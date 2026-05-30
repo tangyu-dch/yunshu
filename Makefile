@@ -11,11 +11,11 @@ WEB_HOST ?= 0.0.0.0
 WEB_PORT ?= 5173
 CONFIG ?= configs/default.yaml
 
-SERVICES := cc-edge cc-console cc-call cc-worker
+SERVICES := cc-edge cc-console cc-call cc-worker cc-all
 
 .PHONY: help fmt fmt-go test test-go vet build build-go build-web web-build clean deps \
 	web-install web-dev web-preview update-contracts \
-	run-edge run-console run-call run-worker \
+	run-edge run-console run-call run-worker run-all \
 	start-edge start-console start-call start-worker \
 	stop-edge stop-console stop-call stop-worker \
 	restart-edge restart-console restart-call restart-worker \
@@ -33,6 +33,7 @@ help:
 	@printf "  make run-call        - 启动 cc-call\n"
 	@printf "  make run-edge        - 启动 cc-edge\n"
 	@printf "  make run-worker      - 启动 cc-worker\n"
+	@printf "  make run-all         - 一键启动 All-in-One 多合一单进程服务\n"
 	@printf "  make start-console   - 后台启动 cc-console\n"
 	@printf "  make stop-console    - 停止 cc-console\n"
 	@printf "  make restart-console - 重启 cc-console\n"
@@ -177,6 +178,13 @@ run-call:
 run-worker:
 	$(call run_service,cc-worker,:8083)
 
+run-all:
+	@if [ -n "$(CONFIG)" ]; then \
+		$(GO) run ./cmd/cc-all -config $(CONFIG); \
+	else \
+		$(GO) run ./cmd/cc-all; \
+	fi
+
 start-edge: build-go
 	$(call start_service,cc-edge,:8081)
 
@@ -188,6 +196,9 @@ start-call: build-go
 
 start-worker: build-go
 	$(call start_service,cc-worker,:8083)
+
+start-cc-all: build-go
+	$(call start_service,cc-all,)
 
 stop-edge:
 	$(call stop_service,cc-edge)
@@ -201,6 +212,9 @@ stop-call:
 stop-worker:
 	$(call stop_service,cc-worker)
 
+stop-cc-all:
+	$(call stop_service,cc-all)
+
 restart-edge: stop-edge start-edge
 
 restart-console: stop-console start-console
@@ -208,6 +222,8 @@ restart-console: stop-console start-console
 restart-call: stop-call start-call
 
 restart-worker: stop-worker start-worker
+
+restart-cc-all: stop-cc-all start-cc-all
 
 status-edge:
 	$(call status_service,cc-edge)
@@ -220,6 +236,9 @@ status-call:
 
 status-worker:
 	$(call status_service,cc-worker)
+
+status-cc-all:
+	$(call status_service,cc-all)
 
 start-all: build-go
 	$(call start_service,cc-edge,:8081)
