@@ -1,0 +1,165 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f5f7fb;
+  color: #0f172a;
+}
+
+a {
+  color: inherit;
+}
+
+/* 
+ * 极简优雅且高效的深色模式平滑渐变过渡动画
+ * 仅对核心容器及主要展示组件的色彩属性应用缓动，避免使用 '*' 通配符导致 DOM 样式计算阻塞。
+ * 不再使用 !important 以确保 Ant Design 自身的微交互（如折叠、悬停、微动效）流畅如初。
+ */
+body,
+.ant-layout,
+.ant-layout-sider,
+.ant-layout-header,
+.ant-layout-content,
+.ant-card,
+.ant-menu,
+.ant-table,
+.ant-table-thead > tr > th,
+.ant-table-tbody > tr > td,
+.ant-select-selector,
+.ant-typography,
+.ant-btn {
+  transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 
+ * 针对现代浏览器启用 GPU 加速的 View Transitions API
+ * 提供极其丝滑、如同梦幻般的页面整体渐变切换效果，彻底告别 DOM 动画卡顿。
+ */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 
+ * 统一的高级深色模式主题变量定义与全局重载系统
+ * 通过 CSS 变量与 Tailwind 基础类重载，一键解决全站所有子页面（包括过去与未来页面）的暗黑模式自适应问题。
+ */
+:root {
+  --bg-app: #f8fafc;
+  --bg-container: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border-color: #e2e8f0;
+}
+
+.dark {
+  --bg-app: #0f1115;
+  --bg-container: #15181e;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --border-color: #1e293b;
+}
+
+/* 全局主背景与文本颜色自适应 */
+body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.dark body {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary) !important;
+}
+
+/* 统一重载系统：自动适配所有带 Tailwind 基础色彩类的历史页面组件 */
+.dark .bg-white {
+  background-color: var(--bg-container) !important;
+}
+.dark .bg-slate-50 {
+  background-color: var(--bg-app) !important;
+}
+.dark .text-slate-800 {
+  color: var(--text-primary) !important;
+}
+.dark .text-slate-700 {
+  color: #e2e8f0 !important; /* slate-200 */
+}
+.dark .text-slate-600 {
+  color: var(--text-secondary) !important;
+}
+.dark .text-slate-500 {
+  color: #64748b !important; /* slate-500 */
+}
+.dark .border-slate-100,
+.dark .border-slate-200 {
+  border-color: var(--border-color) !important;
+}
+.dark .hover\:bg-slate-50:hover {
+  background-color: #1e293b !important; /* slate-800 */
+}
+
+/* Ant Design 全局核心容器的暗黑重写，保证双模切换完美平滑 */
+.dark .ant-layout {
+  background-color: var(--bg-app) !important;
+}
+.dark .ant-layout-content {
+  background-color: var(--bg-app) !important;
+}
+.dark .ant-card {
+  background-color: var(--bg-container) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+.dark .ant-card-head {
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+.dark .ant-table {
+  background-color: var(--bg-container) !important;
+  color: var(--text-primary) !important;
+}
+.dark .ant-table-thead > tr > th {
+  background-color: var(--bg-app) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+.dark .ant-table-tbody > tr > td {
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+.dark .ant-table-tbody > tr:hover > td {
+  background-color: #1e293b !important;
+}
+.dark .ant-modal-content {
+  background-color: var(--bg-container) !important;
+  color: var(--text-primary) !important;
+}
+.dark .ant-modal-header {
+  background-color: var(--bg-container) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+.dark .ant-modal-title {
+  color: var(--text-primary) !important;
+}
+.dark .ant-input,
+.dark .ant-input-affix-wrapper,
+.dark .ant-input-number,
+.dark .ant-select-selector {
+  background-color: var(--bg-container) !important;
+  border-color: var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+

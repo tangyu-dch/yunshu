@@ -1,0 +1,61 @@
+console:
+    callBaseURL: ""
+freeswitch:
+    commandTimeout: 5s
+    eventLeaseTTL: 30s
+    nodes: []
+    reconnect:
+        interval: 5s
+        maxAttempts: 30
+logging:
+    format: json
+    level: info
+mysql:
+    connMaxLifetime: 1h
+    dsn: root:db123456@tcp(127.0.0.1:3306)/yunshu?charset=utf8mb4&parseTime=True&loc=Local
+    maxIdleConns: 10
+    maxOpenConns: 100
+rabbitmq:
+    url: amqp://guest:guest@127.0.0.1:5672/
+redis:
+    addrs:
+        - 127.0.0.1:63790
+    db: 0
+    readTimeout: 3s
+    stream:
+        batchSize: 16
+        block: 5s
+        claimMinIdle: 1m
+        consumer: cc-call-local
+        enabled: false
+        group: cc-call
+        startFromFirst: false
+        stream: yunshu:events
+    writeTimeout: 3s
+service:
+    addr: :8080
+    name: cc-call
+tenant:
+    defaultMerchantId: 1001
+    mode: single
+worker:
+    billing:
+        defaultRatePerMin: 0
+    callback:
+        secret: ""
+        timeout: 5s
+        url: ""
+    downstream:
+        secret: ""
+        timeout: 5s
+        url: ""
+    outbox:
+        batchSize: 100
+        interval: 5s
+        lease: 30s
+        retryDelay: 1m
+        workerId: cc-worker-local
+    recording:
+        secret: ""
+        timeout: 5s
+        url: ""

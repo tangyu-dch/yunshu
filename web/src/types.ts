@@ -1,0 +1,128 @@
+export type StatusTone = 'success' | 'warning' | 'error' | 'default' | 'processing'
+
+export type StatItem = {
+  label: string
+  value: string
+  trend?: string
+  tone?: StatusTone
+}
+
+export type NodeItem = {
+  id: number
+  name: string
+  fsAddr: string
+  address: string
+  localAddress?: string
+  eslPort: number
+  sipPort?: number
+  cmdPort?: number
+  setId?: number
+  weight?: number
+  enable: boolean
+  status: 'active' | 'draining' | 'unavailable'
+  owner: string
+  activeCalls: number
+  maxChannels: number
+  updatedAt: string
+}
+
+export type GatewayItem = {
+  id: number
+  name: string
+  code: string
+  region: string
+  enable: boolean
+  syncRequired: boolean
+  activePools: number
+  concurrency?: number
+  priority?: number
+  codecPrefs?: string
+}
+
+export type BatchTaskItem = {
+  id: number
+  name: string
+  merchant: string
+  progress: number
+  status: 'running' | 'paused' | 'completed'
+  total: number
+  completed: number
+  connected: number
+}
+
+export type CallRecordItem = {
+  id: number
+  callId: string
+  merchant: string
+  callee: string
+  caller: string
+  fsAddr: string
+  state: string
+  duration: string
+  finishedAt: string
+  // 新增高级通话统计字段
+  billsec: number
+  ringsec: number
+  billingSec: number
+  gatewayName: string
+  extension: string
+  userId: number
+  profile: string
+  recordFilePath?: string
+}
+
+export type AiFlowItem = {
+  id: number
+  name: string
+  merchant: string
+  version: string
+  status: 'draft' | 'published' | 'disabled'
+  updatedAt: string
+  prompt?: string
+  description?: string
+}
+
+export type PoolItem = {
+  id: number
+  name: string
+  remark: string
+  gateway: string
+  type: string
+  gatewayId: number
+  typeId: number
+  enable: boolean
+  selectionStrategy?: string
+}
+
+export type PoolPhoneItem = {
+  id: number
+  phone: string
+  pool: string
+  poolId: number
+  province: string
+  city: string
+  concurrency: number
+  callLimit: number
+  enable: boolean
+}
+
+export type SkillGroupItem = {
+  id: number
+  name: string
+  merchant: string
+  merchantId: number
+  description: string
+  enable: boolean
+}
+
+export type DispatcherItem = {
+  id: number
+  setId: number
+  destination: string
+  description: string
+  priority: number
+  flags: number
+  enable: boolean
+}
+
+

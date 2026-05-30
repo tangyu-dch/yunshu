@@ -1,0 +1,81 @@
+# ==========================================
+# Yunshu CallCenter - Universal .gitignore
+# ==========================================
+
+# OS Metadata
+# ------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Compiled Binaries & Directories
+# ------------------------------------------
+bin/
+dist/
+build/
+out/
+release/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.prof
+
+# Go Language Specifics
+# ------------------------------------------
+.gocache/
+go.work
+go.work.sum
+coverage.out
+*.out
+*.pprof
+
+# Node.js / Web Frontend Specifics
+# ------------------------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+.stylelintcache
+.vite
+.parcel-cache
+.cache/
+.next/
+.nuxt/
+
+# IDE / Editor Configurations
+# ------------------------------------------
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+
+# Application Runtime Data & Logs
+# ------------------------------------------
+logs/
+*.log
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Local Environment Variables & Development Fallbacks
+# ------------------------------------------
+.env
+.env.local
+.env.*.local
+*.env
+configs/config.local.yaml
+configs/config.dev.yaml

@@ -1,0 +1,1147 @@
+package callflow
+
+// callflow 包负责 CTI/ESL 工作流编排的消费者入口。
+// 它订阅内部事件总线，将事件路由到对应的 CTI 或 ESL 工作流引擎，
+// 实现业务状态机的推进。消费者不包含业务逻辑，只负责事件分发和流程驱动。
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"strconv"
+
+	"yunshu/internal/contracts"
+	"yunshu/internal/domain/cti"
+	"yunshu/internal/domain/esl"
+	"yunshu/internal/infra/events"
+	"yunshu/pkg/telephony"
+	"yunshu/pkg/workflow"
+)
+
+// RegisterConsumers 注册 cc-call 内部事件消费者。
+// 当前消费者负责订阅事件总线，并在事件发生时提取上下文，向 CTI 或 ESL 引擎发送状态推进信号。
+// 涵盖 API 外呼、批量外呼、拨号盘直呼以及客户呼入四大经典通信流程。
+func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	// 1. 订阅 API 外呼请求事件：API 外呼入口校验及选号。
+	bus.Subscribe(contracts.EventAPICallRequested, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		logger.Info("消费 API 外呼请求事件并推进 CTI 流程", "eventId", event.EventID, "callId", event.AggregateID)
+		if _, err := ctiRunner.Apply(ctx, cti.WorkflowAPIOutbound, event.AggregateID, workflow.Event{Name: "validate", Payload: event.Payload}); err != nil {
+			return err
+		}
+		_, err := ctiRunner.Apply(ctx, cti.WorkflowAPIOutbound, event.AggregateID, workflow.Event{Name: "select_number", Payload: event.Payload})
+		return err
+	})
+
+	// 2. 订阅批量外呼号码分配请求事件：控制并发槽位及分配网关。
+	bus.Subscribe(contracts.EventBatchCallRequested, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		logger.Info("消费批量外呼号码请求事件并推进 CTI 流程", "eventId", event.EventID, "callId", event.AggregateID, "batchTaskId", event.Payload["batchTaskId"], "batchCallTelId", event.Payload["batchCallTelId"])
+		if _, err := ctiRunner.Apply(ctx, cti.WorkflowBatchOutbound, event.AggregateID, workflow.Event{Name: "acquire_slot", Payload: event.Payload}); err != nil {
+			return err
+		}
+		if _, err := ctiRunner.Apply(ctx, cti.WorkflowBatchOutbound, event.AggregateID, workflow.Event{Name: "select_number", Payload: event.Payload}); err != nil {
+			return err
+		}
+		_, err := ctiRunner.Apply(ctx, cti.WorkflowBatchOutbound, event.AggregateID, workflow.Event{Name: "dispatch_originate", Payload: event.Payload})
+		return err
+	})
+
+	// 3. 订阅 ESL 命令已发送事件：通知 ESL 工作流引擎命令已发出，推进至呼叫执行阶段（originating）。
+	bus.Subscribe(contracts.EventESLCommandSent, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		logger.Info("消费 ESL 起呼命令事件并推进 ESL 流程", "eventId", event.EventID, "callId", event.AggregateID)
+		workflowID := eslWorkflowFromPayload(event.Payload)
+		if _, err := eslRunner.Apply(ctx, workflowID, event.AggregateID, workflow.Event{Name: "validate_command", Payload: event.Payload}); err != nil {
+			return err
+		}
+		_, err := eslRunner.Apply(ctx, workflowID, event.AggregateID, workflow.Event{Name: "execute_originate", Payload: event.Payload})
+		return err
+	})
+
+	// 4. 订阅 FreeSWITCH 事件：将物理 FreeSWITCH 事件流映射并投递至 ESL 工作流中，并按通话阶段（如振铃、接通、挂断）执行相应的交互控制。
+	bus.Subscribe(contracts.EventFSApplied, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		eventName, _ := event.Payload["eventName"].(string)
+		logger.Info("消费 FS 事件并推进 ESL 流程", "eventId", event.EventID, "callId", event.AggregateID, "fsEvent", eventName)
+		workflowID := eslWorkflowFromPayload(event.Payload)
+		instance, err := eslRunner.Apply(ctx, workflowID, event.AggregateID, workflow.Event{Name: workflow.EventName(eventName), Payload: event.Payload})
+		if err != nil {
+			if errors.Is(err, workflow.ErrTransitionMissing) {
+				logger.Info("FS 事件未命中当前流程状态，已忽略", "eventId", event.EventID, "callId", event.AggregateID, "fsEvent", eventName, "workflowId", workflowID)
+				return nil
+			}
+			return err
+		}
+		if sessionService == nil || originate == nil {
+			return nil
+		}
+		legRole := stringValue(event.Payload, "legRole")
+
+		// 4.1 处理 API 外呼下的 FS 物理状态变迁
+		if workflowID == esl.WorkflowESLAPIOutbound {
+			switch eventName {
+			case string(esl.EventChannelProgress), string(esl.EventChannelProgressMedia):
+				// 主叫（坐席分机）振铃或收到媒体：发起对被叫（客户）的物理选号分配与呼叫起呼
+				if legRole == string(contracts.LegRoleAgent) {
+					return handleAPIOutboundAgentProgress(ctx, event, sessionService, originate, runtimeSelector, candidateSource, logger)
+				}
+				// 被叫（客户）振铃：在需要补振铃的情况下向坐席播放补振铃音
+				if legRole == string(contracts.LegRoleCustomer) {
+					if eventName == string(esl.EventChannelProgress) {
+						return handleAPIOutboundCustomerProgress(ctx, event, sessionService, originate, logger)
+					}
+					return handleAPIOutboundCustomerReady(ctx, event, sessionService, originate, logger)
+				}
+			case string(esl.EventChannelAnswer):
+				// 主叫（坐席）应答：标记主叫就绪并尝试两腿桥接
+				if legRole == string(contracts.LegRoleAgent) {
+					if err := handleAPIOutboundAgentAnswer(ctx, event, sessionService, originate, logger); err != nil {
+						return err
+					}
+				}
+				// 被叫（客户）应答：标记被叫就绪并尝试两腿桥接，同时切断补振铃音
+				if legRole == string(contracts.LegRoleCustomer) {
+					return handleAPIOutboundCustomerReady(ctx, event, sessionService, originate, logger)
+				}
+			}
+
+			// 4.2 处理 批量外呼 下的 FS 物理状态变迁
+		} else if workflowID == esl.WorkflowESLBatchOutbound {
+			switch eventName {
+			case string(esl.EventChannelProgress), string(esl.EventChannelProgressMedia):
+				// 坐席侧振铃：在需要补振铃的情况下向客户腿播放补振铃音
+				if legRole == string(contracts.LegRoleAgent) {
+					if eventName == string(esl.EventChannelProgress) {
+						return handleBatchOutboundAgentProgress(ctx, event, sessionService, originate, logger)
+					}
+					return handleBatchOutboundAgentReady(ctx, event, sessionService, originate, logger)
+				}
+			case string(esl.EventChannelAnswer):
+				// 客户应答：触发呼叫坐席分机起呼（Customer-First 逻辑）
+				if legRole == string(contracts.LegRoleCustomer) {
+					return handleBatchOutboundCustomerAnswer(ctx, event, sessionService, originate, logger)
+				}
+				// 坐席应答：切断补振铃并桥接双腿
+				if legRole == string(contracts.LegRoleAgent) {
+					return handleBatchOutboundAgentReady(ctx, event, sessionService, originate, logger)
+				}
+			}
+
+			// 4.3 处理 拨号盘直呼 下的 FS 物理状态变迁
+		} else if workflowID == esl.WorkflowESLDialpadDirect {
+			switch eventName {
+			case string(esl.EventChannelAnswer):
+				// 坐席分机摘机/应答：触发对客户电话的物理选号与呼出起呼
+				if legRole == string(contracts.LegRoleAgent) {
+					return handleDialpadAgentAnswer(ctx, event, sessionService, originate, runtimeSelector, candidateSource, logger)
+				}
+				// 客户侧应答：停止补振铃并桥接双腿
+				if legRole == string(contracts.LegRoleCustomer) {
+					return handleDialpadCustomerReady(ctx, event, sessionService, originate, logger)
+				}
+			case string(esl.EventChannelProgress), string(esl.EventChannelProgressMedia):
+				// 客户侧振铃：播放补振铃音
+				if legRole == string(contracts.LegRoleCustomer) {
+					if eventName == string(esl.EventChannelProgress) {
+						return handleDialpadCustomerProgress(ctx, event, sessionService, originate, logger)
+					}
+					return handleDialpadCustomerReady(ctx, event, sessionService, originate, logger)
+				}
+			}
+
+			// 4.4 处理 客户呼入 下的 FS 物理状态变迁
+		} else if workflowID == esl.WorkflowESLInbound {
+			switch eventName {
+			case string(esl.EventChannelAnswer):
+				// 客户呼入应答：触发自动分配并起呼分配到的坐席分机
+				if legRole == string(contracts.LegRoleCustomer) {
+					return handleInboundCustomerAnswer(ctx, event, sessionService, originate, logger)
+				}
+				// 坐席摘机应答：桥接呼入电话与坐席
+				if legRole == string(contracts.LegRoleAgent) {
+					return handleInboundAgentReady(ctx, event, sessionService, originate, logger)
+				}
+			}
+		}
+		_ = instance
+		return nil
+	})
+
+	// 5. 订阅并处理 Outbox 完成事件：使计费、录音、投影等后置处理流与 CTI 状态机彻底同步。
+	outboxEvents := []string{
+		"cdr_persisted",
+		"billing_completed",
+		"recording_completed",
+		"push_completed",
+		"callback_completed",
+	}
+	for _, eventType := range outboxEvents {
+		eventType := eventType // 捕获迭代变量
+		bus.Subscribe(eventType, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+			logger.Info("消费 outbox 完成事件并推进 CTI 流程", "eventId", event.EventID, "callId", event.AggregateID, "eventType", event.EventType)
+			workflowID := ctiWorkflowFromPayload(event.Payload)
+			_, err := ctiRunner.Apply(ctx, workflowID, event.AggregateID, workflow.Event{Name: workflow.EventName(eventType), Payload: event.Payload})
+			if err != nil {
+				if errors.Is(err, workflow.ErrTransitionMissing) {
+					logger.Info("CTI 流程未命中当前状态，已忽略", "eventId", event.EventID, "callId", event.AggregateID, "eventType", event.EventType, "workflowId", workflowID)
+					return nil
+				}
+				return err
+			}
+			return nil
+		})
+	}
+}
+
+// RegisterBatchConsumers 注册批量外呼终结后的流程消费者。
+// 该消费者只处理流程推进和调度服务调用，消息推送、回调、计费等后续节点应继续订阅
+// EventBatchCallTelCompleted 或 CDR/outbox 事件，避免把多个业务副作用塞进一个消费者。
+func RegisterBatchConsumers(bus events.Bus, ctiRunner *workflow.Runner, scheduler *cti.BatchSchedulerService, logger *slog.Logger) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	if scheduler == nil {
+		logger.Warn("批量外呼终结消费者未注册，调度器为空")
+		return
+	}
+
+	// 监听挂断事件以驱动批量调度器外呼下一号码或判定任务 drained
+	bus.Subscribe(contracts.EventFSApplied, func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		if eslWorkflowFromPayload(event.Payload) != esl.WorkflowESLBatchOutbound {
+			return nil
+		}
+		eventName, _ := event.Payload["eventName"].(string)
+		if eventName != string(esl.EventChannelHangupComplete) {
+			return nil
+		}
+		logger.Info("消费批量外呼终结 FS 事件并推进 CTI 流程", "eventId", event.EventID, "callId", event.AggregateID, "batchTaskId", event.Payload["batchTaskId"], "batchCallTelId", event.Payload["batchCallTelId"])
+		if _, err := ctiRunner.Apply(ctx, cti.WorkflowBatchOutbound, event.AggregateID, workflow.Event{Name: "terminal_event", Payload: event.Payload}); err != nil {
+			return err
+		}
+		return scheduler.HandleTerminal(ctx, event.Payload)
+	})
+
+	bus.Subscribe(contracts.EventBatchCallTelCompleted, func(_ context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		logger.Info("消费批量外呼号码完成事件，等待投影/推送/计费节点处理", "eventId", event.EventID, "aggregateId", event.AggregateID, "callId", event.Payload["callId"], "batchTaskId", event.Payload["batchTaskId"], "batchCallTelId", event.Payload["batchCallTelId"])
+		return nil
+	})
+
+	bus.Subscribe(contracts.EventBatchCallTaskCompleted, func(_ context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		logger.Info("消费批量外呼任务完成事件，等待任务统计/消息推送/回调投影节点处理", "eventId", event.EventID, "aggregateId", event.AggregateID, "batchTaskId", event.Payload["batchTaskId"])
+		return nil
+	})
+}
+
+// eslWorkflowFromPayload 根据事件 Payload 自动判断对应的 ESL 工作流标识符。
+func eslWorkflowFromPayload(payload map[string]any) string {
+	profile, _ := payload["profile"].(string)
+	if profile == string(contracts.CallFlowBatchOutbound) {
+		return esl.WorkflowESLBatchOutbound
+	}
+	if profile == string(contracts.CallFlowAPIDirect) {
+		return esl.WorkflowESLDialpadDirect
+	}
+	if profile == string(contracts.CallFlowInbound) {
+		return esl.WorkflowESLInbound
+	}
+	if _, ok := payload["batchTaskId"]; ok {
+		return esl.WorkflowESLBatchOutbound
+	}
+	return esl.WorkflowESLAPIOutbound
+}
+
+// ctiWorkflowFromPayload 根据事件 Payload 自动判断对应的 CTI 工作流标识符。
+func ctiWorkflowFromPayload(payload map[string]any) string {
+	profile, _ := payload["profile"].(string)
+	if profile == string(contracts.CallFlowBatchOutbound) {
+		return cti.WorkflowBatchOutbound
+	}
+	if profile == string(contracts.CallFlowAPIDirect) {
+		return cti.WorkflowDialpadDirect
+	}
+	if profile == string(contracts.CallFlowInbound) {
+		return cti.WorkflowInbound
+	}
+	if _, ok := payload["batchTaskId"]; ok {
+		return cti.WorkflowBatchOutbound
+	}
+	return cti.WorkflowAPIOutbound
+}
+
+// handleAPIOutboundAgentProgress 处理 API 外呼主叫（坐席腿）振铃事件。
+// 此处自动调用 RuntimeSelector 规则链获取可用呼出号码，并立即向 FreeSWITCH 发起客户腿（Leg B）的外呼 originate 命令。
+// 如果在此阶段选号失败（如无可用号码、并发超限、网关失效），为了避免坐席话机无限盲目等待，
+// 必须立即下发“hangup”挂断信令，主动切断主叫坐席腿，确保系统资源得到安全释放，保证通信收口一致性。
+func handleAPIOutboundAgentProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if boolFromMap(session.Metadata, "customerOriginateSent") {
+		return nil
+	}
+	userID := intFromMap(session.Metadata, "userId")
+	merchantID := intFromMap(session.Metadata, "merchantId")
+	callee, _ := session.Metadata["callee"].(string)
+	if callee == "" || userID <= 0 {
+		return esl.ErrInvalidCommand
+	}
+
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	if agentUUID == "" {
+		agentUUID, _ = event.Payload["uuid"].(string)
+	}
+
+	// 挂断清除函数：当发生风控阻断或物理选号不可用时，优雅挂断坐席通道
+	hangupAgent := func(reason string) {
+		if agentUUID != "" {
+			hangupCmd := telephony.NewCommand(
+				"hangup:"+callID+":cleanup_api",
+				"hangup",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				session.Profile,
+				map[string]any{"cause": "NORMAL_TEMPORARY_FAILURE", "reason": reason},
+			)
+			if herr := originate.CommandService.Execute(ctx, hangupCmd); herr == nil {
+				logger.Warn("API 外呼因异常已挂断正在交互中的坐席", "callId", callID, "agentUuid", agentUUID, "reason", reason)
+			} else {
+				logger.Error("API 外呼挂断坐席失败", "callId", callID, "agentUuid", agentUUID, "error", herr.Error())
+			}
+		}
+	}
+
+	// 加载可选主叫列表
+	candidates, err := loadAPICandidates(ctx, candidateSource, userID)
+	if err != nil {
+		hangupAgent("load_candidates_failed: " + err.Error())
+		return err
+	}
+	if len(candidates) == 0 {
+		hangupAgent("no_available_number_candidates")
+		return cti.ErrNoAvailableNumber
+	}
+	if runtimeSelector == nil {
+		logger.Warn("API 外呼事件消费者缺少运行时选号分配器，拒绝继续起客户腿", "callId", callID, "merchantId", merchantID)
+		hangupAgent("allocator_not_configured")
+		return cti.ErrRuntimeAllocatorNotConfigured
+	}
+
+	// 选号并占用通道并发槽位
+	selectionReq := cti.SelectionRequest{
+		CallID:     callID,
+		MerchantID: strconv.Itoa(merchantID),
+		UserID:     userID,
+		Callee:     callee,
+		Candidates: candidates,
+	}
+	var selection cti.SelectionResult
+	var allocation *cti.RuntimeAllocation
+	selection, allocation, err = runtimeSelector.SelectAndClaim(ctx, selectionReq)
+	if err != nil {
+		hangupAgent("select_and_claim_failed: " + err.Error())
+		return err
+	}
+	if !selection.Success || selection.Caller == nil {
+		hangupAgent("no_available_selected_number")
+		return cti.ErrNoAvailableNumber
+	}
+
+	if allocation != nil {
+		session.Metadata["selectionClaimKey"] = allocation.ClaimKey
+		session.Metadata["selectedCaller"] = allocation.Caller
+		session.Metadata["selectedGatewayId"] = allocation.GatewayID
+	}
+
+	// 发起客户腿（Leg B）的 originate 外呼
+	selectionResp := selectionFromCandidate(*selection.Caller)
+	if err := originate.StartAPICustomerOutbound(ctx, esl.APICustomerOriginateRequest{Version: stringFromMap(session.Metadata, "routeVersion"), CallID: callID, Selection: selectionResp}); err != nil {
+		hangupAgent("originate_customer_failed: " + err.Error())
+		return err
+	}
+
+	// 保存外呼路由选择与状态
+	session.Metadata["customerOriginateSent"] = true
+	session.Metadata["selectedCaller"] = selectionResp.Phone
+	session.Metadata["selectedGatewayId"] = selectionResp.GatewayID
+	session.Metadata["selectedGatewayName"] = selectionResp.GatewayName
+	session.Metadata["selectedGatewayRegion"] = selectionResp.GatewayRegion
+	session.Metadata["selectedModel"] = selectionResp.Model
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("API 外呼已完成选号并发起客户腿", "callId", callID, "caller", selectionResp.Phone, "gatewayId", selectionResp.GatewayID, "gatewayName", selectionResp.GatewayName, "gatewayRegion", selectionResp.GatewayRegion)
+	return nil
+}
+
+// handleAPIOutboundAgentAnswer 处理 API 外呼主叫（坐席侧）应答事件。
+// 当坐席已接听电话时，如果被叫客户侧已经振铃但尚未应答，为了提升坐席感知，可立即向坐席下发播放补振铃音命令。
+func handleAPIOutboundAgentAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["agentAnswered"] = true
+
+	// 若被叫已经振铃，当主叫应答时，立即向主叫播放补振铃
+	if boolFromMap(session.Metadata, "supplementRing") && !boolFromMap(session.Metadata, "supplementRingPlaying") && session.State == esl.CallProgress {
+		supplementRingFile, _ := session.Metadata["supplementRingFile"].(string)
+		agentUUID, _ := session.Metadata["agentUuid"].(string)
+		if supplementRingFile != "" && agentUUID != "" {
+			cmd := telephony.NewCommand(
+				"playback:"+callID+":supplement_ring",
+				"playback",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				session.Profile,
+				map[string]any{
+					"file": supplementRingFile,
+					"both": "aleg",
+				},
+			)
+			if err := originate.CommandService.Execute(ctx, cmd); err == nil {
+				session.Metadata["supplementRingPlaying"] = true
+				logger.Info("API 外呼主叫(坐席)应答时被叫已振铃，向主叫发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
+			} else {
+				logger.Error("API 外呼主叫应答时发送补振铃失败", "callId", callID, "error", err.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	return maybeBridgeAPIOutbound(ctx, session, originate, logger, "agent_answer")
+}
+
+// handleAPIOutboundCustomerReady 处理 API 外呼被叫（客户侧）振铃或就绪事件。
+// 一旦客户准备好或应答，立即切断向坐席侧播放的补振铃音，并在两腿同时就绪时触发桥接命令。
+func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+
+	// 停止主叫(坐席)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		agentUUID, _ := session.Metadata["agentUuid"].(string)
+		if agentUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement",
+				"break",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				contracts.CallFlowAPIOutbound,
+				map[string]any{},
+			)
+			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("停止主叫(坐席)腿的补振铃", "callId", callID, "agentUuid", agentUUID)
+			} else {
+				logger.Error("停止主叫腿的补振铃失败", "callId", callID, "error", err.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	return maybeBridgeAPIOutbound(ctx, session, originate, logger, stringValue(event.Payload, "eventName"))
+}
+
+// maybeBridgeAPIOutbound 条件桥接。当主叫和被叫均完成应答后，向 FreeSWITCH 下发双腿桥接命令以合并通话媒体。
+func maybeBridgeAPIOutbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
+	if boolFromMap(session.Metadata, "apiBridgeSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "customerOriginateSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") || !boolFromMap(session.Metadata, "customerReady") {
+		logger.Info("API 外呼两腿尚未同时就绪，暂不桥接", "callId", session.CallID, "reason", reason, "agentAnswered", boolFromMap(session.Metadata, "agentAnswered"), "customerReady", boolFromMap(session.Metadata, "customerReady"))
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if agentUUID == "" || customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	if err := originate.BridgeAPIOutbound(ctx, esl.APIBridgeRequest{CallID: session.CallID, AgentUUID: agentUUID, CustomerUUID: customerUUID, FSAddr: session.FSAddr}); err != nil {
+		return err
+	}
+	session.Metadata["apiBridgeSent"] = true
+	if err := originate.SessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("API 外呼两腿桥接已完成", "callId", session.CallID, "reason", reason, "agentUuid", agentUUID, "customerUuid", customerUUID)
+	return nil
+}
+
+// loadAPICandidates 获取某用户的可选主叫列表。
+func loadAPICandidates(ctx context.Context, source cti.CandidateSource, userID int) ([]cti.NumberCandidate, error) {
+	if source == nil {
+		return nil, esl.ErrInvalidCommand
+	}
+	return source.CandidatesForUser(ctx, userID)
+}
+
+// selectionFromCandidate 候选号码类型格式化映射。
+func selectionFromCandidate(candidate cti.NumberCandidate) contracts.SelectPhoneResp {
+	return contracts.SelectPhoneResp{
+		Phone:              candidate.Phone,
+		GatewayID:          atoi(candidate.GatewayID),
+		SkillGroupID:       candidate.SkillGroupID,
+		ChannelID:          candidate.ChannelID,
+		GatewayName:        candidate.GatewayName,
+		GatewayRegion:      candidate.GatewayRegion,
+		Model:              candidate.Model,
+		CallerPrefix:       candidate.CallerPrefix,
+		CalleePrefix:       candidate.CalleePrefix,
+		CallerRewriteRule:  candidate.CallerRewriteRule,
+		CalleeRewriteRule:  candidate.CalleeRewriteRule,
+		SupplementRing:     candidate.SupplementRing,
+		SupplementRingFile: candidate.SupplementRingFile,
+		Province:           candidate.Province,
+		City:               candidate.City,
+		PoolID:             candidate.PoolID,
+		CodecPrefs:         candidate.CodecPrefs,
+		BroadcastTime:      candidate.BroadcastTime,
+		BroadcastTimeFlag:  candidate.BroadcastTimeFlag,
+	}
+}
+
+// stringFromMap 工具方法，从 Payload 中安全截取 String。
+func stringFromMap(payload map[string]any, key string) string {
+	if value, ok := payload[key]; ok && value != nil {
+		if text, ok := value.(string); ok {
+			return text
+		}
+	}
+	return ""
+}
+
+func stringValue(payload map[string]any, key string) string {
+	return stringFromMap(payload, key)
+}
+
+// boolFromMap 工具方法，安全截取布尔值。
+func boolFromMap(payload map[string]any, key string) bool {
+	if value, ok := payload[key]; ok && value != nil {
+		switch typed := value.(type) {
+		case bool:
+			return typed
+		case string:
+			return typed == "true" || typed == "1" || typed == "yes"
+		}
+	}
+	return false
+}
+
+// intFromMap 工具方法，安全截取整形值。
+func intFromMap(payload map[string]any, key string) int {
+	if value, ok := payload[key]; ok && value != nil {
+		switch typed := value.(type) {
+		case int:
+			return typed
+		case int8:
+			return int(typed)
+		case int16:
+			return int(typed)
+		case int32:
+			return int(typed)
+		case int64:
+			return int(typed)
+		case float32:
+			return int(typed)
+		case float64:
+			return int(typed)
+		}
+	}
+	return 0
+}
+
+func atoi(raw string) int {
+	value, _ := strconv.Atoi(raw)
+	return value
+}
+
+// handleAPIOutboundCustomerProgress 处理 API 外呼被叫客户侧振铃补振铃动作。
+func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "supplementRing") {
+		return nil
+	}
+	supplementRingFile, _ := session.Metadata["supplementRingFile"].(string)
+	if supplementRingFile == "" {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") {
+		logger.Info("API 外呼被叫(客户)已振铃(180)，但主叫(坐席)未应答，暂不发送补振铃", "callId", callID)
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	if agentUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	cmd := telephony.NewCommand(
+		"playback:"+callID+":supplement_ring",
+		"playback",
+		callID,
+		agentUUID,
+		session.FSAddr,
+		contracts.LegRoleAgent,
+		contracts.CallFlowAPIOutbound,
+		map[string]any{
+			"file": supplementRingFile,
+			"both": "aleg",
+		},
+	)
+	if err := originate.CommandService.Execute(ctx, cmd); err != nil {
+		logger.Error("API 外呼发送补振铃命令失败", "callId", callID, "error", err.Error())
+		return err
+	}
+	session.Metadata["supplementRingPlaying"] = true
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("API 外呼已向主叫(坐席)腿发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
+	return nil
+}
+
+// handleBatchOutboundCustomerAnswer 处理批量外呼客户应答（Leg A 先应答）。
+// 批量外呼遵循 Customer-First 规范：一旦客户接听电话，立即发起呼叫绑定分机以合并坐席（Leg B）的 originate 动作。
+func handleBatchOutboundCustomerAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+	if boolFromMap(session.Metadata, "agentOriginateSent") {
+		return nil
+	}
+
+	userID := intFromMap(session.Metadata, "userId")
+	merchantID := intFromMap(session.Metadata, "merchantId")
+	extension, _ := session.Metadata["extension"].(string)
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+
+	if extension == "" || agentUUID == "" || customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+
+	req := esl.BatchAgentOriginateRequest{
+		Version:      stringFromMap(session.Metadata, "routeVersion"),
+		CallID:       callID,
+		Extension:    extension,
+		AgentUUID:    agentUUID,
+		CustomerUUID: customerUUID,
+		FSAddr:       session.FSAddr,
+		UserID:       userID,
+		MerchantID:   merchantID,
+	}
+
+	if err := originate.StartBatchAgentOutbound(ctx, req); err != nil {
+		return err
+	}
+
+	session.Metadata["agentOriginateSent"] = true
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("批量外呼已完成被叫(客户)应答并发起主叫(坐席)腿", "callId", callID, "extension", extension)
+	return nil
+}
+
+// handleBatchOutboundAgentProgress 批量外呼下坐席分机侧振铃，向客户侧播放补振铃音。
+func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "supplementRing") {
+		return nil
+	}
+	supplementRingFile, _ := session.Metadata["supplementRingFile"].(string)
+	if supplementRingFile == "" {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "customerReady") {
+		logger.Info("批量外呼主叫(坐席)腿已振铃(180)，但被叫(客户)未应答，暂不发送补振铃", "callId", callID)
+		return nil
+	}
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	cmd := telephony.NewCommand(
+		"playback:"+callID+":supplement_ring",
+		"playback",
+		callID,
+		customerUUID,
+		session.FSAddr,
+		contracts.LegRoleCustomer,
+		contracts.CallFlowBatchOutbound,
+		map[string]any{
+			"file": supplementRingFile,
+			"both": "aleg",
+		},
+	)
+	if err := originate.CommandService.Execute(ctx, cmd); err != nil {
+		logger.Error("批量外呼发送补振铃命令失败", "callId", callID, "error", err.Error())
+		return err
+	}
+	session.Metadata["supplementRingPlaying"] = true
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("批量外呼已向被叫(客户)腿发送补振铃", "callId", callID, "customerUuid", customerUUID, "file", supplementRingFile)
+	return nil
+}
+
+// handleBatchOutboundAgentReady 批量外呼下坐席分机侧摘机应答。切断向客户腿播放的补振铃并桥接。
+func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["agentAnswered"] = true
+
+	// 停止被叫(客户)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		customerUUID, _ := session.Metadata["customerUuid"].(string)
+		if customerUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement",
+				"break",
+				callID,
+				customerUUID,
+				session.FSAddr,
+				contracts.LegRoleCustomer,
+				contracts.CallFlowBatchOutbound,
+				map[string]any{},
+			)
+			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("停止被叫(客户)腿的补振铃", "callId", callID, "customerUuid", customerUUID)
+			} else {
+				logger.Error("停止被叫腿的补振铃失败", "callId", callID, "error", err.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	return maybeBridgeBatchOutbound(ctx, session, originate, logger, stringValue(event.Payload, "eventName"))
+}
+
+// maybeBridgeBatchOutbound 批量外呼桥接动作下发。
+func maybeBridgeBatchOutbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
+	if boolFromMap(session.Metadata, "batchBridgeSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentOriginateSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") || !boolFromMap(session.Metadata, "customerReady") {
+		logger.Info("批量外呼两腿尚未同时就绪，暂不桥接", "callId", session.CallID, "reason", reason, "agentAnswered", boolFromMap(session.Metadata, "agentAnswered"), "customerReady", boolFromMap(session.Metadata, "customerReady"))
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if agentUUID == "" || customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	if err := originate.BridgeBatchOutbound(ctx, esl.APIBridgeRequest{CallID: session.CallID, AgentUUID: agentUUID, CustomerUUID: customerUUID, FSAddr: session.FSAddr}); err != nil {
+		return err
+	}
+	session.Metadata["batchBridgeSent"] = true
+	if err := originate.SessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("批量外呼两腿桥接已完成", "callId", session.CallID, "reason", reason, "agentUuid", agentUUID, "customerUuid", customerUUID)
+	return nil
+}
+
+// handleDialpadAgentAnswer 拨号盘直呼（坐席主动点拨号盘）下的坐席分机摘机。
+// 此时自动通过选号器分配外呼号码，并对Leg B（客户侧）发起外呼起呼命令。
+// 若选号故障同样自动 Hangup 切断摘机坐席的通道，进行收口清退。
+func handleDialpadAgentAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["agentAnswered"] = true
+
+	if boolFromMap(session.Metadata, "customerOriginateSent") {
+		return nil
+	}
+
+	userID := intFromMap(session.Metadata, "userId")
+	merchantID := intFromMap(session.Metadata, "merchantId")
+	callee, _ := session.Metadata["callee"].(string)
+	if callee == "" || userID <= 0 {
+		return esl.ErrInvalidCommand
+	}
+
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	if agentUUID == "" {
+		agentUUID, _ = event.Payload["uuid"].(string)
+	}
+
+	// 坐席清理动作
+	hangupAgent := func(reason string) {
+		if agentUUID != "" {
+			hangupCmd := telephony.NewCommand(
+				"hangup:"+callID+":cleanup_dialpad",
+				"hangup",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				session.Profile,
+				map[string]any{"cause": "NORMAL_TEMPORARY_FAILURE", "reason": reason},
+			)
+			if herr := originate.CommandService.Execute(ctx, hangupCmd); herr == nil {
+				logger.Warn("拨号盘直呼因异常已挂断摘机坐席", "callId", callID, "agentUuid", agentUUID, "reason", reason)
+			} else {
+				logger.Error("拨号盘直呼挂断坐席失败", "callId", callID, "agentUuid", agentUUID, "error", herr.Error())
+			}
+		}
+	}
+
+	candidates, err := loadAPICandidates(ctx, candidateSource, userID)
+	if err != nil {
+		hangupAgent("load_candidates_failed: " + err.Error())
+		return err
+	}
+	if len(candidates) == 0 {
+		hangupAgent("no_available_number_candidates")
+		return cti.ErrNoAvailableNumber
+	}
+	if runtimeSelector == nil {
+		logger.Warn("拨号盘直呼消费者缺少运行时选号分配器，拒绝继续起客户腿", "callId", callID, "merchantId", merchantID)
+		hangupAgent("allocator_not_configured")
+		return cti.ErrRuntimeAllocatorNotConfigured
+	}
+
+	selectionReq := cti.SelectionRequest{
+		CallID:     callID,
+		MerchantID: strconv.Itoa(merchantID),
+		UserID:     userID,
+		Callee:     callee,
+		Candidates: candidates,
+	}
+
+	var selection cti.SelectionResult
+	var allocation *cti.RuntimeAllocation
+	selection, allocation, err = runtimeSelector.SelectAndClaim(ctx, selectionReq)
+	if err != nil {
+		hangupAgent("select_and_claim_failed: " + err.Error())
+		return err
+	}
+	if !selection.Success || selection.Caller == nil {
+		hangupAgent("no_available_selected_number")
+		return cti.ErrNoAvailableNumber
+	}
+
+	if allocation != nil {
+		session.Metadata["selectionClaimKey"] = allocation.ClaimKey
+		session.Metadata["selectedCaller"] = allocation.Caller
+		session.Metadata["selectedGatewayId"] = allocation.GatewayID
+	}
+
+	customerUUID := esl.NewDeterministicUUID("customer", callID)
+	session.Metadata["customerUuid"] = customerUUID
+
+	selectionResp := selectionFromCandidate(*selection.Caller)
+	if err := originate.StartDialpadCustomerOutbound(ctx, esl.APICustomerOriginateRequest{
+		Version:   stringFromMap(session.Metadata, "routeVersion"),
+		CallID:    callID,
+		Selection: selectionResp,
+	}); err != nil {
+		hangupAgent("originate_customer_failed: " + err.Error())
+		return err
+	}
+
+	session.Metadata["customerOriginateSent"] = true
+	session.Metadata["selectedCaller"] = selectionResp.Phone
+	session.Metadata["selectedGatewayId"] = selectionResp.GatewayID
+	session.Metadata["selectedGatewayName"] = selectionResp.GatewayName
+	session.Metadata["selectedGatewayRegion"] = selectionResp.GatewayRegion
+	session.Metadata["selectedModel"] = selectionResp.Model
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("拨号盘直呼已完成选号并发起客户腿", "callId", callID, "caller", selectionResp.Phone, "gatewayId", selectionResp.GatewayID, "gatewayName", selectionResp.GatewayName, "gatewayRegion", selectionResp.GatewayRegion)
+	return nil
+}
+
+// handleDialpadCustomerProgress 拨号盘直呼下，客户侧振铃补振铃。
+func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "supplementRing") {
+		return nil
+	}
+	supplementRingFile, _ := session.Metadata["supplementRingFile"].(string)
+	if supplementRingFile == "" {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") {
+		logger.Info("拨号盘直呼被叫(客户)已振铃(180)，但主叫(坐席)未应答，暂不发送补振铃", "callId", callID)
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	if agentUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	cmd := telephony.NewCommand(
+		"playback:"+callID+":supplement_ring",
+		"playback",
+		callID,
+		agentUUID,
+		session.FSAddr,
+		contracts.LegRoleAgent,
+		contracts.CallFlowAPIDirect,
+		map[string]any{
+			"file": supplementRingFile,
+			"both": "aleg",
+		},
+	)
+	if err := originate.CommandService.Execute(ctx, cmd); err != nil {
+		logger.Error("拨号盘直呼发送补振铃命令失败", "callId", callID, "error", err.Error())
+		return err
+	}
+	session.Metadata["supplementRingPlaying"] = true
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("拨号盘直呼已向主叫(坐席)腿发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
+	return nil
+}
+
+// handleDialpadCustomerReady 拨号盘直呼被叫（客户）应答或就绪。
+func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+
+	// 停止主叫(坐席)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		agentUUID, _ := session.Metadata["agentUuid"].(string)
+		if agentUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement",
+				"break",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				contracts.CallFlowAPIDirect,
+				map[string]any{},
+			)
+			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("停止主叫(坐席)腿的补振铃", "callId", callID, "agentUuid", agentUUID)
+			} else {
+				logger.Error("停止主叫腿的补振铃失败", "callId", callID, "error", err.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	return maybeBridgeDialpadDirect(ctx, session, originate, logger, stringValue(event.Payload, "eventName"))
+}
+
+// maybeBridgeDialpadDirect 拨号盘直呼双腿桥接命令发送。
+func maybeBridgeDialpadDirect(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
+	if boolFromMap(session.Metadata, "apiBridgeSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "customerOriginateSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") || !boolFromMap(session.Metadata, "customerReady") {
+		logger.Info("拨号盘直呼两腿尚未同时就绪，暂不桥接", "callId", session.CallID, "reason", reason, "agentAnswered", boolFromMap(session.Metadata, "agentAnswered"), "customerReady", boolFromMap(session.Metadata, "customerReady"))
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if agentUUID == "" || customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	if err := originate.BridgeDialpadDirect(ctx, esl.APIBridgeRequest{CallID: session.CallID, AgentUUID: agentUUID, CustomerUUID: customerUUID, FSAddr: session.FSAddr}); err != nil {
+		return err
+	}
+	session.Metadata["apiBridgeSent"] = true
+	if err := originate.SessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("拨号盘直呼两腿桥接已完成", "callId", session.CallID, "reason", reason, "agentUuid", agentUUID, "customerUuid", customerUUID)
+	return nil
+}
+
+// handleInboundCustomerAnswer 处理客户呼入应答动作（Leg A 先就绪）。
+// 随后触发向绑定坐席分机的 originate 呼叫。
+func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+	if boolFromMap(session.Metadata, "agentOriginateSent") {
+		return nil
+	}
+
+	userID := intFromMap(session.Metadata, "userId")
+	merchantID := intFromMap(session.Metadata, "merchantId")
+	extension, _ := session.Metadata["extension"].(string)
+	if extension == "" {
+		extension = "1001" // 默认测试分机
+	}
+	agentUUID := esl.NewDeterministicUUID("agent", callID)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if customerUUID == "" {
+		customerUUID, _ = event.Payload["uuid"].(string)
+		session.Metadata["customerUuid"] = customerUUID
+	}
+
+	req := esl.BatchAgentOriginateRequest{
+		Version:      stringFromMap(session.Metadata, "routeVersion"),
+		CallID:       callID,
+		Extension:    extension,
+		AgentUUID:    agentUUID,
+		CustomerUUID: customerUUID,
+		FSAddr:       session.FSAddr,
+		UserID:       userID,
+		MerchantID:   merchantID,
+	}
+
+	if err := originate.StartInboundAgentOutbound(ctx, req); err != nil {
+		return err
+	}
+
+	session.Metadata["agentUuid"] = agentUUID
+	session.Metadata["extension"] = extension
+	session.Metadata["agentOriginateSent"] = true
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("客户呼入已完成客户应答并发起坐席分机呼叫", "callId", callID, "extension", extension)
+	return nil
+}
+
+// handleInboundAgentReady 客户呼入下，坐席应答摘机。
+func handleInboundAgentReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["agentAnswered"] = true
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	return maybeBridgeInbound(ctx, session, originate, logger, stringValue(event.Payload, "eventName"))
+}
+
+// maybeBridgeInbound 客户呼入下双腿媒体桥接发送。
+func maybeBridgeInbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
+	if boolFromMap(session.Metadata, "inboundBridgeSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentOriginateSent") {
+		return nil
+	}
+	if !boolFromMap(session.Metadata, "agentAnswered") {
+		logger.Info("客户呼入坐席分机尚未就绪，暂不桥接", "callId", session.CallID, "reason", reason)
+		return nil
+	}
+	agentUUID, _ := session.Metadata["agentUuid"].(string)
+	customerUUID, _ := session.Metadata["customerUuid"].(string)
+	if agentUUID == "" || customerUUID == "" {
+		return esl.ErrInvalidCommand
+	}
+	if err := originate.BridgeInbound(ctx, esl.APIBridgeRequest{CallID: session.CallID, AgentUUID: agentUUID, CustomerUUID: customerUUID, FSAddr: session.FSAddr}); err != nil {
+		return err
+	}
+	session.Metadata["inboundBridgeSent"] = true
+	if err := originate.SessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("客户呼入两腿桥接已完成", "callId", session.CallID, "reason", reason, "agentUuid", agentUUID, "customerUuid", customerUUID)
+	return nil
+}
