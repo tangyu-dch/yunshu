@@ -4,10 +4,10 @@ import { App, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from '@tanstack/react-query'
 import { RouterProvider } from 'react-router-dom'
-import { router } from './router'
-import { useUiStore } from './store/ui'
+import { router } from '@/router'
+import { useUiStore } from '@/store/ui'
 import { message } from 'antd'
-import './styles/index.css'
+import '@/styles/index.css'
 
 const queryClient = new QueryClient({
   defaultOptions: {

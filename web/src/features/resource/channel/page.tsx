@@ -2,9 +2,9 @@ import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Swi
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { QueryBar } from '../../../components/QueryBar'
-import { deleteChannels, fetchChannels, saveChannel } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
+import { deleteChannels, fetchChannels, saveChannel } from '@/api/operate'
 
 type ChannelFormValues = {
   id?: number

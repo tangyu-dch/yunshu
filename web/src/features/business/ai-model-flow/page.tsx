@@ -1,15 +1,15 @@
 import { Button, Form, Input, Modal, Popconfirm, Space, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
 import {
   fetchAiFlows,
   saveAiFlow,
   deleteAiFlows,
   precheckAiFlow,
   publishAiFlow
-} from '../../../api/operate'
+} from '@/api/operate'
 
 type AiFlowFormValues = {
   id?: number

@@ -35,7 +35,7 @@ import {
   triggerInstallDeploy,
   fetchInstallDeployStatus,
   startInstallServices
-} from '../../api/operate'
+} from '@/api/operate'
 
 const { Title, Text, Paragraph } = Typography
 

@@ -1,5 +1,5 @@
-import { http } from './http'
-import type { AiFlowItem, BatchTaskItem, CallRecordItem, DispatcherItem, GatewayItem, NodeItem, PoolItem, PoolPhoneItem, SkillGroupItem, StatItem } from '../types'
+import { http } from '@/api/http'
+import type { AiFlowItem, BatchTaskItem, CallRecordItem, DispatcherItem, GatewayItem, NodeItem, PoolItem, PoolPhoneItem, SkillGroupItem, StatItem } from '@/types'
 
 type PageResult<T> = {
   pageNumber: number

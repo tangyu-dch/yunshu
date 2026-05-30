@@ -1,8 +1,8 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { deleteRates, fetchRates, saveRate } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { deleteRates, fetchRates, saveRate } from '@/api/operate'
 
 type RateFormValues = {
   id?: number

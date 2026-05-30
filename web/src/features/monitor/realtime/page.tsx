@@ -1,7 +1,7 @@
 import { Badge, Card, Col, Row, Space, Tag, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { TableWrap } from '../../../components/TableWrap'
-import { fetchCallRecords, fetchFsNodes } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { fetchCallRecords, fetchFsNodes } from '@/api/operate'
 
 export function RealtimeMonitorPage() {
   const { data: nodes } = useQuery({ queryKey: ['monitor', 'nodes'], queryFn: fetchFsNodes })

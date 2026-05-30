@@ -1,5 +1,5 @@
-import type { TenantContext } from '../store/auth'
-import { generateIntegritySignature, useAuthStore } from '../store/auth'
+import type { TenantContext } from '@/store/auth'
+import { generateIntegritySignature, useAuthStore } from '@/store/auth'
 
 export type PagePermission =
   | 'operate:freeswitch:read'

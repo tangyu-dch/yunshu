@@ -1,8 +1,8 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { deleteWhitelist, fetchWhitelist, saveWhitelist } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { deleteWhitelist, fetchWhitelist, saveWhitelist } from '@/api/operate'
 
 type WhitelistFormValues = {
   id?: number

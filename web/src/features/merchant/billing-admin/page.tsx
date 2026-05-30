@@ -1,8 +1,8 @@
 import { Button, Form, Input, InputNumber, Modal, Radio, Space, Tabs, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { fetchBillingOverview, fetchMerchants, fetchRechargeRecords, rechargeMerchant, saveBillingOverview } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { fetchBillingOverview, fetchMerchants, fetchRechargeRecords, rechargeMerchant, saveBillingOverview } from '@/api/operate'
 
 type BillingFormValues = {
   id?: number

@@ -2,8 +2,8 @@ import { Button, Card, Space, Table, Tag, Typography, message, Modal, Form, Inpu
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import type { ColumnsType } from 'antd/es/table'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { useAuthStore } from '../../../store/auth'
+import { PermissionGate } from '@/components/PermissionGate'
+import { useAuthStore } from '@/store/auth'
 import {
   fetchBatchTasks,
   saveBatchTask,
@@ -11,7 +11,7 @@ import {
   pauseBatchDialpad,
   resumeBatchDialpad,
   disconnectPauseBatchDialpad
-} from '../../../api/operate'
+} from '@/api/operate'
 
 type DialpadItem = {
   id: number

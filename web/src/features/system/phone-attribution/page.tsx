@@ -2,9 +2,9 @@ import { Button, Form, Input, Modal, Popconfirm, Space, Typography, message } fr
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
 import { PlusOutlined, DeleteOutlined, EditOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
-import { TableWrap } from '../../../components/TableWrap'
-import { QueryBar } from '../../../components/QueryBar'
-import { deletePhoneAttributions, fetchPhoneAttributions, savePhoneAttribution } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
+import { deletePhoneAttributions, fetchPhoneAttributions, savePhoneAttribution } from '@/api/operate'
 
 type PhoneAttributionFormValues = {
   areaCode: string

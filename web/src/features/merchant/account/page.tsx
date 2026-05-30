@@ -1,9 +1,9 @@
 import { Button, Form, Input, Modal, Popconfirm, Space, Switch, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { deleteMerchantAccounts, fetchMerchantAccounts, saveMerchantAccount, toggleMerchantAccountEnable, resetMerchantAccountPassword } from '../../../api/operate'
-import { useAuthStore } from '../../../store/auth'
+import { TableWrap } from '@/components/TableWrap'
+import { deleteMerchantAccounts, fetchMerchantAccounts, saveMerchantAccount, toggleMerchantAccountEnable, resetMerchantAccountPassword } from '@/api/operate'
+import { useAuthStore } from '@/store/auth'
 
 type AccountFormValues = {
   id?: number

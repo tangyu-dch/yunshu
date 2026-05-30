@@ -1,5 +1,5 @@
-import type { AuthLoginResp } from '../types/auth'
-import { http } from './http'
+import type { AuthLoginResp } from '@/types/auth'
+import { http } from '@/api/http'
 
 type LoginInput = {
   username: string

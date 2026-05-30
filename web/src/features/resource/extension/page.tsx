@@ -17,15 +17,15 @@ import {
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { QueryBar } from '../../../components/QueryBar'
+import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import {
   deleteExtensions,
   fetchExtensions,
   fetchMerchants,
   saveExtension,
   toggleExtensionEnable
-} from '../../../api/operate'
+} from '@/api/operate'
 import {
   ReloadOutlined,
   PlusOutlined,

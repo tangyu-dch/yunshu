@@ -20,9 +20,9 @@ import {
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
-import { useAuthStore } from '../../../store/auth'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
+import { useAuthStore } from '@/store/auth'
 import {
   fetchBatchTasks,
   saveBatchTask,
@@ -30,7 +30,7 @@ import {
   toggleBatchTaskEnable,
   importBatchTaskTels,
   fetchBatchTaskDetails
-} from '../../../api/operate'
+} from '@/api/operate'
 import {
   ReloadOutlined,
   DeleteOutlined,

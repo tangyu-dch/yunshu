@@ -7,9 +7,9 @@ import {
   PayCircleOutlined,
   FileTextOutlined,
 } from '@ant-design/icons'
-import { TableWrap } from '../../../components/TableWrap'
-import { fetchBillingOverview, fetchMerchants, fetchRates, fetchRechargeRecords, fetchActiveRates, bindMerchantRate } from '../../../api/operate'
-import { useAuthStore } from '../../../store/auth'
+import { TableWrap } from '@/components/TableWrap'
+import { fetchBillingOverview, fetchMerchants, fetchRates, fetchRechargeRecords, fetchActiveRates, bindMerchantRate } from '@/api/operate'
+import { useAuthStore } from '@/store/auth'
 
 export function MerchantBillingPage() {
   const [pageNumber, setPageNumber] = useState(1)

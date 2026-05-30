@@ -1,4 +1,4 @@
-import type { AiFlowItem, BatchTaskItem, CallRecordItem, GatewayItem, NodeItem, StatItem } from '../types'
+import type { AiFlowItem, BatchTaskItem, CallRecordItem, GatewayItem, NodeItem, StatItem } from '@/types'
 
 export const overviewStats: StatItem[] = [
   { label: '今日外呼', value: '12,480', trend: '+12.8%', tone: 'success' },

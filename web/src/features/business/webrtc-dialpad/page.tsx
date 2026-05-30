@@ -1,8 +1,8 @@
 import { Button, Card, Col, Form, Input, Row, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
 import JsSIP from 'jssip'
-import { useAuthStore } from '../../../store/auth'
-import { getMerchantDetail } from '../../../api/operate'
+import { useAuthStore } from '@/store/auth'
+import { getMerchantDetail } from '@/api/operate'
 
 export function WebRtcDialpadPage() {
   const username = useAuthStore((state) => state.username)

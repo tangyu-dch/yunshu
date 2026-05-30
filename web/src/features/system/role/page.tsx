@@ -2,7 +2,7 @@ import { Button, Form, Input, Modal, Popconfirm, Space, Switch, Tag, Typography,
 import { InfoCircleOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
+import { TableWrap } from '@/components/TableWrap'
 import {
   fetchRoles,
   saveRole,
@@ -11,7 +11,7 @@ import {
   fetchPermissions,
   fetchRolePermissions,
   saveRolePermissions,
-} from '../../../api/operate'
+} from '@/api/operate'
 
 type RoleFormValues = {
   code: string

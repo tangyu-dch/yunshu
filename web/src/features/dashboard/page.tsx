@@ -14,9 +14,9 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import dayjs from 'dayjs'
-import { ChartWrap } from '../../components/ChartWrap'
-import { fetchAiFlows, fetchBatchTasks, fetchCallRecords, fetchFsNodes, fetchGatewayPage } from '../../api/operate'
-import { useAuthStore } from '../../store/auth'
+import { ChartWrap } from '@/components/ChartWrap'
+import { fetchAiFlows, fetchBatchTasks, fetchCallRecords, fetchFsNodes, fetchGatewayPage } from '@/api/operate'
+import { useAuthStore } from '@/store/auth'
 
 interface NavItem {
   key: string

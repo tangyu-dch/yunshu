@@ -1,10 +1,10 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
-import { QueryBar } from '../../../components/QueryBar'
-import { deletePools, fetchGatewayPage, fetchPools, savePool } from '../../../api/operate'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
+import { deletePools, fetchGatewayPage, fetchPools, savePool } from '@/api/operate'
 
 type PoolFormValues = {
   id?: number

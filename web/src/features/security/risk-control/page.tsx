@@ -3,9 +3,9 @@ import { ApartmentOutlined, SafetyCertificateOutlined, SettingOutlined, PlusOutl
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
-import { useAuthStore } from '../../../store/auth'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
+import { useAuthStore } from '@/store/auth'
 import {
   fetchPools,
   savePool,
@@ -19,7 +19,7 @@ import {
   fetchRiskControlMerchants,
   saveRiskControlMerchants,
   fetchAreaCodes
-} from '../../../api/operate'
+} from '@/api/operate'
 
 const { TabPane } = Tabs
 const { Option } = Select

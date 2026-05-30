@@ -47,10 +47,10 @@ import {
 import { useMemo, useState, useEffect } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { hasPermission } from '../auth/permissions'
-import { useAuthStore } from '../store/auth'
-import { useUiStore } from '../store/ui'
-import { getMerchantDetail } from '../api/operate'
+import { hasPermission } from '@/auth/permissions'
+import { useAuthStore } from '@/store/auth'
+import { useUiStore } from '@/store/ui'
+import { getMerchantDetail } from '@/api/operate'
 import dayjs from 'dayjs'
 
 const { Header, Sider, Content } = Layout

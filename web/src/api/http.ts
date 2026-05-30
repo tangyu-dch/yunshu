@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import { message } from 'antd'
-import { useAuthStore, generateIntegritySignature } from '../store/auth'
+import { useAuthStore, generateIntegritySignature } from '@/store/auth'
 
 type BackendResult<T = unknown> = {
   code: number

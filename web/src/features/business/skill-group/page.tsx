@@ -1,8 +1,8 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message, Table } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
 import {
   deleteSkillGroups,
   fetchSkillGroups,
@@ -13,7 +13,7 @@ import {
   saveSkillGroupUsers,
   fetchSkillGroupPhones,
   saveSkillGroupPhones
-} from '../../../api/operate'
+} from '@/api/operate'
 
 type SkillGroupFormValues = {
   id?: number

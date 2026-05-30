@@ -1,9 +1,9 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
-import { deleteDispatchers, fetchDispatchers, reloadDispatchers, saveDispatcher } from '../../../api/operate'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
+import { deleteDispatchers, fetchDispatchers, reloadDispatchers, saveDispatcher } from '@/api/operate'
 
 type DispatcherFormValues = {
   id?: number

@@ -1,5 +1,5 @@
 import { Card, Col, Row, Statistic, Tag } from 'antd'
-import type { StatItem } from '../types'
+import type { StatItem } from '@/types'
 
 export function StatCards({ items }: { items: StatItem[] }) {
   return (

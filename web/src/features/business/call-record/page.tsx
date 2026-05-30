@@ -1,9 +1,9 @@
 import { Button, Space, Tag, Typography, Card, Row, Col } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
-import { TableWrap } from '../../../components/TableWrap'
-import { QueryBar } from '../../../components/QueryBar'
-import { fetchCallRecords } from '../../../api/operate'
+import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
+import { fetchCallRecords } from '@/api/operate'
 import {
   SearchOutlined,
   ReloadOutlined,

@@ -3,8 +3,8 @@ import { Alert, App, Button, Card, ConfigProvider, Form, Input, Radio, Select, S
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
-import { login as loginRequest } from '../../../api/auth'
-import { useAuthStore } from '../../../store/auth'
+import { login as loginRequest } from '@/api/auth'
+import { useAuthStore } from '@/store/auth'
 
 const schema = z.object({
   platform: z.enum(['operate', 'merchant']),

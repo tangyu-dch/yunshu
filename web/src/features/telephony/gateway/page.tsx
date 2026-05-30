@@ -18,8 +18,8 @@ import {
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { PermissionGate } from '../../../components/PermissionGate'
-import { TableWrap } from '../../../components/TableWrap'
+import { PermissionGate } from '@/components/PermissionGate'
+import { TableWrap } from '@/components/TableWrap'
 import {
   fetchGatewayPage,
   saveGateway,
@@ -27,7 +27,7 @@ import {
   syncGateway,
   fetchChannels,
   fetchRates
-} from '../../../api/operate'
+} from '@/api/operate'
 import {
   ReloadOutlined,
   PlusOutlined,
