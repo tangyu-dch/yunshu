@@ -63,6 +63,8 @@ yarn-error.log*
 
 # Application Runtime Data & Logs
 # ------------------------------------------
+run/
+*.pid
 logs/
 *.log
 data/
