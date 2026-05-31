@@ -153,7 +153,7 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 	gatewaySync := &esl.GatewayConfigService{Gateways: gatewayRepository, Nodes: registryGatewaySyncNodeLister{registry: nodeRegistry}, Executor: &fsesl.GatewayHTTPExecutor{Timeout: cfg.FreeSwitch.CommandTimeout, Logger: logger}, Logger: logger}
 	originate := &esl.OriginateService{CommandService: command, SessionService: session, NodeSelector: registryNodeSelector{registry: nodeRegistry}, Extensions: extensionResolver, Guard: outboundGuard, Events: bus, Logger: logger}
 	apiCall := &cti.APICallService{ESL: inProcessESLClient{originate: originate}, Events: bus, Logger: logger}
-	callflow.RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, logger)
+	callflow.RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), logger)
 	var batchScheduler *cti.BatchSchedulerService
 	if gormDB != nil {
 		batchScheduler = &cti.BatchSchedulerService{Repository: business.NewBatchRepository(gormDB, logger), ESL: inProcessESLClient{originate: originate}, Events: bus, Logger: logger}

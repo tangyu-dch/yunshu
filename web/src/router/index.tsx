@@ -4,6 +4,7 @@ import { hasPermission } from '@/auth/permissions'
 import { AdminLayout } from '@/layout/AdminLayout'
 import { useAuthStore, generateIntegritySignature } from '@/store/auth'
 import { AiModelFlowPage } from '@/features/business/ai-model-flow/page'
+import { AiModelFlowDesigner } from '@/features/business/ai-model-flow/designer'
 import { BatchDialpadPage } from '@/features/business/batch-call-dialpad/page'
 import { WebRtcDialpadPage } from '@/features/business/webrtc-dialpad/page'
 import { BatchTaskPage } from '@/features/business/batch-call-task/page'
@@ -22,8 +23,10 @@ import { SkillGroupPage } from '@/features/business/skill-group/page'
 import { PhoneGroupPage } from '@/features/business/phone-group/page'
 import { MerchantAccountPage } from '@/features/merchant/account/page'
 import { MerchantBillingPage } from '@/features/merchant/billing/page'
+import { MerchantApiDocPage } from '@/features/merchant/api-doc/page'
 import { AccountPage } from '@/features/system/account/page'
 import { RolePermissionPage } from '@/features/system/role/page'
+import { OperatorApiDocPage } from '@/features/system/api-doc/page'
 import { RatePage } from '@/features/merchant/rate/page'
 import { BlacklistPage } from '@/features/security/blacklist/page'
 import { WhitelistPage } from '@/features/security/whitelist/page'
@@ -102,6 +105,16 @@ export const router = createBrowserRouter([
   { path: '/install', element: <InstallPage /> },
   { path: '/403', element: <ForbiddenPage /> },
   {
+    path: '/merchant/ai-model-flow/designer/:id',
+    element: (
+      <Guard>
+        <RequirePermission permission="merchant:ai-flow:write">
+          <AiModelFlowDesigner />
+        </RequirePermission>
+      </Guard>
+    )
+  },
+  {
     path: '/',
     element: <ProtectedShell />,
     children: [
@@ -127,6 +140,7 @@ export const router = createBrowserRouter([
       { path: 'operate/proxy-config', element: <RequirePermission permission="operate:freeswitch:read"><ProxyConfigPage /></RequirePermission> },
       { path: 'operate/media-config', element: <RequirePermission permission="operate:freeswitch:read"><MediaConfigPage /></RequirePermission> },
       { path: 'operate/call-record', element: <RequirePermission permission="operate:merchant:read"><CallRecordPage /></RequirePermission> },
+      { path: 'operate/api-doc', element: <RequirePermission permission="operate:account:read"><OperatorApiDocPage /></RequirePermission> },
       { path: 'merchant/batch-call-task', element: <RequirePermission permission="merchant:batch-task:read"><BatchTaskPage /></RequirePermission> },
       { path: 'merchant/batch-call-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><BatchDialpadPage /></RequirePermission> },
       { path: 'merchant/webrtc-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><WebRtcDialpadPage /></RequirePermission> },
@@ -137,6 +151,7 @@ export const router = createBrowserRouter([
       { path: 'merchant/phone-group', element: <RequirePermission permission="merchant:phone-group:read"><PhoneGroupPage /></RequirePermission> },
       { path: 'merchant/account', element: <RequirePermission permission="merchant:account:read"><MerchantAccountPage /></RequirePermission> },
       { path: 'merchant/billing', element: <MerchantBillingPage /> },
+      { path: 'merchant/api-doc', element: <MerchantApiDocPage /> },
     ],
   },
 ])

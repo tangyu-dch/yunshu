@@ -80,6 +80,7 @@ export type AiFlowItem = {
   updatedAt: string
   prompt?: string
   description?: string
+  flowGraph?: any
 }
 
 export type PoolItem = {

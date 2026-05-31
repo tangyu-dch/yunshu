@@ -4,6 +4,8 @@
 
 This repository is the Go rewrite workspace for Yunshu CallCenter. Build the whole system, not only ESL or CTI. Every implementation must preserve existing external contracts until a deliberate migration contract replaces them.
 
+- **项目中文名称统一**：项目的中文名称叫 **“云枢”**（不是“云舒”），所有对外和对内的中文注释、日志、文档说明、控制台提示词、管理文案中必须统一使用**“云枢”**，请勿使用错误的同音词。
+
 ## Reference Source Rules
 
 - Use the  Yunshu CallCenter implementation as the authoritative business reference for FS connection management, CTI/ESL orchestration, event handling, database models, and production behavior.

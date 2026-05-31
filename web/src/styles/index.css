@@ -62,6 +62,13 @@ body,
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --border-color: #e2e8f0;
+  
+  /* 画布与连线设计变量 */
+  --canvas-bg: #f8fafc;
+  --canvas-dots: rgba(100, 116, 139, 0.12);
+  --edge-stroke: #cbd5e1;
+  --edge-foreground: #94a3b8;
+  --edge-bg-glow: #e2e8f0;
 }
 
 .dark {
@@ -70,6 +77,13 @@ body,
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --border-color: #1e293b;
+  
+  /* 画布与连线设计变量 (暗黑模式) */
+  --canvas-bg: #070a13;
+  --canvas-dots: rgba(148, 163, 184, 0.07);
+  --edge-stroke: #1e293b;
+  --edge-foreground: #334155;
+  --edge-bg-glow: #1e293b;
 }
 
 /* 全局主背景与文本颜色自适应 */

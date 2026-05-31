@@ -1,8 +1,9 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message, Table } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import {
   deleteSkillGroups,
   fetchSkillGroups,
@@ -28,6 +29,7 @@ export function SkillGroupPage() {
   const [pageSize, setPageSize] = useState(20)
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
   
   // Binding modal states
   const [bindUsersId, setBindUsersId] = useState<number | null>(null)
@@ -35,7 +37,19 @@ export function SkillGroupPage() {
 
   const [form] = Form.useForm<SkillGroupFormValues>()
   const queryClient = useQueryClient()
-  const { data } = useQuery({ queryKey: ['merchant', 'skill-group', pageNumber, pageSize], queryFn: () => fetchSkillGroups(pageNumber, pageSize) })
+  const { data, isLoading } = useQuery({ queryKey: ['merchant', 'skill-group', pageNumber, pageSize], queryFn: () => fetchSkillGroups(pageNumber, pageSize) })
+  
+  const queryFields = useMemo(() => [
+    { key: 'name', label: '技能组名称', type: 'text' as const, placeholder: '请输入技能组名称模糊搜索' },
+  ], [])
+
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.name) {
+      records = records.filter((r: any) => String(r.name).toLowerCase().includes(queryParams.name.toLowerCase().trim()))
+    }
+    return records
+  }, [data, queryParams])
   
   const deleteMutation = useMutation({
     mutationFn: async (ids: number[]) => deleteSkillGroups(ids),
@@ -90,10 +104,13 @@ export function SkillGroupPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          管理商户的技能组、归属和启停状态。
-        </Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'skill-group'] })}>刷新</Button>
           <PermissionGate permission="merchant:skill-group:write">
@@ -106,7 +123,8 @@ export function SkillGroupPage() {
       <TableWrap
         title="技能组列表"
         rowKey="id"
-        dataSource={data?.records ?? []}
+        loading={isLoading}
+        dataSource={filteredRecords}
         pagination={{
           current: pageNumber,
           pageSize,
@@ -150,6 +168,7 @@ export function SkillGroupPage() {
       <Modal
         open={open}
         title={editingId ? '编辑技能组' : '新增技能组'}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -160,18 +179,20 @@ export function SkillGroupPage() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ merchantId: 1001, enable: true }}>
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="merchantId" label="商户 ID" rules={[{ required: true, message: '请输入商户 ID' }]}>
-            <InputNumber className="w-full" min={1} />
-          </Form.Item>
-          <Form.Item name="description" label="描述">
-            <Input />
-          </Form.Item>
-          <Form.Item name="enable" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+              <Input placeholder="例如: 智能客服一组" />
+            </Form.Item>
+            <Form.Item name="merchantId" label="商户 ID" rules={[{ required: true, message: '请输入商户 ID' }]}>
+              <InputNumber className="w-full" min={1} placeholder="例如: 1001" />
+            </Form.Item>
+            <Form.Item name="description" label="描述" className="col-span-1 md:col-span-2">
+              <Input placeholder="该技能组的主要话务方向" />
+            </Form.Item>
+            <Form.Item name="enable" label="启用" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
 

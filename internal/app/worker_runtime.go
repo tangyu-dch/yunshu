@@ -139,7 +139,21 @@ func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *pro
 			if ledger.Status == business.StatusRated {
 				return nil
 			}
-			rating := business.EstimateByMinute(ledger.DurationSec, defaultRatePerMin)
+
+			rateNote := ""
+			rate := defaultRatePerMin
+			if rate <= 0 {
+				logger.Warn("【云枢计费告警】系统默认计费费率未配置或为零！将只生成审计用的零费率估算，不允许直接当作最终扣费结果。", "callId", ledger.CallID)
+				rateNote = "【审计估算】系统默认费率未配置，采用零金额审计结转"
+			}
+
+			rating := business.EstimateByMinute(ledger.DurationSec, rate)
+			if rateNote != "" {
+				rating.Note = rateNote
+				rating.RatePerMin = 0
+				rating.Amount = 0
+			}
+
 			if err := billingStore.MarkRated(ctx, ledger.CallID, rating.Amount, rating.RatePerMin, rating.Note); err != nil {
 				return err
 			}
@@ -156,6 +170,13 @@ func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *pro
 			}
 			before, after, err := settlementStore.DebitBalance(ctx, job.MerchantID, job.Amount)
 			if err != nil {
+				if errors.Is(err, business.ErrBillingOverviewNotFound) {
+					logger.Warn("【云枢账务审计】商户账单总览表不存在，跳过余额扣减，显式记录为 no-op 结算事实", "merchantId", job.MerchantID, "jobId", job.ID)
+					if markErr := settlementStore.MarkNoOp(ctx, job.ID, "merchant billing overview not found"); markErr != nil {
+						return markErr
+					}
+					return nil
+				}
 				if markErr := settlementStore.MarkFailed(ctx, job.ID, err.Error()); markErr != nil {
 					return markErr
 				}

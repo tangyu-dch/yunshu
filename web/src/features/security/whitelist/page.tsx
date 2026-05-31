@@ -68,10 +68,7 @@ export function WhitelistPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护免风控或高优先起呼的特定客户白名单手机号。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'whitelist'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>

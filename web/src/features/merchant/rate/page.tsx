@@ -1,7 +1,8 @@
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Typography, message } from 'antd'
+import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Tag, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import { deleteRates, fetchRates, saveRate } from '@/api/operate'
 
 type RateFormValues = {
@@ -17,13 +18,26 @@ export function RatePage() {
   const [pageSize, setPageSize] = useState(20)
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
   const [form] = Form.useForm<RateFormValues>()
   const queryClient = useQueryClient()
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['operate', 'rate', pageNumber, pageSize],
     queryFn: () => fetchRates(pageNumber, pageSize),
   })
+
+  const queryFields = useMemo(() => [
+    { key: 'rateName', label: '费率名称', type: 'text' as const, placeholder: '请输入费率名称模糊搜索' },
+  ], [])
+
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.rateName) {
+      records = records.filter((r: any) => String(r.rateName).toLowerCase().includes(queryParams.rateName.toLowerCase().trim()))
+    }
+    return records
+  }, [data, queryParams])
 
   const deleteMutation = useMutation({
     mutationFn: async (ids: number[]) => deleteRates(ids),
@@ -72,10 +86,13 @@ export function RatePage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护外呼话单结算时的计费套餐单价与结算周期。
-        </Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'rate'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>
@@ -87,7 +104,8 @@ export function RatePage() {
       <TableWrap
         title="费率列表"
         rowKey="id"
-        dataSource={data?.records ?? []}
+        loading={isLoading}
+        dataSource={filteredRecords}
         pagination={{
           current: pageNumber,
           pageSize,
@@ -133,6 +151,7 @@ export function RatePage() {
       <Modal
         open={open}
         title={editingId ? '编辑费率' : '新增费率'}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -153,18 +172,20 @@ export function RatePage() {
           }}
           initialValues={{ billingCycle: 60 }}
         >
-          <Form.Item name="rateName" label="费率名称" rules={[{ required: true, message: '请输入费率名称' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="billingPrice" label="单价 (￥/分钟)" rules={[{ required: true, message: '请输入计费单价' }]}>
-            <InputNumber className="w-full" min={0} step={0.0001} precision={4} />
-          </Form.Item>
-          <Form.Item name="billingCycle" label="计费周期 (秒)" rules={[{ required: true, message: '请输入周期秒数' }]}>
-            <InputNumber className="w-full" min={1} defaultValue={60} />
-          </Form.Item>
-          <Form.Item name="remark" label="备注">
-            <Input />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item name="rateName" label="费率名称" rules={[{ required: true, message: '请输入费率名称' }]}>
+              <Input placeholder="例如: 基础运营费率" />
+            </Form.Item>
+            <Form.Item name="billingPrice" label="单价 (￥/分钟)" rules={[{ required: true, message: '请输入计费单价' }]}>
+              <InputNumber className="w-full" min={0} step={0.0001} precision={4} placeholder="例如: 0.1500" />
+            </Form.Item>
+            <Form.Item name="billingCycle" label="计费周期 (秒)" rules={[{ required: true, message: '请输入周期秒数' }]}>
+              <InputNumber className="w-full" min={1} defaultValue={60} placeholder="默认: 60" />
+            </Form.Item>
+            <Form.Item name="remark" label="备注" className="col-span-1 md:col-span-2">
+              <Input placeholder="备注说明，例如: 某某网关专用" />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
     </Space>

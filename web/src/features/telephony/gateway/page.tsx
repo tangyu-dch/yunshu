@@ -164,8 +164,7 @@ export function GatewayPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">配置外呼 SIP 网关中继与运营商线路，监控最大并发负载能力，并向 FreeSWITCH 运行态实时下发同步配置。</Typography.Text>
+      <div className="flex justify-end items-center mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
             刷新

@@ -36,6 +36,7 @@ type ProxyConfigValues = {
   kamailioSipPort: number
   kamailioWsPort: number
   kamailioExternalIp: string
+  kamailioStatus?: 'online' | 'offline'
 }
 
 export function ProxyConfigPage() {
@@ -52,7 +53,8 @@ export function ProxyConfigPage() {
       const res = await fetchProxyConfig()
       form.setFieldsValue(res)
       return res
-    }
+    },
+    refetchInterval: 4000, // 每 4 秒定时自动轮询，保证掉线在 5 秒内实时反馈
   })
 
   // 保存配置变动至数据库
@@ -122,7 +124,7 @@ export function ProxyConfigPage() {
       sipPort: data.kamailioSipPort ?? 5060,
       wsPort: data.kamailioWsPort ?? 5066,
       externalIp: data.kamailioExternalIp ?? '127.0.0.1',
-      status: 'ACTIVE'
+      status: data.kamailioStatus ?? 'offline'
     }
   ] : []
 
@@ -159,22 +161,11 @@ export function ProxyConfigPage() {
           <Typography.Title level={4} className="!mb-1 font-bold text-slate-800 dark:text-slate-200">
             代理配置管理
           </Typography.Title>
-          <Typography.Text type="secondary">
-            维护底层 Kamailio 负载网关与信令分发核心的网络参数，管理对外的 SIP 服务监听与 NAT 网络宣告。
-          </Typography.Text>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>
           刷新状态
         </Button>
       </div>
-
-      <Alert
-        message="架构温馨提示"
-        description="修改信令代理核心的网络监听 IP 或端口时，需要应用并重启 Docker 容器来更新端口映射。此操作将短暂影响注册连接，推荐在闲时执行。"
-        type="warning"
-        showIcon
-        className="rounded-lg shadow-sm border border-amber-200"
-      />
 
       {operationStatus && (
         <Alert
@@ -204,7 +195,7 @@ export function ProxyConfigPage() {
             <div>
               <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">SIP SIGNAL PROXY SERVICE</div>
               <div className="text-sm font-bold text-slate-800 dark:text-zinc-100 mt-1 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                <span className={`w-2 h-2 rounded-full ${data?.kamailioStatus === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500 animate-ping'} inline-block`} />
                 Kamailio 信令代理核心
               </div>
               <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-2 font-mono space-y-0.5">
@@ -212,7 +203,11 @@ export function ProxyConfigPage() {
                 <div>WS 监听端口: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.kamailioWsPort ?? 5066}</span></div>
               </div>
             </div>
-            <Tag color="success" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">ACTIVE</Tag>
+            {data?.kamailioStatus === 'online' ? (
+              <Tag color="success" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">HEALTHY</Tag>
+            ) : (
+              <Tag color="error" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono animate-pulse">OFFLINE</Tag>
+            )}
           </div>
         </Card>
       </div>
@@ -245,7 +240,22 @@ export function ProxyConfigPage() {
           {
             title: '状态',
             dataIndex: 'status',
-            render: () => <Tag color="success" style={{ border: 'none' }}>运行中</Tag>
+            render: (val) => {
+              if (val === 'online') {
+                return (
+                  <Tag color="success" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-emerald-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    在线启用
+                  </Tag>
+                )
+              }
+              return (
+                <Tag color="error" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-rose-600 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping inline-block" />
+                  故障离线
+                </Tag>
+              )
+            }
           },
           {
             title: '操作',

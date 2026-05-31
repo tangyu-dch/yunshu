@@ -2,6 +2,7 @@ package business
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -17,15 +18,17 @@ import (
 //
 // 该表用于管理端保存 AI 流程草稿、预检查结果和发布状态，不参与呼叫热路径。
 type AIModelFlowModel struct {
-	ID          int       `gorm:"column:id;primaryKey"`
-	Name        string    `gorm:"column:name"`
-	Prompt      string    `gorm:"column:prompt"`
-	Description string    `gorm:"column:description"`
-	Published   bool      `gorm:"column:published"`
-	Prechecked  bool      `gorm:"column:prechecked"`
-	DelFlag     bool      `gorm:"column:del_flag"`
-	CreatedTime time.Time `gorm:"column:created_time"`
-	UpdatedTime time.Time `gorm:"column:updated_time"`
+	ID            int       `gorm:"column:id;primaryKey"`
+	Name          string    `gorm:"column:name"`
+	Prompt        string    `gorm:"column:prompt"`
+	CustomReplies string    `gorm:"column:custom_replies;type:text"` // 新增自定义回复与按键编排链 JSON 文本
+	FlowGraph     string    `gorm:"column:flow_graph;type:text"`     // 新增可视化网格流程图拓扑 JSON 文本
+	Description   string    `gorm:"column:description"`
+	Published     bool      `gorm:"column:published"`
+	Prechecked    bool      `gorm:"column:prechecked"`
+	DelFlag       bool      `gorm:"column:del_flag"`
+	CreatedTime   time.Time `gorm:"column:created_time"`
+	UpdatedTime   time.Time `gorm:"column:updated_time"`
 }
 
 // TableName 返回 AI 流程管理表名。
@@ -248,25 +251,68 @@ func (r *MemoryAIModelFlowRepository) Publish(_ context.Context, id int) (operat
 }
 
 func aiModelFlowToModel(flow operatedomain.AIModelFlow) AIModelFlowModel {
+	customRepliesJSON, err := json.Marshal(flow.CustomReplies)
+	if err != nil {
+		slog.Warn("AI 话术流自定义回复序列化失败", "name", flow.Name, "error", err.Error())
+		customRepliesJSON = []byte("[]")
+	}
+
+	var flowGraphJSON []byte
+	if flow.FlowGraph != nil {
+		var err error
+		flowGraphJSON, err = json.Marshal(flow.FlowGraph)
+		if err != nil {
+			slog.Warn("AI 话术流可视化拓扑图序列化失败", "name", flow.Name, "error", err.Error())
+			flowGraphJSON = []byte("{}")
+		}
+	} else {
+		flowGraphJSON = []byte("{}")
+	}
+
 	return AIModelFlowModel{
-		ID:          flow.ID,
-		Name:        flow.Name,
-		Prompt:      flow.Prompt,
-		Description: flow.Description,
-		Published:   flow.Published,
-		Prechecked:  flow.Prechecked,
+		ID:            flow.ID,
+		Name:          flow.Name,
+		Prompt:        flow.Prompt,
+		CustomReplies: string(customRepliesJSON),
+		FlowGraph:     string(flowGraphJSON),
+		Description:   flow.Description,
+		Published:     flow.Published,
+		Prechecked:    flow.Prechecked,
 	}
 }
 
 func aiModelFlowFromModel(model AIModelFlowModel) operatedomain.AIModelFlow {
+	var customReplies []operatedomain.CustomReplyRule
+	if model.CustomReplies != "" {
+		if err := json.Unmarshal([]byte(model.CustomReplies), &customReplies); err != nil {
+			slog.Error("AI 话术流自定义回复反序列化失败", "id", model.ID, "error", err.Error())
+			customReplies = []operatedomain.CustomReplyRule{}
+		}
+	} else {
+		customReplies = []operatedomain.CustomReplyRule{}
+	}
+
+	var flowGraph *operatedomain.AIFlowGraph
+	if model.FlowGraph != "" && model.FlowGraph != "{}" {
+		var graph operatedomain.AIFlowGraph
+		if err := json.Unmarshal([]byte(model.FlowGraph), &graph); err != nil {
+			slog.Error("AI 话术流可视化拓扑图反序列化失败", "id", model.ID, "error", err.Error())
+			flowGraph = nil
+		} else {
+			flowGraph = &graph
+		}
+	}
+
 	return operatedomain.AIModelFlow{
-		ID:          model.ID,
-		Name:        model.Name,
-		Prompt:      model.Prompt,
-		Published:   model.Published,
-		Prechecked:  model.Prechecked,
-		Description: model.Description,
-		UpdatedAt:   model.UpdatedTime,
+		ID:            model.ID,
+		Name:          model.Name,
+		Prompt:        model.Prompt,
+		CustomReplies: customReplies,
+		FlowGraph:     flowGraph,
+		Published:     model.Published,
+		Prechecked:    model.Prechecked,
+		Description:   model.Description,
+		UpdatedAt:     model.UpdatedTime,
 	}
 }
 

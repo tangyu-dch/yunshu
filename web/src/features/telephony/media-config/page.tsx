@@ -1,8 +1,9 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message, Card, Row, Col } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import { fetchRtpenginesPage, saveRtpengine, deleteRtpengines, reloadRtpengines, Rtpengine } from '@/api/operate'
 import {
   ClusterOutlined,
@@ -20,12 +21,31 @@ export function MediaConfigPage() {
   
   // 分页与筛选条件
   const [page, setPage] = useState(1)
-  const [pageSize] = useState(10)
-  
+  const [pageSize, setPageSize] = useState(10)
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
+
   const { data, isLoading } = useQuery({
     queryKey: ['operate', 'rtpengines', page, pageSize],
-    queryFn: () => fetchRtpenginesPage({ pageNumber: page, pageSize: pageSize })
+    queryFn: () => fetchRtpenginesPage({ pageNumber: page, pageSize: pageSize }),
+    refetchInterval: 4000, // 每 4 秒定时自动轮询，保证掉线在 5 秒内实时反馈
   })
+
+  const queryFields = useMemo(() => [
+    { key: 'rtpengineSock', label: '套接字地址', type: 'text' as const, placeholder: '请输入套接字模糊搜索，如 127.0.0.1' },
+    { key: 'description', label: '描述说明', type: 'text' as const, placeholder: '请输入描述模糊搜索' },
+  ], [])
+
+  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.rtpengineSock) {
+      records = records.filter((r: any) => String(r.rtpengineSock).toLowerCase().includes(queryParams.rtpengineSock.toLowerCase().trim()))
+    }
+    if (queryParams.description) {
+      records = records.filter((r: any) => String(r.description || '').toLowerCase().includes(queryParams.description.toLowerCase().trim()))
+    }
+    return records
+  }, [data?.records, queryParams])
 
   // 保存节点
   const saveMutation = useMutation({
@@ -108,9 +128,6 @@ export function MediaConfigPage() {
           <Typography.Title level={4} className="!mb-1 font-bold text-slate-800 dark:text-slate-200">
             媒体配置管理
           </Typography.Title>
-          <Typography.Text type="secondary">
-            维护底层高并发 RTPEngine 媒体转发与转码代理节点，管理信令转发中的 RTP 媒体套接字连接池。
-          </Typography.Text>
         </div>
         <Space>
           <Button
@@ -140,11 +157,27 @@ export function MediaConfigPage() {
                 媒体代理集群
               </div>
               <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-2 font-mono space-y-0.5">
-                <div>已启用节点数: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.records.filter((r) => !r.disabled).length ?? 0}</span></div>
-                <div>挂起离线节点: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.records.filter((r) => r.disabled).length ?? 0}</span></div>
+                <div>已启用且在线: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{data?.records.filter((r) => !r.disabled && r.status === 'online').length ?? 0}</span></div>
+                <div>已启用但故障: <span className="font-semibold text-rose-600 dark:text-rose-400">{data?.records.filter((r) => !r.disabled && r.status === 'offline').length ?? 0}</span></div>
+                <div>已被禁用节点: <span className="font-semibold text-slate-500 dark:text-zinc-400">{data?.records.filter((r) => r.disabled).length ?? 0}</span></div>
               </div>
             </div>
-            <Tag color="success" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">ONLINE</Tag>
+            {(() => {
+              const totalActive = data?.records.filter((r) => !r.disabled).length ?? 0
+              const activeOnline = data?.records.filter((r) => !r.disabled && r.status === 'online').length ?? 0
+              const activeOffline = data?.records.filter((r) => !r.disabled && r.status === 'offline').length ?? 0
+
+              if (totalActive === 0) {
+                return <Tag color="warning" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">NO ACTIVE NODES</Tag>
+              }
+              if (activeOnline > 0 && activeOffline === 0) {
+                return <Tag color="success" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">HEALTHY</Tag>
+              }
+              if (activeOnline > 0 && activeOffline > 0) {
+                return <Tag color="warning" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">DEGRADED</Tag>
+              }
+              return <Tag color="error" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono animate-pulse">ALL OFFLINE</Tag>
+            })()}
           </div>
         </Card>
 
@@ -154,15 +187,18 @@ export function MediaConfigPage() {
               <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">ACTIVE CAPABILITIES</div>
               {data && data.records.length > 0 ? (
                 <div className="space-y-1 mt-1.5">
-                  {data.records.slice(0, 2).map((node: Rtpengine) => (
-                    <div key={node.id} className="flex items-center justify-between text-xs w-full">
-                      <span className="font-bold text-slate-800 dark:text-zinc-100 flex items-center gap-1.5 truncate max-w-[150px]">
-                        <span className={`w-1.5 h-1.5 rounded-full ${!node.disabled ? 'bg-emerald-500' : 'bg-slate-300'} inline-block`} />
-                        {node.description || `媒体节点 ${node.id}`}
-                      </span>
-                      <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">{node.rtpengineSock}</span>
-                    </div>
-                  ))}
+                  {data.records.slice(0, 2).map((node: Rtpengine) => {
+                    const dotColor = node.disabled ? 'bg-slate-300' : (node.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500 animate-ping')
+                    return (
+                      <div key={node.id} className="flex items-center justify-between text-xs w-full">
+                        <span className="font-bold text-slate-800 dark:text-zinc-100 flex items-center gap-1.5 truncate max-w-[150px]">
+                          <span className={`w-1.5 h-1.5 rounded-full ${dotColor} inline-block`} />
+                          {node.description || `媒体节点 ${node.id}`}
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500">{node.rtpengineSock}</span>
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="text-sm font-bold text-slate-800 dark:text-zinc-100 mt-1 flex items-center gap-1.5">
@@ -183,12 +219,18 @@ export function MediaConfigPage() {
         </Card>
       </div>
 
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
       {/* 媒体节点 Table 列表 */}
       <TableWrap
         title="媒体代理节点列表"
         rowKey="id"
         loading={isLoading}
-        dataSource={data?.records ?? []}
+        dataSource={filteredRecords}
         pagination={{
           current: page,
           pageSize: pageSize,
@@ -218,12 +260,33 @@ export function MediaConfigPage() {
           },
           {
             title: '状态',
-            dataIndex: 'disabled',
-            render: (disabled) => (
-              <Tag color={disabled ? 'error' : 'success'} style={{ border: 'none' }}>
-                {disabled ? '已禁用' : '启用中'}
-              </Tag>
-            )
+            render: (_, record) => {
+              if (record.disabled) {
+                return <Tag color="default" style={{ border: 'none' }}>已禁用</Tag>
+              }
+              if (record.status === 'online') {
+                return (
+                  <Tag color="success" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-emerald-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    在线启用
+                  </Tag>
+                )
+              }
+              if (record.status === 'offline') {
+                return (
+                  <Tag color="error" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-rose-600 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping inline-block" />
+                    故障离线
+                  </Tag>
+                )
+              }
+              return (
+                <Tag color="processing" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-blue-600">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse inline-block" />
+                  检测中...
+                </Tag>
+              )
+            }
           },
           {
             title: '操作',

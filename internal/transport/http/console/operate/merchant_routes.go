@@ -112,6 +112,23 @@ func RegisterMerchantRoutes(r gin.IRoutes, service *operatedomain.MerchantManage
 		}
 		c.JSON(http.StatusOK, contracts.OK(page))
 	})
+
+	r.POST("/merchant/reset-api-key/:id", func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		result, err := service.ResetAPIKeys(c.Request.Context(), id)
+		if err != nil {
+			if err.Error() == "forbidden" {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "无权访问此商户"))
+				return
+			}
+			writeMerchantError(c, err, "重置 API 密钥对失败")
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(result.Merchant))
+	})
 }
 
 func saveMerchant(service *operatedomain.MerchantManagementService) gin.HandlerFunc {

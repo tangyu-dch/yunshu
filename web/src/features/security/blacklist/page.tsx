@@ -373,24 +373,6 @@ export function BlacklistPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      {/* Dynamic Glassmorphism Header */}
-      <div
-        className="p-6 rounded-2xl shadow-soft border-l-[5px] border-indigo-500 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900/40 dark:to-slate-800/40 border border-slate-100 dark:border-slate-800"
-      >
-        <Row align="middle" justify="space-between">
-          <Col>
-            <div className="flex items-center gap-3">
-              <SafetyCertificateOutlined style={{ fontSize: '28px', color: '#6366f1' }} />
-              <div className="mb-2">
-                <Typography.Text type="secondary">
-                  构建呼叫安全核心拦截链。在此管理对接第三方实时黑名单验证通道以及本地全量强风控拦截等级与号码。
-                </Typography.Text>
-              </div>
-            </div>
-          </Col>
-        </Row>
-      </div>
-
       {/* Main Tabs Container */}
       <Tabs
         activeKey={activeTab}
@@ -408,14 +390,7 @@ export function BlacklistPage() {
           }
           key="1"
         >
-          <div className="flex justify-between items-center mb-4">
-            <Alert
-              message="风控提示"
-              description="黑名单库配置对应呼叫链路中对接的外部风控服务商通道（如东信易通、羽乐科技等）。配置网关绑定后，可对该线路流量进行智能评估过滤。"
-              type="info"
-              showIcon
-              className="flex-1 mr-4 border-slate-200 dark:border-slate-800 dark:bg-slate-900/40"
-            />
+          <div className="flex justify-end mb-4">
             <Space>
               <Button
                 icon={<ReloadOutlined />}
@@ -509,7 +484,7 @@ export function BlacklistPage() {
           {/* Table Actions Bar */}
           <div className="flex justify-between items-center mb-4">
             <div className="flex-1 mr-4">
-              {selectedPhones.length > 0 ? (
+              {selectedPhones.length > 0 && (
                 <Alert
                   type="warning"
                   showIcon
@@ -527,13 +502,6 @@ export function BlacklistPage() {
                       </Popconfirm>
                     </span>
                   }
-                />
-              ) : (
-                <Alert
-                  type="success"
-                  showIcon
-                  className="dark:bg-emerald-950/20 dark:border-emerald-900/50"
-                  message="您可以针对不同号码设置具体的防骚扰、投诉防范拦截等级。呼叫模块将在发起前置 Originate 校验中强制拦截并退款。"
                 />
               )}
             </div>
@@ -615,14 +583,7 @@ export function BlacklistPage() {
           }
           key="3"
         >
-          <div className="flex justify-between items-center mb-4">
-            <Alert
-              message="通道管理提示"
-              description="在此处可自主添加、编辑并接入任意外部风控服务商的黑名单验证接口代码。配置完成后，可在新增或编辑黑名单验证库时动态选择，实现零重启的通道无缝热扩容。"
-              type="info"
-              showIcon
-              className="flex-1 mr-4 border-slate-200 dark:border-slate-800 dark:bg-slate-900/40"
-            />
+          <div className="flex justify-end mb-4">
             <Space>
               <Button type="primary" icon={<PlusOutlined />} onClick={openCreateChannel}>
                 接入外部新通道

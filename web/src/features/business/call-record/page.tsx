@@ -178,10 +178,7 @@ export function CallRecordPage() {
   return (
     <Space direction="vertical" size="large" className="w-full">
       {/* 头部提示与操作区 */}
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          支持针对网关、分机、计费及振铃等多维 CDR 指标的精细化全局检索与数据分析。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isPending}>
             刷新数据

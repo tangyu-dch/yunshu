@@ -188,8 +188,7 @@ export function ExtensionPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">维护坐席使用的 CTI 话务 SIP 分机号及多商户/坐席绑定关联，实时监测分机注册通信状态。</Typography.Text>
+      <div className="flex justify-end items-center mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isPending}>刷新</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>

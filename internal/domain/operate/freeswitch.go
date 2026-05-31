@@ -9,8 +9,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 )
 
 var (
@@ -27,7 +30,7 @@ type FreeSwitchManagementService struct {
 	Logger   *slog.Logger
 }
 
-// List 返回所有未删除节点，包含禁用节点，供运营端页面展示 and 审计。
+// List 返回所有未删除节点，包含禁用节点，并并发执行物理 ESL 在线健康检测。
 func (s *FreeSwitchManagementService) List(ctx context.Context) ([]Node, error) {
 	logger := s.logger()
 	logger.Info("运营端开始查询 FreeSWITCH 节点列表")
@@ -36,6 +39,22 @@ func (s *FreeSwitchManagementService) List(ctx context.Context) ([]Node, error) 
 		logger.Error("运营端查询 FreeSWITCH 节点列表失败", "error", err.Error())
 		return nil, err
 	}
+
+	// 极速并发执行物理在线健康检测
+	var wg sync.WaitGroup
+	for i := range nodes {
+		if !nodes[i].Enable {
+			nodes[i].Status = NodeUnavailable
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			nodes[idx].Status = pingFreeswitch(nodes[idx].Address, nodes[idx].ESLPort)
+		}(i)
+	}
+	wg.Wait()
+
 	logger.Info("运营端查询 FreeSWITCH 节点列表完成", "nodeCount", len(nodes))
 	return nodes, nil
 }
@@ -160,4 +179,20 @@ func splitFSAddr(fsAddr string) (string, int, bool) {
 		return "", 0, false
 	}
 	return fsAddr[:index], port, true
+}
+
+// pingFreeswitch 极速物理 ESL 状态心跳探测
+func pingFreeswitch(address string, eslPort int) NodeStatus {
+	if eslPort <= 0 {
+		eslPort = 8021
+	}
+	addr := net.JoinHostPort(address, strconv.Itoa(eslPort))
+
+	// 设置超短的 150ms 拨号超时
+	conn, err := net.DialTimeout("tcp", addr, 150*time.Millisecond)
+	if err != nil {
+		return NodeUnavailable
+	}
+	conn.Close()
+	return NodeActive
 }

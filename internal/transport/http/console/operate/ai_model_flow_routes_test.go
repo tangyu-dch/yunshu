@@ -23,7 +23,45 @@ func TestAIModelFlowRoutes(t *testing.T) {
 	}
 	RegisterAIModelFlowRoutes(router, service)
 
-	saveReq := httptest.NewRequest(http.MethodPut, "/merchant/ai-model-flow/add", bytes.NewReader([]byte(`{"name":"流程A","prompt":"请处理呼叫"}`)))
+	saveReq := httptest.NewRequest(http.MethodPut, "/merchant/ai-model-flow/add", bytes.NewReader([]byte(`{
+		"name": "流程A",
+		"prompt": "请处理呼叫",
+		"customReplies": [
+			{
+				"id": "rule-1",
+				"name": "查话费意图",
+				"matchMode": "semantic",
+				"intent": "intent_billing",
+				"replyText": "您的当前账户余额为 58 元",
+				"action": "continue"
+			},
+			{
+				"id": "rule-2",
+				"name": "转人工按键",
+				"matchMode": "dtmf",
+				"intent": "9",
+				"replyText": "正在为您引导至人工队列，请稍候",
+				"action": "transfer",
+				"actionParam": "8002"
+			}
+		],
+		"flowGraph": {
+			"nodes": [
+				{
+					"id": "node-100",
+					"type": "start",
+					"label": "开始",
+					"x": 120.5,
+					"y": 150.0,
+					"metadata": {
+						"asrEnabled": true,
+						"wsUrl": "ws://127.0.0.1:9002/stream"
+					}
+				}
+			],
+			"edges": []
+		}
+	}`)))
 	saveReq.Header.Set("Content-Type", "application/json")
 	saveRec := httptest.NewRecorder()
 	router.ServeHTTP(saveRec, saveReq)

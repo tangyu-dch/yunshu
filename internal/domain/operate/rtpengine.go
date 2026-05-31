@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"strings"
+	"sync"
+	"time"
 )
 
 var (
@@ -24,6 +27,7 @@ type Rtpengine struct {
 	Disabled      bool   `json:"disabled"`
 	Weight        int    `json:"weight"`
 	Description   string `json:"description"`
+	Status        string `json:"status,omitempty"` // 内存中存储的实时物理在线状态: "online" | "offline" | "disabled"
 }
 
 // RtpenginePageRequest 表示 RTPEngine 节点的查询条件。
@@ -71,7 +75,7 @@ type RtpengineManagementService struct {
 	Logger     *slog.Logger
 }
 
-// Page 返回分页查询结果。
+// Page 返回分页查询结果，并并发执行物理在线健康检测。
 func (s *RtpengineManagementService) Page(ctx context.Context, req RtpenginePageRequest) (RtpenginePageResult, error) {
 	logger := s.logger()
 	req = normalizeRtpenginePage(req)
@@ -81,8 +85,70 @@ func (s *RtpengineManagementService) Page(ctx context.Context, req RtpenginePage
 		logger.Error("运营端分页查询 Kamailio RTPEngine 节点失败", "error", err.Error())
 		return RtpenginePageResult{}, err
 	}
+
+	// 极速并发执行物理在线状态检测
+	var wg sync.WaitGroup
+	for i := range page.Records {
+		if page.Records[i].Disabled {
+			page.Records[i].Status = "disabled"
+			continue
+		}
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			page.Records[idx].Status = pingRtpengine(page.Records[idx].RtpengineSock)
+		}(i)
+	}
+	wg.Wait()
+
 	logger.Info("运营端分页查询 Kamailio RTPEngine 节点完成", "total", page.Total, "recordCount", len(page.Records))
 	return page, nil
+}
+
+// pingRtpengine 实现在线网络检测
+func pingRtpengine(sock string) string {
+	addr := sock
+	protocol := "udp"
+	if strings.HasPrefix(sock, "udp:") {
+		protocol = "udp"
+		addr = strings.TrimPrefix(sock, "udp:")
+	} else if strings.HasPrefix(sock, "tcp:") {
+		protocol = "tcp"
+		addr = strings.TrimPrefix(sock, "tcp:")
+	}
+
+	// 如果地址没有指定端口，默认追加控制端口 2223
+	if !strings.Contains(addr, ":") {
+		addr = addr + ":2223"
+	}
+
+	// 设置极短的拨号超时 150 毫秒
+	conn, err := net.DialTimeout(protocol, addr, 150*time.Millisecond)
+	if err != nil {
+		return "offline"
+	}
+	defer conn.Close()
+
+	// 设置读写 Deadline 150 毫秒
+	_ = conn.SetDeadline(time.Now().Add(150 * time.Millisecond))
+
+	// 发送 RTPEngine NG 协议的 JSON 探针
+	_, err = conn.Write([]byte(`12345 {"command":"ping"}`))
+	if err != nil {
+		return "offline"
+	}
+
+	buf := make([]byte, 128)
+	n, err := conn.Read(buf)
+	if err != nil || n == 0 {
+		return "offline"
+	}
+
+	resp := string(buf[:n])
+	if strings.Contains(resp, "pong") || strings.Contains(resp, "result") {
+		return "online"
+	}
+	return "offline"
 }
 
 // Save 保存（新增或更新）节点。

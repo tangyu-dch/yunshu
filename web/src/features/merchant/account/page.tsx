@@ -110,10 +110,7 @@ export function MerchantAccountPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护本商户的坐席/普通用户账号。注：商户管理员账号无法在此进行修改或删除。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'account'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>

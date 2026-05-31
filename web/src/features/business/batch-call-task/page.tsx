@@ -19,9 +19,10 @@ import {
   Card
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import { useAuthStore } from '@/store/auth'
 import {
   fetchBatchTasks,
@@ -65,6 +66,7 @@ export function BatchTaskPage() {
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   // Import Numbers Modal State
   const [importTaskId, setImportTaskId] = useState<number | null>(null)
@@ -80,6 +82,32 @@ export function BatchTaskPage() {
     queryKey: ['merchant', 'batch-task', pageNumber, pageSize, merchantId],
     queryFn: () => fetchBatchTasks(pageNumber, pageSize),
   })
+
+  const queryFields = useMemo(() => [
+    { key: 'name', label: '任务名称', type: 'text' as const, placeholder: '请输入外呼任务名称模糊搜索' },
+    {
+      key: 'status',
+      label: '任务状态',
+      type: 'select' as const,
+      options: [
+        { value: 'running', label: '运行中' },
+        { value: 'paused', label: '暂停中' },
+        { value: 'finished', label: '已完成' },
+        { value: 'error', label: '异常' },
+      ],
+    },
+  ], [])
+
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.name) {
+      records = records.filter((r: any) => String(r.name).toLowerCase().includes(queryParams.name.toLowerCase().trim()))
+    }
+    if (queryParams.status) {
+      records = records.filter((r: any) => r.status === queryParams.status)
+    }
+    return records
+  }, [data, queryParams])
 
   // Fetch detailed dial logs of selected task
   const { data: detailsData, isLoading: detailsLoading } = useQuery({
@@ -219,8 +247,13 @@ export function BatchTaskPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">配置批量外呼计划，管理客户导入号码，追踪自动拨打与接通的多维数据指标。</Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
+      <div className="flex justify-end mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isLoading}>刷新</Button>
           {selectedIds.length > 0 && (
@@ -247,7 +280,7 @@ export function BatchTaskPage() {
         title="外呼活动任务列表"
         rowKey="id"
         loading={isLoading}
-        dataSource={data?.records ?? []}
+        dataSource={filteredRecords}
         rowSelection={{
           selectedRowKeys: selectedIds,
           onChange: (keys: any[]) => setSelectedIds(keys as number[]),
@@ -379,6 +412,7 @@ export function BatchTaskPage() {
       <Modal
         title={editingId ? '编辑外呼任务' : '新建外呼任务'}
         open={open}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -388,15 +422,16 @@ export function BatchTaskPage() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
-          <Form.Item
-            name="name"
-            label="任务名称"
-            rules={[{ required: true, message: '请输入外呼任务名称' }]}
-          >
-            <Input placeholder="例如: 优质客户回访任务" />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item
+              name="name"
+              label="任务名称"
+              rules={[{ required: true, message: '请输入外呼任务名称' }]}
+              className="col-span-1 md:col-span-2"
+            >
+              <Input placeholder="例如: 优质客户回访任务" />
+            </Form.Item>
 
-          <div className="grid grid-cols-2 gap-4">
             <Form.Item
               name="connectedInterval"
               label="接通重试间隔 (秒)"
@@ -404,6 +439,7 @@ export function BatchTaskPage() {
             >
               <InputNumber min={60} className="w-full" placeholder="默认 600 秒" />
             </Form.Item>
+
             <Form.Item
               name="unconnectedInterval"
               label="未接通重试间隔 (秒)"
@@ -411,21 +447,21 @@ export function BatchTaskPage() {
             >
               <InputNumber min={60} className="w-full" placeholder="默认 1200 秒" />
             </Form.Item>
-          </div>
 
-          <Form.Item
-            name="callTimePeriod"
-            label="允许呼叫时段"
-            help="格式如: 09:00-12:00,14:00-18:00 (使用英文逗号隔开多个时段)"
-          >
-            <Input placeholder="09:00-12:00,14:00-18:00" />
-          </Form.Item>
+            <Form.Item
+              name="callTimePeriod"
+              label="允许呼叫时段"
+              help="格式如: 09:00-12:00,14:00-18:00"
+              className="col-span-1 md:col-span-2"
+            >
+              <Input placeholder="09:00-12:00,14:00-18:00" />
+            </Form.Item>
 
-          <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-lg mb-4">
-            <Form.Item name="aiFlag" label="启用 AI 智能交互" valuePropName="checked" className="!mb-0">
+            <Form.Item name="aiFlag" label="启用 AI 智能交互" valuePropName="checked" className="flex items-center">
               <Switch checkedChildren="开" unCheckedChildren="关" />
             </Form.Item>
-            <Form.Item name="enable" label="启用状态" valuePropName="checked" className="!mb-0">
+
+            <Form.Item name="enable" label="启用状态" valuePropName="checked" className="flex items-center">
               <Switch checkedChildren="启动" unCheckedChildren="挂起" />
             </Form.Item>
           </div>

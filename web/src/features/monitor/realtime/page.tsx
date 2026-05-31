@@ -9,9 +9,6 @@ export function RealtimeMonitorPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="mb-2">
-        <Typography.Text type="secondary">看当前通话、FS 节点、事件租约和推送状态。</Typography.Text>
-      </div>
       <Row gutter={[16, 16]}>
         {nodes?.map((node) => (
           <Col key={node.id} xs={24} md={8}>

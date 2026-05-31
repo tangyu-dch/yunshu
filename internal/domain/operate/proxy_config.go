@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -42,6 +43,7 @@ type ProxyConfig struct {
 	RtpengineSdpIp      string `json:"rtpengineSdpIp"`
 	RtpengineStartPort  int    `json:"rtpengineStartPort"`
 	RtpengineEndPort    int    `json:"rtpengineEndPort"`
+	KamailioStatus      string `json:"kamailioStatus,omitempty"` // 内存中存储的实时物理在线状态: "online" | "offline"
 }
 
 // ProxyConfigItem 表示数据库存储的单条代理配置项。
@@ -100,16 +102,23 @@ func (s *ProxyConfigManagementService) GetConfig(ctx context.Context) (ProxyConf
 		configMap[item.Key] = item.Value
 	}
 
+	sipPort := getIntVal(configMap, KeyKamailioSipPort, 5060)
+	wsPort := getIntVal(configMap, KeyKamailioWsPort, 5066)
+
+	// 极速物理在线检测
+	kamailioStatus := pingKamailio(sipPort, wsPort)
+
 	return ProxyConfig{
 		KamailioUdpIp:       getStrVal(configMap, KeyKamailioUdpIp, "0.0.0.0"),
 		KamailioTcpIp:       getStrVal(configMap, KeyKamailioTcpIp, "0.0.0.0"),
-		KamailioSipPort:     getIntVal(configMap, KeyKamailioSipPort, 5060),
-		KamailioWsPort:      getIntVal(configMap, KeyKamailioWsPort, 5066),
+		KamailioSipPort:     sipPort,
+		KamailioWsPort:      wsPort,
 		KamailioExternalIp:  getStrVal(configMap, KeyKamailioExternalIp, "127.0.0.1"),
 		RtpengineInternalIp: getStrVal(configMap, KeyRtpengineInternalIp, "0.0.0.0"),
 		RtpengineSdpIp:      getStrVal(configMap, KeyRtpengineSdpIp, "127.0.0.1"),
 		RtpengineStartPort:  getIntVal(configMap, KeyRtpengineStartPort, 30000),
 		RtpengineEndPort:    getIntVal(configMap, KeyRtpengineEndPort, 30100),
+		KamailioStatus:      kamailioStatus,
 	}, nil
 }
 
@@ -272,4 +281,23 @@ func getIntVal(m map[string]string, key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// pingKamailio 实现在线网络检测
+func pingKamailio(sipPort, wsPort int) string {
+	// 采用 WebRTC WS 端口 (TCP) 和 SIP 端口 (通常映射为 TCP) 双重检测机制
+	addrWS := fmt.Sprintf("127.0.0.1:%d", wsPort)
+	conn, err := net.DialTimeout("tcp", addrWS, 150*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return "online"
+	}
+
+	addrSIP := fmt.Sprintf("127.0.0.1:%d", sipPort)
+	conn2, err := net.DialTimeout("tcp", addrSIP, 150*time.Millisecond)
+	if err == nil {
+		conn2.Close()
+		return "online"
+	}
+	return "offline"
 }

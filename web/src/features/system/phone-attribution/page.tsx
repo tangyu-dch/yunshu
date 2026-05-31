@@ -90,10 +90,7 @@ export function PhoneAttributionPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          被叫号码归属地号段映射表。配置 7 位手机号段对应的省份和城市区划代码，提供风控系统盲区禁拨精确匹配。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button
             icon={<ReloadOutlined />}

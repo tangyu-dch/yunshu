@@ -183,10 +183,7 @@ export function BatchDialpadPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          配置并发呼叫频率，监控并发水位，并控制当前拨号盘的生命周期状态。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'batch-dialpad'] })}>刷新</Button>
           <PermissionGate permission="merchant:batch-dialpad:control">

@@ -6,6 +6,7 @@ package callflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"yunshu/internal/contracts"
 	"yunshu/internal/domain/cti"
 	"yunshu/internal/domain/esl"
+	"yunshu/internal/domain/operate"
 	"yunshu/internal/infra/events"
 	"yunshu/pkg/telephony"
 	"yunshu/pkg/workflow"
@@ -21,7 +23,7 @@ import (
 // RegisterConsumers 注册 cc-call 内部事件消费者。
 // 当前消费者负责订阅事件总线，并在事件发生时提取上下文，向 CTI 或 ESL 引擎发送状态推进信号。
 // 涵盖 API 外呼、批量外呼、拨号盘直呼以及客户呼入四大经典通信流程。
-func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, logger *slog.Logger) {
+func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, statusReader esl.ExtensionStatusReader, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -156,7 +158,7 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 			case string(esl.EventChannelAnswer):
 				// 客户呼入应答：触发自动分配并起呼分配到的坐席分机
 				if legRole == string(contracts.LegRoleCustomer) {
-					return handleInboundCustomerAnswer(ctx, event, sessionService, originate, logger)
+					return handleInboundCustomerAnswer(ctx, event, sessionService, originate, statusReader, logger)
 				}
 				// 坐席摘机应答：桥接呼入电话与坐席
 				if legRole == string(contracts.LegRoleAgent) {
@@ -165,6 +167,48 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 			}
 		}
 		_ = instance
+		return nil
+	})
+
+	// 4.5 订阅智能 IVR ASR/STT 识别文本事件，驱动可视化寻路引擎
+	bus.Subscribe("asr_speech_detected", func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		callID := event.AggregateID
+		text := stringFromMap(event.Payload, "text")
+		session, err := sessionService.Store.Get(ctx, callID)
+		if err != nil {
+			return nil
+		}
+		if boolFromMap(session.Metadata, "aiEnabled") {
+			var flow operate.AIModelFlow
+			if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
+				_ = json.Unmarshal([]byte(flowJSON), &flow)
+			}
+			if flow.FlowGraph != nil {
+				engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+				_ = engine.ProcessASRText(ctx, &session, flow, text)
+			}
+		}
+		return nil
+	})
+
+	// 4.6 订阅智能 IVR DTMF 按键事件，驱动按键条件分支
+	bus.Subscribe("dtmf_detected", func(ctx context.Context, event contracts.EventEnvelope[map[string]any]) error {
+		callID := event.AggregateID
+		digit := stringFromMap(event.Payload, "digit")
+		session, err := sessionService.Store.Get(ctx, callID)
+		if err != nil {
+			return nil
+		}
+		if boolFromMap(session.Metadata, "aiEnabled") {
+			var flow operate.AIModelFlow
+			if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
+				_ = json.Unmarshal([]byte(flowJSON), &flow)
+			}
+			if flow.FlowGraph != nil {
+				engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+				_ = engine.ProcessDTMFKey(ctx, &session, flow, digit)
+			}
+		}
 		return nil
 	})
 
@@ -1048,7 +1092,7 @@ func maybeBridgeDialpadDirect(ctx context.Context, session esl.CallSession, orig
 
 // handleInboundCustomerAnswer 处理客户呼入应答动作（Leg A 先就绪）。
 // 随后触发向绑定坐席分机的 originate 呼叫。
-func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, statusReader esl.ExtensionStatusReader, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -1058,6 +1102,25 @@ func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvel
 		session.Metadata = map[string]any{}
 	}
 	session.Metadata["customerReady"] = true
+
+	// 🚀 如果配置了启用机器人智能话术流 (AI Robot First)
+	if boolFromMap(session.Metadata, "aiEnabled") {
+		var flow operate.AIModelFlow
+		if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
+			_ = json.Unmarshal([]byte(flowJSON), &flow)
+		}
+
+		engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+		err := engine.StartAIVoiceFlow(ctx, &session, flow)
+		if err != nil {
+			logger.Error("云枢运行时：AI 智能话术流启动失败，降级回退人工坐席", "error", err.Error())
+		} else {
+			session.Metadata["aiFlowActive"] = true
+			session.Metadata["aiCurrentNode"] = "node-intent" // 默认停留在意图卡点监听
+			return sessionService.Store.Save(ctx, session)
+		}
+	}
+
 	if boolFromMap(session.Metadata, "agentOriginateSent") {
 		return nil
 	}

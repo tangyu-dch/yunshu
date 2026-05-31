@@ -102,10 +102,7 @@ export function PhoneGroupPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          管理呼叫路由的号码组，绑定外呼号码与坐席技能组。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'phone-group'] })}>刷新</Button>
           <PermissionGate permission="merchant:phone-group:write">

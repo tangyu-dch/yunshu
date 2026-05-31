@@ -63,32 +63,55 @@ func NewRedisAllocator(client *goredis.Client, ttl time.Duration) *RedisAllocato
 	return &RedisAllocator{Client: client, TTL: ttl}
 }
 
-// Claim 原子占用一个候选号的并发槽位。
+// Claim 原子占用候选号列表中的并发槽位，遵循“逐个试选经过规则链的候选号码”的高并发原则。
+// 当且仅当所有候选号码都因为并发满额或异常占用失败时，才最终向外抛出错误。
 func (a *RedisAllocator) Claim(ctx context.Context, req cti.SelectionRequest, candidates []cti.NumberCandidate) (cti.RuntimeAllocation, error) {
 	if len(candidates) == 0 {
 		return cti.RuntimeAllocation{}, cti.ErrNoAvailableNumber
 	}
-	candidate := candidates[0]
-	limit := candidate.Concurrency
-	if limit <= 0 {
-		return cti.RuntimeAllocation{}, ErrRuntimeConcurrencyExhausted
+
+	var lastErr error = ErrRuntimeConcurrencyExhausted
+	for _, candidate := range candidates {
+		limit := candidate.Concurrency
+		if limit <= 0 {
+			lastErr = ErrRuntimeConcurrencyExhausted
+			continue
+		}
+
+		claimKey := fmt.Sprintf("cti:select:claim:%s", req.CallID)
+		counterKey := fmt.Sprintf("cti:select:counter:%s:%s:%s", req.MerchantID, candidate.GatewayID, candidate.Phone)
+		value := candidate.Phone + "|" + candidate.GatewayID
+
+		raw, err := a.Client.Eval(ctx, claimScript, []string{claimKey, counterKey}, limit, a.TTL.Milliseconds(), value).Result()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		values, ok := raw.([]any)
+		if !ok || len(values) < 2 {
+			lastErr = fmt.Errorf("unexpected redis claim response: %v", raw)
+			continue
+		}
+
+		accepted, _ := strconv.Atoi(fmt.Sprint(values[0]))
+		if accepted != 1 {
+			lastErr = ErrRuntimeConcurrencyExhausted
+			continue
+		}
+
+		// 成功占用其中一个候选号码，立即返回并结束试选
+		return cti.RuntimeAllocation{
+			CallID:     req.CallID,
+			MerchantID: req.MerchantID,
+			Caller:     candidate.Phone,
+			GatewayID:  candidate.GatewayID,
+			ClaimKey:   claimKey,
+		}, nil
 	}
-	claimKey := fmt.Sprintf("cti:select:claim:%s", req.CallID)
-	counterKey := fmt.Sprintf("cti:select:counter:%s:%s:%s", req.MerchantID, candidate.GatewayID, candidate.Phone)
-	value := candidate.Phone + "|" + candidate.GatewayID
-	raw, err := a.Client.Eval(ctx, claimScript, []string{claimKey, counterKey}, limit, a.TTL.Milliseconds(), value).Result()
-	if err != nil {
-		return cti.RuntimeAllocation{}, err
-	}
-	values, ok := raw.([]any)
-	if !ok || len(values) < 2 {
-		return cti.RuntimeAllocation{}, fmt.Errorf("unexpected redis claim response: %v", raw)
-	}
-	accepted, _ := strconv.Atoi(fmt.Sprint(values[0]))
-	if accepted != 1 {
-		return cti.RuntimeAllocation{}, ErrRuntimeConcurrencyExhausted
-	}
-	return cti.RuntimeAllocation{CallID: req.CallID, MerchantID: req.MerchantID, Caller: candidate.Phone, GatewayID: candidate.GatewayID, ClaimKey: claimKey}, nil
+
+	// 整组号码试选均告失败后，抛出最后一次捕获到的错误（或 ErrRuntimeConcurrencyExhausted）
+	return cti.RuntimeAllocation{}, lastErr
 }
 
 // Release 幂等释放号码并发槽位。

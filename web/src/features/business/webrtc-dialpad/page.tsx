@@ -1,8 +1,8 @@
 import { Button, Card, Col, Form, Input, Row, Space, Tag, Typography, message } from 'antd'
 import { useEffect, useRef, useState } from 'react'
-import JsSIP from 'jssip'
 import { useAuthStore } from '@/store/auth'
 import { getMerchantDetail } from '@/api/operate'
+import { YunshuCallSDK } from '@/sdk/yunshu-call-sdk'
 
 export function WebRtcDialpadPage() {
   const username = useAuthStore((state) => state.username)
@@ -22,20 +22,19 @@ export function WebRtcDialpadPage() {
   const [callee, setCallee] = useState('')
   const [callDuration, setCallDuration] = useState(0)
 
-  // WebRTC / JsSIP instances
-  const [ua, setUa] = useState<JsSIP.UA | null>(null)
-  const [session, setSession] = useState<any | null>(null)
+  // WebRTC SDK instance & States
+  const sdkRef = useRef<YunshuCallSDK | null>(null)
   const [registered, setRegistered] = useState(false)
   const [regState, setRegState] = useState<'disconnected' | 'connecting' | 'registered' | 'failed'>('disconnected')
   const [callState, setCallState] = useState<'idle' | 'dialing' | 'ringing' | 'connected' | 'ended'>('idle')
+  const [incomingCaller, setIncomingCaller] = useState<string | null>(null)
   const [logs, setLogs] = useState<string[]>([])
 
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const timerRef = useRef<any>(null)
 
   const addLog = (msg: string) => {
-    const time = new Date().toLocaleTimeString()
-    setLogs((prev) => [`[${time}] ${msg}`, ...prev.slice(0, 99)])
+    setLogs((prev) => [msg, ...prev.slice(0, 99)])
   }
 
   // Load merchant-specific SIP domain dynamically
@@ -47,7 +46,7 @@ export function WebRtcDialpadPage() {
           .then((merchant) => {
             if (merchant && merchant.sipDomain) {
               setDomain(merchant.sipDomain)
-              addLog(`已自动加载商户 [${merchant.name || mid}] 的 SIP 域: ${merchant.sipDomain}`)
+              addLog(`[YunshuCallSDK][${new Date().toLocaleTimeString()}] 已自动加载商户 [${merchant.name || mid}] 的 SIP 域: ${merchant.sipDomain}`)
             }
           })
           .catch((err) => {
@@ -77,152 +76,126 @@ export function WebRtcDialpadPage() {
     }
   }, [callState])
 
-  // Clean up UA on unmount
+  // Clean up SDK on unmount
   useEffect(() => {
     return () => {
-      if (ua) {
+      if (sdkRef.current) {
         addLog('正在清理 WebRTC 客户端连接...')
-        ua.stop()
+        sdkRef.current.destroy()
       }
     }
-  }, [ua])
+  }, [])
 
   const handleRegister = () => {
-    if (ua) {
+    if (sdkRef.current) {
       addLog('正在断开现有连接...')
-      ua.stop()
-      setUa(null)
+      sdkRef.current.destroy()
+      sdkRef.current = null
       setRegistered(false)
       setRegState('disconnected')
     }
 
-    addLog(`正在初始化 WebRTC 客户端: sip:${ext}@${domain}`)
+    addLog(`正在初始化 WebRTC SDK: sip:${ext}@${domain}`)
     try {
-      const socket = new JsSIP.WebSocketInterface(wsUrl)
-      const config = {
-        sockets: [socket],
-        uri: `sip:${ext}@${domain}`,
-        password: password,
-        register: true,
-        session_timers: false,
-      }
+      const sdk = new YunshuCallSDK({
+        wsUrl,
+        ext,
+        password,
+        domain,
+        audioElement: audioRef.current || undefined,
+      })
 
-      const newUa = new JsSIP.UA(config)
-
-      newUa.on('connecting', () => {
+      sdk.on('connecting', () => {
         setRegState('connecting')
-        addLog('SIP 正在连接 WebSockets 服务器...')
       })
 
-      newUa.on('connected', () => {
-        addLog('WebSockets 连接已建立')
+      sdk.on('connected', () => {
+        // Will be outputted via log event
       })
 
-      newUa.on('disconnected', () => {
+      sdk.on('disconnected', () => {
         setRegState('disconnected')
         setRegistered(false)
-        addLog('SIP 连接已断开')
       })
 
-      newUa.on('registered', () => {
+      sdk.on('registered', () => {
         setRegState('registered')
         setRegistered(true)
-        addLog('SIP 注册成功! 随时可以呼入或呼出')
         message.success(`分机 ${ext} 注册成功`)
       })
 
-      newUa.on('unregistered', () => {
+      sdk.on('unregistered', () => {
         setRegState('disconnected')
         setRegistered(false)
-        addLog('SIP 分机已注销')
       })
 
-      newUa.on('registrationFailed', (e: any) => {
+      sdk.on('registrationFailed', (cause: any) => {
         setRegState('failed')
         setRegistered(false)
-        addLog(`SIP 注册失败: ${e.cause || '未知原因'}`)
-        message.error(`注册失败: ${e.cause || '网络错误'}`)
+        message.error(`注册失败: ${cause || '网络验证未通过'}`)
       })
 
-      newUa.on('newRTCSession', (e: any) => {
-        const rtcSession = e.session
-        setSession(rtcSession)
+      sdk.on('callDialing', (remoteUser) => {
+        setCallState('dialing')
+        setIncomingCaller(null)
+      })
 
-        if (rtcSession.direction === 'incoming') {
-          addLog(`收到来电: 来自 ${rtcSession.remote_identity.uri.user}`)
-          setCallState('ringing')
-
-          // 自动应答或者提示
-          message.info(`收到分机来电: ${rtcSession.remote_identity.uri.user}`)
-        } else {
-          addLog(`正在呼出: 拨号给 ${rtcSession.remote_identity.uri.user}`)
-          setCallState('dialing')
+      sdk.on('callRinging', (data: any) => {
+        setCallState('ringing')
+        if (data && data.direction === 'incoming') {
+          setIncomingCaller(data.remoteUser)
+          message.info(`收到分机来电: ${data.remoteUser}`)
         }
-
-        rtcSession.on('peerconnection', (data: any) => {
-          addLog('WebRTC PeerConnection 建立，开始协商媒体流...')
-          data.peerconnection.addEventListener('track', (event: any) => {
-            addLog('检测到远端媒体音轨，绑定到音频播放器')
-            if (audioRef.current && event.streams[0]) {
-              audioRef.current.srcObject = event.streams[0]
-              audioRef.current.play().catch((err) => {
-                addLog(`自动播放音频流失败: ${err.message}`)
-              })
-            }
-          })
-        })
-
-        rtcSession.on('connecting', () => {
-          addLog('WebRTC 信令呼叫中...')
-        })
-
-        rtcSession.on('progress', () => {
-          setCallState('ringing')
-          addLog('呼叫进行中，对方振铃中...')
-        })
-
-        rtcSession.on('accepted', () => {
-          setCallState('connected')
-          addLog('通话已接通! 媒体协商完成')
-          message.success('通话已接通')
-        })
-
-        rtcSession.on('failed', (data: any) => {
-          setCallState('ended')
-          addLog(`呼叫失败/拒绝: ${data.cause}`)
-          message.error(`呼叫未成功: ${data.cause}`)
-          setTimeout(() => setCallState('idle'), 2000)
-        })
-
-        rtcSession.on('ended', () => {
-          setCallState('ended')
-          addLog('通话结束')
-          message.info('通话结束')
-          setTimeout(() => setCallState('idle'), 2000)
-        })
       })
 
-      newUa.start()
-      setUa(newUa)
+      sdk.on('callConnected', () => {
+        setCallState('connected')
+        message.success('通话已接通')
+      })
+
+      sdk.on('callFailed', (cause: any) => {
+        setCallState('ended')
+        message.error(`呼叫未成功: ${cause || '被叫拒接/无人应答'}`)
+        setTimeout(() => {
+          setCallState('idle')
+          setIncomingCaller(null)
+        }, 2000)
+      })
+
+      sdk.on('callEnded', () => {
+        setCallState('ended')
+        message.info('通话结束')
+        setTimeout(() => {
+          setCallState('idle')
+          setIncomingCaller(null)
+        }, 2000)
+      })
+
+      sdk.on('log', (msg: string) => {
+        addLog(msg)
+      })
+
+      sdk.register()
+      sdkRef.current = sdk
     } catch (e: any) {
-      addLog(`连接配置异常: ${e.message}`)
+      addLog(`[Error] 连接配置异常: ${e.message}`)
       message.error(`配置异常: ${e.message}`)
     }
   }
 
   const handleDisconnect = () => {
-    if (ua) {
-      ua.stop()
-      setUa(null)
+    if (sdkRef.current) {
+      sdkRef.current.destroy()
+      sdkRef.current = null
       setRegistered(false)
       setRegState('disconnected')
-      addLog('已手动断开客户端连接')
+      addLog(`[YunshuCallSDK][${new Date().toLocaleTimeString()}] 已手动断开客户端连接`)
       message.info('连接已关闭')
     }
   }
 
   const handleCall = () => {
-    if (!ua || !registered) {
+    if (!sdkRef.current || !registered) {
       message.warning('请先注册 SIP 分机后再拨号')
       return
     }
@@ -230,39 +203,27 @@ export function WebRtcDialpadPage() {
       message.warning('请输入目标呼叫号码')
       return
     }
-
-    addLog(`开始呼叫号码: ${callee}`)
-    const options = {
-      mediaConstraints: { audio: true, video: false },
-      rtcOfferConstraints: { offerToReceiveAudio: true, offerToReceiveVideo: false },
-    }
-    ua.call(`sip:${callee}@${domain}`, options)
+    sdkRef.current.call(callee)
   }
 
   const handleHangup = () => {
-    if (session) {
-      addLog('正在挂断当前通话...')
-      session.terminate()
+    if (sdkRef.current) {
+      sdkRef.current.hangup()
     } else {
       setCallState('idle')
     }
   }
 
   const handleAnswer = () => {
-    if (session && callState === 'ringing') {
-      addLog('接听来电...')
-      const options = {
-        mediaConstraints: { audio: true, video: false },
-      }
-      session.answer(options)
+    if (sdkRef.current && callState === 'ringing') {
+      sdkRef.current.answer()
     }
   }
 
   const appendDigit = (digit: string) => {
     setCallee((prev) => prev + digit)
-    if (session && callState === 'connected') {
-      addLog(`发送 DTMF 按键: ${digit}`)
-      session.sendDTMF(digit)
+    if (sdkRef.current && callState === 'connected') {
+      sdkRef.current.sendDTMF(digit)
     }
   }
 
@@ -276,19 +237,13 @@ export function WebRtcDialpadPage() {
     setExt(selectedExt)
     setPassword('123456')
     setDomain('sip.yunshu.local')
-    addLog(`已载入预设分机 ${selectedExt} 配置`)
+    addLog(`[YunshuCallSDK][${new Date().toLocaleTimeString()}] 已载入预设分机 ${selectedExt} 配置`)
   }
 
   return (
     <Space direction="vertical" size="large" className="w-full">
       {/* Hidden Audio element to play remote WebRTC call streams */}
       <audio ref={audioRef} autoPlay id="remoteAudio" style={{ display: 'none' }} />
-
-      <div className="mb-2">
-        <Typography.Text type="secondary">
-          利用 SIP-over-WebSocket 直接在浏览器中注册分机并进行呼叫测试。请确保浏览器已授予麦克风权限。
-        </Typography.Text>
-      </div>
 
       <Row gutter={[24, 24]}>
         {/* SIP Registration Settings */}
@@ -316,7 +271,7 @@ export function WebRtcDialpadPage() {
                 </Form.Item>
 
                 <div className="mb-4">
-                  <Typography.Text type="secondary" className="block mb-2">快速载入本地测试账户：</Typography.Text>
+                  <span className="block mb-2 text-xs font-semibold text-slate-500">快速载入本地测试账户：</span>
                   <Space>
                     <Button size="small" onClick={() => fillPreset('1001')}>分机 1001</Button>
                     <Button size="small" onClick={() => fillPreset('1002')}>分机 1002</Button>
@@ -390,12 +345,12 @@ export function WebRtcDialpadPage() {
                 <div style={{ fontSize: '12px', color: '#888', textTransform: 'uppercase', letterSpacing: '1px' }}>
                   {callState === 'idle' && '待机空闲'}
                   {callState === 'dialing' && '正在起呼...'}
-                  {callState === 'ringing' && '对方振铃中...'}
+                  {callState === 'ringing' && (incomingCaller ? `来电: ${incomingCaller}` : '对方振铃中...')}
                   {callState === 'connected' && '通话中'}
                   {callState === 'ended' && '已挂断'}
                 </div>
                 <div style={{ fontSize: '28px', fontWeight: 'bold', margin: '8px 0', minHeight: '38px', color: '#333' }}>
-                  {callee || '请输入号码'}
+                  {callee || (incomingCaller ? incomingCaller : '请输入号码')}
                 </div>
                 <div style={{ fontSize: '14px', color: '#1890ff', fontWeight: '500' }}>
                   {callState === 'connected' ? formatDuration(callDuration) : '00:00'}
@@ -445,7 +400,7 @@ export function WebRtcDialpadPage() {
                   清除
                 </Button>
 
-                {callState === 'ringing' && session?.direction === 'incoming' ? (
+                {callState === 'ringing' && incomingCaller ? (
                   <Button
                     type="primary"
                     shape="circle"

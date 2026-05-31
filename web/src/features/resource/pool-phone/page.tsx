@@ -106,10 +106,7 @@ export function PoolPhonePage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护号码归属号码池、并发限制、呼叫上限和启停状态。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'pool-phone'] })}>刷新</Button>
           <PermissionGate permission="operate:phone:read">

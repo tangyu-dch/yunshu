@@ -200,6 +200,37 @@ func (s *MerchantManagementService) Enable(ctx context.Context, id int, enable b
 	return MerchantMutationResult{Merchant: saved}, nil
 }
 
+// ResetAPIKeys 重新生成并持久化商户的 AppKey 与 AppSecret
+func (s *MerchantManagementService) ResetAPIKeys(ctx context.Context, id int) (MerchantMutationResult, error) {
+	logger := s.logger()
+	logger.Info("商户端开始重置 API 密钥对", "id", id)
+
+	tenant, _ := contracts.TenantFromContext(ctx)
+	if !tenant.Internal && tenant.MerchantID != "" {
+		mID, err := strconv.Atoi(tenant.MerchantID)
+		if err != nil || mID != id {
+			logger.Warn("非法的越权密钥重置请求", "requestMchId", id, "tokenMchId", tenant.MerchantID)
+			return MerchantMutationResult{}, errors.New("forbidden")
+		}
+	}
+
+	merchant, err := s.Repository.GetByID(ctx, id)
+	if err != nil {
+		logger.Warn("密钥重置失败，商户不存在", "id", id, "error", err.Error())
+		return MerchantMutationResult{}, err
+	}
+
+	merchant.AppKey, merchant.AppSecret = GenerateAppKeyPair()
+	saved, err := s.Repository.Save(ctx, merchant)
+	if err != nil {
+		logger.Error("密钥重置并持久化失败", "id", id, "error", err.Error())
+		return MerchantMutationResult{}, err
+	}
+
+	logger.Info("密钥重置并持久化完成", "id", saved.ID, "appKey", saved.AppKey)
+	return MerchantMutationResult{Merchant: saved}, nil
+}
+
 func (s *MerchantManagementService) logger() *slog.Logger {
 	if s.Logger != nil {
 		return s.Logger

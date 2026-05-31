@@ -136,6 +136,7 @@ type AiFlowResp = {
   description?: string
   prompt?: string
   updatedAt?: string
+  flowGraph?: any
 }
 
 export async function fetchGatewayPage(pageNumber = 1, pageSize = 50) {
@@ -509,6 +510,7 @@ export async function fetchAiFlows(pageNumber = 1, pageSize = 50) {
       updatedAt: item.updatedAt || '',
       prompt: item.prompt || '',
       description: item.description || '',
+      flowGraph: item.flowGraph,
     })),
   }
 }
@@ -1155,6 +1157,7 @@ export type Rtpengine = {
   disabled: boolean
   weight: number
   description: string
+  status?: 'online' | 'offline' | 'disabled'
 }
 
 export type RtpenginePageRequest = {
@@ -1191,6 +1194,11 @@ export async function deleteRtpengines(payload: { id: number }[]) {
 
 export async function reloadRtpengines() {
   const { data } = await http.post('/operate/kamailio/rtpengine/reload')
+  return data
+}
+
+export async function resetMerchantApiKeys(id: number) {
+  const { data } = await http.post<MerchantResp>(`/merchant/reset-api-key/${id}`)
   return data
 }
 

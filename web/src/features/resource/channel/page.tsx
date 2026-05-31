@@ -116,10 +116,7 @@ export function ChannelPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护外呼路由对应的物理渠道及盲区禁拨规则配置。
-        </Typography.Text>
+      <div className="flex justify-end items-center mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'channel'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>

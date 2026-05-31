@@ -20,7 +20,11 @@ import (
 
 const (
 	StatusSettled = "settled"
+	StatusNoOp    = "no_op"
 )
+
+// ErrBillingOverviewNotFound 表示商户的账费余额总览不存在，在进行结算扣除时用作显式的 no-op 回退标记。
+var ErrBillingOverviewNotFound = errors.New("merchant billing overview not found")
 
 // SettlementJob 表示一条结算任务。
 type SettlementJob struct {
@@ -46,6 +50,7 @@ type SettlementStore interface {
 	DebitBalance(ctx context.Context, merchantID int, amount float64) (before float64, after float64, err error)
 	MarkSettled(ctx context.Context, id string, before, after float64, settledAt time.Time) error
 	MarkFailed(ctx context.Context, id string, reason string) error
+	MarkNoOp(ctx context.Context, id string, reason string) error
 }
 
 // MemoryStore 是本地测试用结算仓储。
@@ -79,7 +84,11 @@ func (s *SettlementMemoryStore) SaveFromOutbox(_ context.Context, entry Entry) (
 func (s *SettlementMemoryStore) DebitBalance(_ context.Context, merchantID int, amount float64) (float64, float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	before := s.Balance[merchantID]
+	before, ok := s.Balance[merchantID]
+	if !ok {
+		// 为了使内存存储支持测试用 no-op 逻辑：如果商户没有余额记录（等同于没有overview），则抛出哨兵错误
+		return 0, 0, ErrBillingOverviewNotFound
+	}
 	after := before - amount
 	s.Balance[merchantID] = after
 	return before, after, nil
@@ -112,6 +121,21 @@ func (s *SettlementMemoryStore) MarkFailed(_ context.Context, id string, reason 
 	}
 	job.Status = StatusFailed
 	job.LastError = reason
+	s.SettlementJobs[job.CallID] = job
+	return nil
+}
+
+// MarkNoOp 标记结算任务为无操作（no-op）状态。
+func (s *SettlementMemoryStore) MarkNoOp(_ context.Context, id string, reason string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, ok := s.jobByID(id)
+	if !ok {
+		return fmt.Errorf("settlement job not found: %s", id)
+	}
+	job.Status = StatusNoOp
+	job.LastError = reason
+	job.SettledAt = time.Now().UTC()
 	s.SettlementJobs[job.CallID] = job
 	return nil
 }
@@ -225,7 +249,7 @@ func (s *SettlementGormStore) SaveFromOutbox(ctx context.Context, entry Entry) (
 	return job, nil
 }
 
-// DebitBalance 扣减商户余额。
+// DebitBalance 扣减商户余额。当余额总览不存在时，向外抛出 ErrBillingOverviewNotFound。
 func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, amount float64) (float64, float64, error) {
 	if amount <= 0 {
 		return 0, 0, nil
@@ -238,8 +262,8 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 			Where("merchant_id = ?", merchantID).
 			First(&billing).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				s.Logger.Info("商户账单总览不存在，跳过余额扣减", "merchantId", merchantID, "amount", amount)
-				return nil
+				s.Logger.Info("商户账单总览不存在，准备回退为 no-op 结算逻辑", "merchantId", merchantID, "amount", amount)
+				return ErrBillingOverviewNotFound
 			}
 			return err
 		}
@@ -257,6 +281,9 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrBillingOverviewNotFound) {
+			return 0, 0, err
+		}
 		s.Logger.Error("商户余额扣减失败", "merchantId", merchantID, "amount", amount, "error", err.Error())
 		return 0, 0, err
 	}
@@ -283,6 +310,18 @@ func (s *SettlementGormStore) MarkFailed(ctx context.Context, id string, reason 
 		Updates(map[string]any{"status": StatusFailed, "last_error": reason, "updated_at": s.now()})
 	if result.Error != nil {
 		s.Logger.Error("结算任务标记失败失败", "jobId", id, "error", result.Error.Error())
+		return result.Error
+	}
+	return nil
+}
+
+// MarkNoOp 标记结算任务为无操作（no-op）状态。
+func (s *SettlementGormStore) MarkNoOp(ctx context.Context, id string, reason string) error {
+	result := s.DB.WithContext(ctx).Model(&SettlementJobModel{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"status": StatusNoOp, "settled_at": s.now(), "updated_at": s.now(), "last_error": reason})
+	if result.Error != nil {
+		s.Logger.Error("结算任务标记 no-op 失败", "jobId", id, "error", result.Error.Error())
 		return result.Error
 	}
 	return nil

@@ -1,8 +1,9 @@
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message } from 'antd'
+import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Tag, Switch, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import { deleteDispatchers, fetchDispatchers, reloadDispatchers, saveDispatcher } from '@/api/operate'
 
 type DispatcherFormValues = {
@@ -21,9 +22,22 @@ export function DispatcherPage() {
   const [pageSize, setPageSize] = useState(20)
   const [open, setOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
   const [form] = Form.useForm<DispatcherFormValues>()
   const queryClient = useQueryClient()
-  const { data } = useQuery({ queryKey: ['operate', 'dispatcher', pageNumber, pageSize], queryFn: () => fetchDispatchers(pageNumber, pageSize) })
+  const { data, isLoading } = useQuery({ queryKey: ['operate', 'dispatcher', pageNumber, pageSize], queryFn: () => fetchDispatchers(pageNumber, pageSize) })
+
+  const queryFields = useMemo(() => [
+    { key: 'destination', label: '目的地址', type: 'text' as const, placeholder: '请输入 SIP 目的地址模糊搜索' },
+  ], [])
+
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.destination) {
+      records = records.filter((r: any) => String(r.destination).toLowerCase().includes(queryParams.destination.toLowerCase().trim()))
+    }
+    return records
+  }, [data, queryParams])
 
   const reloadMutation = useMutation({
     mutationFn: reloadDispatchers,
@@ -92,10 +106,13 @@ export function DispatcherPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          管理 SIP 路由分发、权重和重载。
-        </Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
+      <div className="flex justify-end items-center mb-2">
         <Space>
           <PermissionGate permission="operate:dispatcher:reload">
             <Button onClick={() => reloadMutation.mutate()}>重载路由</Button>
@@ -110,7 +127,8 @@ export function DispatcherPage() {
       <TableWrap
         title="分发列表"
         rowKey="id"
-        dataSource={data?.records ?? []}
+        loading={isLoading}
+        dataSource={filteredRecords}
         pagination={{
           current: pageNumber,
           pageSize,
@@ -150,6 +168,7 @@ export function DispatcherPage() {
       <Modal
         open={open}
         title={editingId ? '编辑分发项' : '新增分发项'}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -160,27 +179,29 @@ export function DispatcherPage() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ setId: 1, priority: 10, enable: true, flags: 0 }}>
-          <Form.Item name="setId" label="Set ID" rules={[{ required: true, message: '请输入 Set ID' }]}>
-            <InputNumber className="w-full" min={1} />
-          </Form.Item>
-          <Form.Item name="destination" label="目的地址" rules={[{ required: true, message: '请输入目的地址' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="description" label="描述" rules={[{ required: true, message: '请输入描述' }]}>
-            <Input />
-          </Form.Item>
-          <Form.Item name="flags" label="Flags" rules={[{ required: true, message: '请输入 Flags' }]}>
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-          <Form.Item name="priority" label="优先级" rules={[{ required: true, message: '请输入优先级' }]}>
-            <InputNumber className="w-full" min={0} />
-          </Form.Item>
-          <Form.Item name="attrs" label="附加参数">
-            <Input />
-          </Form.Item>
-          <Form.Item name="enable" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item name="setId" label="Set ID" rules={[{ required: true, message: '请输入 Set ID' }]}>
+              <InputNumber className="w-full" min={1} placeholder="例如: 1" />
+            </Form.Item>
+            <Form.Item name="destination" label="目的地址" rules={[{ required: true, message: '请输入目的地址' }]}>
+              <Input placeholder="例如: sip:192.168.1.10:5060" />
+            </Form.Item>
+            <Form.Item name="flags" label="Flags" rules={[{ required: true, message: '请输入 Flags' }]}>
+              <InputNumber className="w-full" min={0} placeholder="例如: 0" />
+            </Form.Item>
+            <Form.Item name="priority" label="优先级" rules={[{ required: true, message: '请输入优先级' }]}>
+              <InputNumber className="w-full" min={0} placeholder="例如: 10" />
+            </Form.Item>
+            <Form.Item name="attrs" label="附加参数">
+              <Input placeholder="路由附加参数" />
+            </Form.Item>
+            <Form.Item name="enable" label="启用" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="description" label="描述" rules={[{ required: true, message: '请输入描述' }]} className="col-span-1 md:col-span-2">
+              <Input placeholder="描述分发项的用途" />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
     </Space>

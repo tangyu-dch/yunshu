@@ -1,8 +1,9 @@
 import { Button, Form, Input, Modal, Popconfirm, Space, Switch, Tag, Typography, Checkbox, message, Row, Col, Card } from 'antd'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import {
   fetchRoles,
   saveRole,
@@ -32,6 +33,10 @@ export function RolePermissionPage() {
   const [selectedRoleCode, setSelectedRoleCode] = useState<string | null>(null)
   const [selectedRoleName, setSelectedRoleName] = useState('')
   const [checkedKeys, setCheckedKeys] = useState<string[]>([])
+
+  const queryFields = useMemo(() => [
+    { key: 'name', label: '角色名称', type: 'text' as const, placeholder: '请输入角色名称搜索' },
+  ], [])
 
   const [form] = Form.useForm<RoleFormValues>()
   const queryClient = useQueryClient()
@@ -150,10 +155,13 @@ export function RolePermissionPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          配置管理平台的用户角色，分配并下发控制台的功能访问权限码。
-        </Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={(params) => setNameQuery(params.name || '')}
+        loading={isRolesLoading}
+      />
+
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'role'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>
@@ -225,6 +233,7 @@ export function RolePermissionPage() {
       <Modal
         open={open}
         title={editingCode ? '编辑角色信息' : '新增角色'}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingCode(null)
@@ -242,25 +251,27 @@ export function RolePermissionPage() {
           }}
           initialValues={{ enable: true }}
         >
-          <Form.Item
-            name="code"
-            label="角色编码 (英文标识)"
-            rules={[
-              { required: true, message: '请输入角色编码' },
-              { pattern: /^[a-zA-Z0-9_]+$/, message: '仅支持字母、数字及下划线' }
-            ]}
-          >
-            <Input disabled={Boolean(editingCode)} placeholder="例如: operate_staff" />
-          </Form.Item>
-          <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
-            <Input placeholder="例如: 运营专员" />
-          </Form.Item>
-          <Form.Item name="description" label="角色描述">
-            <Input.TextArea placeholder="简短描述该角色拥有的工作权限范围" rows={3} />
-          </Form.Item>
-          <Form.Item name="enable" label="启用状态" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item
+              name="code"
+              label="角色编码 (英文标识)"
+              rules={[
+                { required: true, message: '请输入角色编码' },
+                { pattern: /^[a-zA-Z0-9_]+$/, message: '仅支持字母、数字及下划线' }
+              ]}
+            >
+              <Input disabled={Boolean(editingCode)} placeholder="例如: operate_staff" />
+            </Form.Item>
+            <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
+              <Input placeholder="例如: 运营专员" />
+            </Form.Item>
+            <Form.Item name="enable" label="启用状态" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+            <Form.Item name="description" label="角色描述" className="col-span-1 md:col-span-2">
+              <Input.TextArea placeholder="简短描述该角色拥有的工作权限范围" rows={3} />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
 
@@ -277,11 +288,6 @@ export function RolePermissionPage() {
         confirmLoading={savePermsMutation.isPending}
         destroyOnClose
       >
-        <div className="mb-4 flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 rounded text-blue-800 dark:text-blue-300 text-sm">
-          <InfoCircleOutlined className="text-blue-600 dark:text-blue-400" />
-          <span>勾选并配置功能项，下发后该角色下的所有账号将实时生效相应的菜单与操作权限。</span>
-        </div>
-
         <div className="max-h-[500px] overflow-y-auto pr-2 pb-6">
           <Checkbox.Group
             value={checkedKeys}

@@ -1,8 +1,9 @@
 import { Button, Form, Input, InputNumber, Modal, Popconfirm, Space, Switch, Tag, Typography, message, Card } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
 import { fetchFsNodes, saveFsNode, deleteFsNode, toggleFsNodeEnable } from '@/api/operate'
 
 type NodeFormValues = {
@@ -24,11 +25,38 @@ export function FreeSwitchPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form] = Form.useForm<NodeFormValues>()
   const queryClient = useQueryClient()
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   const { data, isLoading } = useQuery({
     queryKey: ['operate', 'freeswitch'],
     queryFn: fetchFsNodes,
+    refetchInterval: 4000, // 每 4 秒定时自动轮询，保证掉线在 5 秒内实时反馈
   })
+
+  const queryFields = useMemo(() => [
+    { key: 'address', label: '节点地址', type: 'text' as const, placeholder: '请输入 IP 或域名模糊搜索' },
+    {
+      key: 'enable',
+      label: '启用状态',
+      type: 'select' as const,
+      options: [
+        { value: true, label: '启用' },
+        { value: false, label: '停用' },
+      ],
+    },
+  ], [])
+
+  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
+  const filteredRecords = useMemo(() => {
+    let records = data ?? []
+    if (queryParams.address) {
+      records = records.filter((r: any) => String(r.address).toLowerCase().includes(queryParams.address.toLowerCase().trim()))
+    }
+    if (queryParams.enable !== undefined) {
+      records = records.filter((r: any) => Boolean(r.enable) === Boolean(queryParams.enable))
+    }
+    return records
+  }, [data, queryParams])
 
 
   const toggleMutation = useMutation({
@@ -184,10 +212,13 @@ export function FreeSwitchPage() {
         </Card>
       </div>
 
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护软交换节点状态、事件租约和运行负载。
-        </Typography.Text>
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
+      <div className="flex justify-end items-center mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'freeswitch'] })}>刷新状态</Button>
           <PermissionGate permission="operate:freeswitch:write">
@@ -200,12 +231,41 @@ export function FreeSwitchPage() {
         title="软交换节点列表"
         rowKey="id"
         loading={isLoading}
-        dataSource={data ?? []}
+        dataSource={filteredRecords}
         columns={[
           { title: '名称', dataIndex: 'name' },
           { title: '内网/外网地址', render: (_, r) => `${r.address}:${r.eslPort} ${r.localAddress ? `(${r.localAddress})` : ''}` },
           { title: '权重 / SetID', render: (_, r) => `Set: ${r.setId ?? 1} / W: ${r.weight ?? 100}` },
-          { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={value === 'active' ? 'green' : value === 'draining' ? 'gold' : 'red'}>{value === 'active' ? '启用中' : value === 'draining' ? '排空中' : '不可用'}</Tag> },
+          { 
+            title: '状态', 
+            render: (_, record: any) => {
+              if (!record.enable) {
+                return <Tag color="default" style={{ border: 'none' }}>已停用</Tag>
+              }
+              if (record.status === 'active') {
+                return (
+                  <Tag color="success" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-emerald-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                    在线启用
+                  </Tag>
+                )
+              }
+              if (record.status === 'draining') {
+                return (
+                  <Tag color="warning" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-amber-600">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse inline-block" />
+                    正在排空
+                  </Tag>
+                )
+              }
+              return (
+                <Tag color="error" style={{ border: 'none' }} className="flex items-center w-fit gap-1 font-semibold text-rose-600 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping inline-block" />
+                  故障离线
+                </Tag>
+              )
+            }
+          },
           { title: '租约持有者', dataIndex: 'owner' },
           { title: '活跃通话/并发上限', render: (_, record) => `${record.activeCalls}/${record.maxChannels}` },
           { title: '更新时间', dataIndex: 'updatedAt', render: (val) => val ? new Date(val).toLocaleString() : '-' },
@@ -235,6 +295,7 @@ export function FreeSwitchPage() {
       <Modal
         open={open}
         title={editingId ? '编辑软交换节点' : '新增软交换节点'}
+        width={640}
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -254,45 +315,47 @@ export function FreeSwitchPage() {
             <Input />
           </Form.Item>
 
-          <Form.Item name="address" label="节点 IP 地址 / 主机名" rules={[{ required: true, message: '请输入节点 IP 地址' }]}>
-            <Input placeholder="例如: 192.168.1.100" />
-          </Form.Item>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+            <Form.Item name="address" label="节点 IP 地址 / 主机名" rules={[{ required: true, message: '请输入节点 IP 地址' }]}>
+              <Input placeholder="例如: 192.168.1.100" />
+            </Form.Item>
 
-          <Form.Item name="localAddress" label="内网 IP 地址 (可选)">
-            <Input placeholder="例如: 10.0.0.10" />
-          </Form.Item>
+            <Form.Item name="localAddress" label="内网 IP 地址 (可选)">
+              <Input placeholder="例如: 10.0.0.10" />
+            </Form.Item>
 
-          <Form.Item name="eslPort" label="ESL 端口" rules={[{ required: true, message: '请输入 ESL 端口' }]}>
-            <InputNumber className="w-full" min={1} max={65535} />
-          </Form.Item>
+            <Form.Item name="eslPort" label="ESL 端口" rules={[{ required: true, message: '请输入 ESL 端口' }]}>
+              <InputNumber className="w-full" min={1} max={65535} />
+            </Form.Item>
 
-          <Form.Item name="sipPort" label="SIP 端口 (可选)">
-            <InputNumber className="w-full" min={1} max={65535} />
-          </Form.Item>
+            <Form.Item name="sipPort" label="SIP 端口 (可选)">
+              <InputNumber className="w-full" min={1} max={65535} />
+            </Form.Item>
 
-          <Form.Item name="cmdPort" label="命令控制端口 (可选)">
-            <InputNumber className="w-full" min={1} max={65535} />
-          </Form.Item>
+            <Form.Item name="cmdPort" label="命令控制端口 (可选)">
+              <InputNumber className="w-full" min={1} max={65535} />
+            </Form.Item>
 
-          <Form.Item name="password" label="ESL 密码" rules={editingId ? [] : [{ required: true, message: '请输入 ESL 密码' }]}>
-            <Input.Password placeholder={editingId ? '留空表示不修改' : '默认: ClueCon'} />
-          </Form.Item>
+            <Form.Item name="password" label="ESL 密码" rules={editingId ? [] : [{ required: true, message: '请输入 ESL 密码' }]}>
+              <Input.Password placeholder={editingId ? '留空表示不修改' : '默认: ClueCon'} />
+            </Form.Item>
 
-          <Form.Item name="setId" label="Set ID (负载组)">
-            <InputNumber className="w-full" min={1} />
-          </Form.Item>
+            <Form.Item name="setId" label="Set ID (负载组)">
+              <InputNumber className="w-full" min={1} />
+            </Form.Item>
 
-          <Form.Item name="weight" label="权重">
-            <InputNumber className="w-full" min={1} />
-          </Form.Item>
+            <Form.Item name="weight" label="权重">
+              <InputNumber className="w-full" min={1} />
+            </Form.Item>
 
-          <Form.Item name="cc" label="最大并发限制 (CC)">
-            <InputNumber className="w-full" min={1} />
-          </Form.Item>
+            <Form.Item name="cc" label="最大并发限制 (CC)">
+              <InputNumber className="w-full" min={1} />
+            </Form.Item>
 
-          <Form.Item name="enable" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
+            <Form.Item name="enable" label="启用" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </div>
         </Form>
       </Modal>
     </Space>

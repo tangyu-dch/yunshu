@@ -99,12 +99,6 @@ export function BillingPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="mb-2">
-        <Typography.Text type="secondary">
-          管理商户预付费/后付费结算模式、信用额度并进行资金充值。
-        </Typography.Text>
-      </div>
-
       <Tabs
         activeKey={activeTab}
         onChange={(key) => {

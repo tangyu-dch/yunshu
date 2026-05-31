@@ -16,15 +16,52 @@ var (
 	ErrAIModelFlowNotFound = errors.New("ai model flow not found")
 )
 
+// CustomReplyRule 表示 AI 流程中的单条回复或按键分支规则。
+type CustomReplyRule struct {
+	ID          string `json:"id"`          // 规则唯一标识 UUID
+	Name        string `json:"name"`        // 规则名称
+	MatchMode   string `json:"matchMode"`   // 匹配模式: "dtmf" | "semantic" | "keyword" | "fallback"
+	Intent      string `json:"intent"`      // 匹配内容: dtmf键(如 "1", "2")，大模型意图标签，或关键词正则
+	ReplyText   string `json:"replyText"`   // 回复播放文本，支持插值 {ai_response}
+	Action      string `json:"action"`      // 执行动作: "continue" | "collect" | "transfer" | "hangup"
+	ActionParam string `json:"actionParam"` // 动作关联参数（例如分机号、技能组ID，或者 collect 时如 "maxDigits=1;timeout=5"）
+}
+
+// AIFlowNode 表示可视化编排流图中的一个功能节点。
+type AIFlowNode struct {
+	ID       string         `json:"id"`       // 节点 UUID
+	Type     string         `json:"type"`     // 节点类型: "start" | "intent" | "dtmf" | "reply" | "condition" | "transfer" | "end"
+	Label    string         `json:"label"`    // 节点显示名称
+	X        float64        `json:"x"`        // 画布物理 X 轴坐标
+	Y        float64        `json:"y"`        // 画布物理 Y 轴坐标
+	Metadata map[string]any `json:"metadata"` // 动态配置。转人工节点、推流节点、TTS节点属性均挂载在此
+}
+
+// AIFlowEdge 表示节点之间的有向连线分支。
+type AIFlowEdge struct {
+	ID           string `json:"id"`           // 连线 ID
+	Source       string `json:"source"`       // 源节点 ID
+	Target       string `json:"target"`       // 目标节点 ID
+	SourceHandle string `json:"sourceHandle"` // 源节点具体哪个分支句柄（如 "dtmf_1", "intent_billing", "has_agent", "no_agent"）
+}
+
+// AIFlowGraph 表示整张可视化编排流图的拓扑数据。
+type AIFlowGraph struct {
+	Nodes []AIFlowNode `json:"nodes"`
+	Edges []AIFlowEdge `json:"edges"`
+}
+
 // AIModelFlow 表示商户侧 AI 流程配置。
 type AIModelFlow struct {
-	ID          int       `json:"id,omitempty"`
-	Name        string    `json:"name"`
-	Prompt      string    `json:"prompt"`
-	Published   bool      `json:"published"`
-	Prechecked  bool      `json:"prechecked"`
-	Description string    `json:"description,omitempty"`
-	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
+	ID            int               `json:"id,omitempty"`
+	Name          string            `json:"name"`
+	Prompt        string            `json:"prompt"`
+	CustomReplies []CustomReplyRule `json:"customReplies"`       // 传统智能自定义回复与按键编排链
+	FlowGraph     *AIFlowGraph      `json:"flowGraph,omitempty"` // 核心可视化流图拓扑数据
+	Published     bool              `json:"published"`
+	Prechecked    bool              `json:"prechecked"`
+	Description   string            `json:"description,omitempty"`
+	UpdatedAt     time.Time         `json:"updatedAt,omitempty"`
 }
 
 // AIModelFlowPageRequest 表示 AI 流程分页查询条件。

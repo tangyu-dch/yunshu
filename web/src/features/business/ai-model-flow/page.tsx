@@ -1,114 +1,158 @@
-import { Button, Form, Input, Modal, Popconfirm, Space, Tag, Typography, message } from 'antd'
+import { Button, Popconfirm, Space, Tag, Typography, message, Tooltip } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
+import { QueryBar } from '@/components/QueryBar'
+import {
+  PlusOutlined,
+  DeleteOutlined,
+  SettingOutlined,
+  ReloadOutlined,
+  PhoneOutlined,
+  CustomerServiceOutlined
+} from '@ant-design/icons'
 import {
   fetchAiFlows,
-  saveAiFlow,
   deleteAiFlows,
-  precheckAiFlow,
   publishAiFlow
 } from '@/api/operate'
 
-type AiFlowFormValues = {
-  id?: number
-  name: string
-  prompt: string
-  description?: string
-}
+const { Text } = Typography
 
 export function AiModelFlowPage() {
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [open, setOpen] = useState(false)
-  const [editingId, setEditingId] = useState<number | null>(null)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
-  const [form] = Form.useForm<AiFlowFormValues>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  // 读取 AI 智能流列表
   const { data, isLoading } = useQuery({
     queryKey: ['merchant', 'ai-flow', pageNumber, pageSize],
     queryFn: () => fetchAiFlows(pageNumber, pageSize),
   })
 
-  const saveMutation = useMutation({
-    mutationFn: async (values: AiFlowFormValues) =>
-      saveAiFlow({
-        id: editingId ?? undefined,
-        name: values.name,
-        prompt: values.prompt,
-        description: values.description,
-      }),
-    onSuccess: async () => {
-      message.success(editingId ? '模型流已更新' : '模型流已创建')
-      setOpen(false)
-      setEditingId(null)
-      form.resetFields()
-      await queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })
+  const queryFields = useMemo(() => [
+    { key: 'name', label: '模型流名称', type: 'text' as const, placeholder: '请输入名称模糊搜索' },
+    {
+      key: 'status',
+      label: '状态',
+      type: 'select' as const,
+      options: [
+        { value: 'published', label: '已发布' },
+        { value: 'draft', label: '草稿 (预检)' }
+      ],
     },
-    onError: (error) => message.error(error instanceof Error ? error.message : '保存失败'),
-  })
+  ], [])
+
+  const filteredRecords = useMemo(() => {
+    let records = data?.records ?? []
+    if (queryParams.name) {
+      records = records.filter((r: any) => String(r.name).toLowerCase().includes(queryParams.name.toLowerCase().trim()))
+    }
+    if (queryParams.status) {
+      records = records.filter((r: any) => r.status === queryParams.status)
+    }
+    return records
+  }, [data, queryParams])
+
+  // 计算看板实时统计数据
+  const stats = useMemo(() => {
+    const total = filteredRecords.length
+    const published = filteredRecords.filter((r: any) => r.status === 'published').length
+    const drafts = total - published
+    return { total, published, drafts }
+  }, [filteredRecords])
 
   const deleteMutation = useMutation({
     mutationFn: async (ids: number[]) => deleteAiFlows(ids),
     onSuccess: async () => {
-      message.success('模型流已删除')
+      message.success('云枢 AI 模型流已删除成功')
       setSelectedIds([])
       await queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '删除失败'),
   })
 
-  const precheckMutation = useMutation({
-    mutationFn: async (flow: any) => precheckAiFlow(flow),
-    onSuccess: async () => {
-      message.success('模型流预检查通过')
-      await queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })
-    },
-    onError: (error) => message.error(error instanceof Error ? error.message : '预检查失败'),
-  })
-
   const publishMutation = useMutation({
     mutationFn: async (id: number) => publishAiFlow(id),
     onSuccess: async () => {
-      message.success('模型流已成功发布')
+      message.success('云枢大模型智能话术流已成功发布上线')
       await queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '发布失败'),
   })
 
-  function openCreate() {
-    setEditingId(null)
-    setOpen(true)
-    setTimeout(() => {
-      form.resetFields()
-    }, 0)
-  }
-
-  function openEdit(id: number) {
-    setEditingId(id)
-    const record = data?.records.find((item) => item.id === id)
-    setOpen(true)
-    setTimeout(() => {
-      form.setFieldsValue({
-        name: record?.name ?? '',
-        // 对于只读的模型流列表，可默认把 description 与 prompt 关联
-        prompt: record?.prompt || '请进行相关质检，检测以下对话的异常情绪：',
-        description: record?.description || '',
-      })
-    }, 0)
-  }
-
   return (
     <Space direction="vertical" size="large" className="w-full">
+      
+      {/* 极客感看板统计卡片区 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Card 1: 总数 */}
+        <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800/80 p-5 rounded-2xl flex items-center justify-between shadow-sm relative overflow-hidden group hover:border-blue-500/40 hover:shadow-md transition-all duration-300">
+          <div className="absolute -right-6 -bottom-6 text-slate-100/50 dark:text-slate-800/10 text-7xl font-bold font-mono pointer-events-none select-none group-hover:scale-110 transition-transform">
+            TOTAL
+          </div>
+          <div className="space-y-1">
+            <span className="text-[12px] text-slate-500 dark:text-slate-400 font-medium tracking-wide block">话术流总部署数</span>
+            <span className="text-3xl font-bold font-mono text-slate-800 dark:text-slate-100">{stats.total}</span>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-100/50 dark:border-blue-800/20 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-sm">
+            <CustomerServiceOutlined style={{ fontSize: '20px' }} />
+          </div>
+        </div>
+
+        {/* Card 2: 已发布 */}
+        <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800/80 p-5 rounded-2xl flex items-center justify-between shadow-sm relative overflow-hidden group hover:border-emerald-500/40 hover:shadow-md transition-all duration-300">
+          <div className="absolute -right-6 -bottom-6 text-slate-100/50 dark:text-slate-800/10 text-7xl font-bold font-mono pointer-events-none select-none group-hover:scale-110 transition-transform">
+            LIVE
+          </div>
+          <div className="space-y-1">
+            <span className="text-[12px] text-slate-500 dark:text-slate-400 font-medium tracking-wide block">线上生产运行环境</span>
+            <span className="text-3xl font-bold font-mono text-emerald-600 dark:text-emerald-400">{stats.published}</span>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100/50 dark:border-emerald-800/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-sm">
+            <PhoneOutlined style={{ fontSize: '20px' }} />
+          </div>
+        </div>
+
+        {/* Card 3: 草稿 */}
+        <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-slate-800/80 p-5 rounded-2xl flex items-center justify-between shadow-sm relative overflow-hidden group hover:border-amber-500/40 hover:shadow-md transition-all duration-300">
+          <div className="absolute -right-6 -bottom-6 text-slate-100/50 dark:text-slate-800/10 text-7xl font-bold font-mono pointer-events-none select-none group-hover:scale-110 transition-transform">
+            DRAFT
+          </div>
+          <div className="space-y-1">
+            <span className="text-[12px] text-slate-500 dark:text-slate-400 font-medium tracking-wide block">草稿与预检状态</span>
+            <span className="text-3xl font-bold font-mono text-amber-600 dark:text-amber-400">{stats.drafts}</span>
+          </div>
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-100/50 dark:border-amber-800/20 flex items-center justify-center text-amber-600 dark:text-amber-400 shadow-sm">
+            <ReloadOutlined style={{ fontSize: '20px' }} />
+          </div>
+        </div>
+      </div>
+
+      <QueryBar
+        fields={queryFields}
+        onSearch={setQueryParams}
+        loading={isLoading}
+      />
+
       <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          管理用于自动质检、业务流分析及大模型意向分层的提示词模型流。
-        </Typography.Text>
+        <div className="text-slate-500 dark:text-slate-400 text-xs">
+          您可以在画布中通过<strong>图形可视化编排</strong>的方式组装智能话术流，实现实时语音推流及排队调度。
+        </div>
         <Space>
-          <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })}>刷新</Button>
+          <Button 
+            icon={<ReloadOutlined />} 
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['merchant', 'ai-flow'] })}
+            className="bg-white text-slate-600 hover:text-slate-850 hover:border-slate-400 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-300 dark:hover:text-slate-100"
+          >
+            刷新列表
+          </Button>
           {selectedIds.length > 0 && (
             <PermissionGate permission="merchant:ai-flow:write">
               <Popconfirm
@@ -117,23 +161,29 @@ export function AiModelFlowPage() {
                 okText="确定"
                 cancelText="取消"
               >
-                <Button danger>批量删除</Button>
+                <Button danger icon={<DeleteOutlined />}>批量删除</Button>
               </Popconfirm>
             </PermissionGate>
           )}
           <PermissionGate permission="merchant:ai-flow:write">
-            <Button type="primary" onClick={openCreate}>
-              新建模型流
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />} 
+              onClick={() => navigate('/merchant/ai-model-flow/designer/new')}
+              style={{ background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', border: 'none' }}
+              className="shadow-[0_4px_14px_rgba(3,105,161,0.4)]"
+            >
+              新建智能语音流
             </Button>
           </PermissionGate>
         </Space>
       </div>
 
       <TableWrap
-        title="模型流列表"
+        title="云枢大模型话术列表"
         rowKey="id"
         loading={isLoading}
-        dataSource={data?.records ?? []}
+        dataSource={filteredRecords}
         rowSelection={{
           selectedRowKeys: selectedIds,
           onChange: (keys: any[]) => setSelectedIds(keys as number[]),
@@ -149,63 +199,95 @@ export function AiModelFlowPage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '模型流 ID', dataIndex: 'id', width: 100 },
-          { title: '名称', dataIndex: 'name' },
-          { title: '商户', dataIndex: 'merchant' },
-          { title: '版本', dataIndex: 'version', width: 120 },
+          { 
+            title: '模型流 ID', 
+            dataIndex: 'id', 
+            width: 100,
+            render: (id) => <span className="font-mono text-slate-600 dark:text-slate-400 font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800/80 px-2 py-0.5 rounded-lg text-xs"># {String(id).padStart(2, '0')}</span>
+          },
+          { 
+            title: '话术名称', 
+            dataIndex: 'name', 
+            render: (val, record: any) => (
+              <Space>
+                {record.status === 'published' ? (
+                  <PhoneOutlined className="text-emerald-500" />
+                ) : (
+                  <CustomerServiceOutlined className="text-amber-500" />
+                )}
+                <span className="text-slate-800 dark:text-slate-200 font-semibold text-[13px]">{val}</span>
+              </Space>
+            )
+          },
+          { 
+            title: '商户作用域', 
+            dataIndex: 'merchant', 
+            render: () => <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold border border-blue-100 bg-blue-50/50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-400">当前商户独立托管</span>
+          },
+          { 
+            title: '触发 Prompt 提示词', 
+            dataIndex: 'prompt', 
+            ellipsis: true,
+            render: (val) => (
+              <Tooltip title={val}>
+                <span className="font-mono text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-900/40 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-800 cursor-help block max-w-[280px] truncate">
+                  {val || '未定义提示词'}
+                </span>
+              </Tooltip>
+            )
+          },
           {
             title: '状态',
             dataIndex: 'status',
-            width: 120,
+            width: 140,
             render: (value: string) => {
-              let color = 'default'
-              let label = '未预检'
               if (value === 'published') {
-                color = 'green'
-                label = '已发布'
-              } else if (value === 'draft') {
-                color = 'gold'
-                label = '草稿 (预检)'
+                return (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm dark:shadow-[0_0_8px_rgba(16,185,129,0.2)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-ping" />
+                    已发布上线
+                  </span>
+                )
               }
-              return <Tag color={color}>{label}</Tag>
+              return (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 shadow-sm dark:shadow-[0_0_8px_rgba(245,158,11,0.2)]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5" />
+                  草稿 (预检)
+                </span>
+              )
             },
           },
-          { title: '更新时间', dataIndex: 'updatedAt', width: 180 },
+          { 
+            title: '最新修改时间', 
+            dataIndex: 'updatedAt', 
+            width: 180,
+            render: (val) => <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{val ? val.replace('T', ' ').slice(0, 19) : '-'}</span>
+          },
           {
-            title: '操作',
             key: 'actions',
-            width: 280,
+            width: 260,
             render: (_, record) => {
               const isPublished = record.status === 'published'
-              const isDraft = record.status === 'draft'
               return (
                 <Space size="middle">
-                  <PermissionGate permission="merchant:ai-flow:precheck">
-                    <Button
-                      type="link"
-                      onClick={() =>
-                        precheckMutation.mutate({
-                          id: record.id,
-                          name: record.name,
-                          prompt: '请进行相关质检，检测对话异常：',
-                        })
-                      }
-                    >
-                      预检
-                    </Button>
-                  </PermissionGate>
                   <PermissionGate permission="merchant:ai-flow:publish">
                     <Button
                       type="link"
                       disabled={isPublished}
                       onClick={() => publishMutation.mutate(record.id)}
+                      className={isPublished ? 'text-slate-400 dark:text-slate-600 cursor-not-allowed p-0' : 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 font-medium p-0'}
                     >
-                      发布
+                      发布上线
                     </Button>
                   </PermissionGate>
                   <PermissionGate permission="merchant:ai-flow:write">
-                    <Button type="link" onClick={() => openEdit(record.id)}>
-                      编辑
+                    <Button 
+                      type="link" 
+                      icon={<SettingOutlined />} 
+                      onClick={() => navigate(`/merchant/ai-model-flow/designer/${record.id}`)}
+                      className="text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300 font-medium p-0"
+                    >
+                      编排画布
                     </Button>
                     <Popconfirm
                       title="确定要删除该模型流吗？"
@@ -213,7 +295,7 @@ export function AiModelFlowPage() {
                       okText="确定"
                       cancelText="取消"
                     >
-                      <Button type="link" danger>
+                      <Button type="link" danger style={{ padding: 0 }}>
                         删除
                       </Button>
                     </Popconfirm>
@@ -224,44 +306,6 @@ export function AiModelFlowPage() {
           },
         ]}
       />
-
-      <Modal
-        title={editingId ? '编辑 AI 模型流' : '创建 AI 模型流'}
-        open={open}
-        onCancel={() => {
-          setOpen(false)
-          setEditingId(null)
-        }}
-        onOk={() => form.submit()}
-        confirmLoading={saveMutation.isPending}
-        destroyOnClose
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
-          <Form.Item
-            name="name"
-            label="模型流名称"
-            rules={[{ required: true, message: '请输入模型流名称' }]}
-          >
-            <Input placeholder="例如: 客户意向智能分析模型" />
-          </Form.Item>
-
-          <Form.Item
-            name="prompt"
-            label="提示词 (Prompt)"
-            rules={[{ required: true, message: '请输入模型提示词 Prompt' }]}
-          >
-            <Input.TextArea
-              rows={6}
-              placeholder="编写发送给大语言模型的系统提示词 Prompt。例如:
-你是一个智能客服分析助手，分析以下对话内容中用户的意向，并以 JSON 格式输出意向等级 (A/B/C/D)..."
-            />
-          </Form.Item>
-
-          <Form.Item name="description" label="描述 (可选)">
-            <Input.TextArea placeholder="该模型流的用途或修改备注" rows={2} />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Space>
   )
 }

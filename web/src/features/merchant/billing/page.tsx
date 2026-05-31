@@ -87,12 +87,6 @@ export function MerchantBillingPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="mb-2">
-        <Typography.Text type="secondary">
-          查看商户当前的计费套餐资费标准、账务余额以及资金充值历史流水记录。
-        </Typography.Text>
-      </div>
-
       {/* Cards for Overview */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>

@@ -503,8 +503,7 @@ export function MerchantPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">全局管控入驻商户主体资质、登录账号规则、API 对接秘钥以及并发坐席配额。</Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isPending}>刷新</Button>
           <PermissionGate permission="operate:merchant:write">

@@ -20,7 +20,8 @@ import {
 	EyeOutlined,
 	EyeInvisibleOutlined,
 	KeyOutlined,
-	ClusterOutlined
+	ClusterOutlined,
+	ApiOutlined
 } from '@ant-design/icons'
 import {
 	Avatar,
@@ -91,6 +92,7 @@ const navItems: NavItem[] = [
       { key: '/operate/role', icon: <TeamOutlined />, label: '角色权限', permission: 'operate:role:read' },
       { key: '/operate/extension', icon: <TeamOutlined />, label: '分机管理', permission: 'operate:extension:read' },
       { key: '/operate/call-record', icon: <FileSearchOutlined />, label: '通话记录', permission: 'operate:merchant:read' },
+      { key: '/operate/api-doc', icon: <ApiOutlined />, label: '运营 API 浏览器', permission: 'operate:account:read' },
     ],
   },
   {
@@ -167,6 +169,7 @@ const navItems: NavItem[] = [
     children: [
       { key: '/merchant/account', icon: <TeamOutlined />, label: '账号管理', permission: 'merchant:account:read' },
       { key: '/merchant/billing', icon: <DatabaseOutlined />, label: '套餐账务' },
+      { key: '/merchant/api-doc', icon: <DatabaseOutlined />, label: '接口对接' },
     ],
   },
 ]
@@ -192,6 +195,7 @@ const breadcrumbMap: Record<string, string[]> = {
   '/operate/billing': ['费率财务', '账务与充值'],
   '/operate/blacklist': ['安全防范', '黑名单管理'],
   '/operate/whitelist': ['安全防范', '白名单管理'],
+  '/operate/api-doc': ['系统运营', '运营 API 浏览器'],
   '/merchant/batch-call-task': ['外呼业务', '批量外呼任务'],
   '/merchant/batch-call-dialpad': ['外呼业务', '批量话务拨号盘'],
   '/merchant/webrtc-dialpad': ['外呼业务', 'WebRTC 坐席拨号盘'],
@@ -201,6 +205,7 @@ const breadcrumbMap: Record<string, string[]> = {
   '/merchant/skill-group': ['坐席技能', '坐席技能组配置'],
   '/merchant/account': ['系统设置', '账号与分权'],
   '/merchant/billing': ['系统设置', '套餐计费账单'],
+  '/merchant/api-doc': ['系统设置', 'API 开发对接中心'],
 }
 
 function filterNavItems(items: NavItem[], tenant: any): NavItem[] {

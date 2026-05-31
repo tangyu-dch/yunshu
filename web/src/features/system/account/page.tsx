@@ -106,10 +106,7 @@ export function AccountPage() {
 
   return (
     <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-between items-center mb-2">
-        <Typography.Text type="secondary">
-          维护平台级管理员、运营人员以及商户的管理员与坐席登录账号。
-        </Typography.Text>
+      <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'account'] })}>刷新</Button>
           <Button type="primary" onClick={openCreate}>

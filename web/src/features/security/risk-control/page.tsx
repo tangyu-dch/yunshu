@@ -403,9 +403,6 @@ export function RiskControlPage() {
             <Typography.Title level={4} style={{ color: 'var(--text-primary)', margin: 0, fontWeight: 600 }}>
               选号逻辑与风控管理
             </Typography.Title>
-            <Typography.Text style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px', display: 'block' }}>
-              统一调度号码分发路由与外呼策略，包含伪随机、优先级、物理并发等选号模式，外加呼叫盲区、高频率限制等核心安全风控拦截。
-            </Typography.Text>
           </div>
         </div>
       </Card>
@@ -483,13 +480,6 @@ export function RiskControlPage() {
                 }}
               >
                 <div style={{ padding: '8px' }}>
-                  <Alert
-                    message="选号决策决策说明"
-                    description="呼叫路由在选号时沿以下链路决策：技能组接收请求 -> 提取绑定号码池(及对应分配分发策略) -> 筛选可用网关 -> 分流至指定渠道线路。"
-                    type="info"
-                    showIcon
-                    className="mb-4"
-                  />
                   {poolsData?.records && poolsData.records.length > 0 ? (
                     <div className="flex flex-col gap-6" style={{ marginTop: '16px' }}>
                       {poolsData.records.filter((p: any) => p.enable).map((pool: any) => {
@@ -722,23 +712,7 @@ export function RiskControlPage() {
             </Card>
           ) : (
             <Card className="shadow-soft" bordered={false} style={{ borderRadius: '8px', padding: '16px' }}>
-              <div className="flex justify-between items-center gap-4 mb-6">
-                <Alert
-                  message={<strong>配置提示与关联指南</strong>}
-                  description={
-                    <span>
-                      风控策略需要先在“风控规则设置”中创建。在下方列表中，您可以将创建好的配置绑定至指定的商户。绑定后，该商户发起的全部外呼选号都将受此策略约束。如果您需要查看所有的商户状态或添加新商户，请直接前往{' '}
-                      <Link to="/operate/merchant" style={{ fontWeight: 500, textDecoration: 'underline' }}>
-                        [商户配置]
-                      </Link>{' '}
-                      页面进行维护。
-                    </span>
-                  }
-                  type="info"
-                  showIcon
-                  className="flex-1"
-                  style={{ borderRadius: '8px' }}
-                />
+              <div className="flex justify-end mb-6">
                 <PermissionGate permission="operate:riskcontrol:write">
                   <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => { setActiveTab('2'); openCreateRisk(); }}>
                     新增风控策略
@@ -799,19 +773,6 @@ export function RiskControlPage() {
           <Form.Item name="type" hidden><InputNumber /></Form.Item>
           <Form.Item name="gatewayId" hidden><InputNumber /></Form.Item>
           <Form.Item name="enable" hidden valuePropName="checked"><Switch /></Form.Item>
-
-          <Alert
-            message="选号分发策略选择说明"
-            description={
-              <div>
-                <p>1. <b>CONCURRENCY（并发优先）</b>：优先从当前活跃并发占比最小的可用物理号码中分发话务。</p>
-                <p>2. <b>PRIORITY（网关优先级）</b>：话务沿候选网关设置的优先级数值升序排列投递，优先路由低优先级（便宜/高质量）网关号码。</p>
-                <p>3. <b>RANDOM（伪随机哈希均分）</b>：基于 CallID 对可用候选进行伪随机排序，话务在号码间被完全均匀打散轮询。</p>
-              </div>
-            }
-            type="info"
-            className="mb-4"
-          />
 
           <Form.Item name="selectionStrategy" label="号码池分发策略" rules={[{ required: true, message: '请选择分发策略' }]}>
             <Select style={{ width: '100%' }}>
@@ -906,8 +867,7 @@ export function RiskControlPage() {
               {({ getFieldValue }) =>
                 getFieldValue('calleeFrequencyFlag') && (
                   <div>
-                    <div className="flex justify-between items-center mb-3">
-                      <Typography.Text type="secondary">配置多时间维度的频次统计阈值，达到限制即静默绕过或拦截。</Typography.Text>
+                    <div className="flex justify-end mb-3">
                       <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={addFreqRule}>
                         添加拦截条目
                       </Button>
@@ -966,13 +926,6 @@ export function RiskControlPage() {
         confirmLoading={saveBindingsMutation.isPending}
         destroyOnClose
       >
-        <Alert
-          message="绑定说明"
-          description="将此风控策略规则和拦截条件绑定至指定的商户。绑定后，该商户发起的全部外呼选号过程都将强制经过此策略进行安全校验拦截。"
-          type="warning"
-          showIcon
-          className="mb-4"
-        />
 
         <div className="mb-3">
           <Typography.Text strong>选择要应用此策略的商户列表 (支持多选):</Typography.Text>
