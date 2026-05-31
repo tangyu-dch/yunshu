@@ -1202,3 +1202,37 @@ export async function resetMerchantApiKeys(id: number) {
   return data
 }
 
+// ----------------------------------------------------
+// 大模型厂商与 API 配置接口
+// ----------------------------------------------------
+
+export type AiModelConfigItem = {
+  id?: number
+  name: string
+  provider: string
+  modelName: string
+  endpoint: string
+  apiKey: string
+  temperature: number
+  systemPrompt: string
+  description?: string
+}
+
+export async function fetchAiModelConfigs() {
+  const { data } = await http.get<AiModelConfigItem[]>('/merchant/ai-model-config/list')
+  return data
+}
+
+export async function saveAiModelConfig(payload: AiModelConfigItem) {
+  const path = payload.id ? '/merchant/ai-model-config/save' : '/merchant/ai-model-config/add'
+  const method = payload.id ? 'post' : 'put'
+  const { data } = await http[method](path, payload)
+  return data
+}
+
+export async function deleteAiModelConfigs(ids: number[]) {
+  const { data } = await http.post('/merchant/ai-model-config/delete', ids.map(id => ({ id })))
+  return data
+}
+
+

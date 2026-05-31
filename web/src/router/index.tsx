@@ -146,6 +146,7 @@ export const router = createBrowserRouter([
       { path: 'merchant/webrtc-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><WebRtcDialpadPage /></RequirePermission> },
       { path: 'merchant/call-record', element: <RequirePermission permission="merchant:call-record:read"><CallRecordPage /></RequirePermission> },
       { path: 'merchant/ai-model-flow', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },
+      { path: 'merchant/ai-model-config', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },
 
       { path: 'merchant/skill-group', element: <RequirePermission permission="merchant:skill-group:read"><SkillGroupPage /></RequirePermission> },
       { path: 'merchant/phone-group', element: <RequirePermission permission="merchant:phone-group:read"><PhoneGroupPage /></RequirePermission> },

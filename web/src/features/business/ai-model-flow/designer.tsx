@@ -20,7 +20,8 @@ import {
 } from '@ant-design/icons'
 import {
   fetchAiFlows,
-  saveAiFlow
+  saveAiFlow,
+  fetchAiModelConfigs
 } from '@/api/operate'
 
 const { Title, Text, Paragraph } = Typography
@@ -62,6 +63,12 @@ export type AIFlowNode = {
     enableQueue?: boolean
     maxQueueTime?: number
     mohFile?: string
+    llmProvider?: string
+    llmModel?: string
+    llmEndpoint?: string
+    llmApiKey?: string
+    llmTemperature?: number
+    llmSystemPrompt?: string
   }
 }
 
@@ -266,6 +273,7 @@ export function AiModelFlowDesigner() {
   
   // 仿真沙盒状态
   const [sandboxOpen, setSandboxOpen] = useState(false)
+  const [isSaveModalOpen, setIsSaveModalOpen] = useState(false)
   const [mockAgentOnline, setMockAgentOnline] = useState(true)
   const [mockLogs, setMockLogs] = useState<string[]>([])
   const [asrInput, setAsrInput] = useState('')
@@ -344,6 +352,12 @@ export function AiModelFlowDesigner() {
   const { data: flowsData, isLoading: flowsLoading } = useQuery({
     queryKey: ['merchant', 'ai-flow', 1, 100],
     queryFn: () => fetchAiFlows(1, 100),
+  })
+
+  // 读取 AI 大模型厂商与 API 预设配置
+  const { data: configsData } = useQuery({
+    queryKey: ['merchant', 'ai-model-configs'],
+    queryFn: () => fetchAiModelConfigs(),
   })
 
   const currentFlow = useMemo(() => {
@@ -1184,7 +1198,7 @@ export function AiModelFlowDesigner() {
             icon={<SaveOutlined />}
             type="primary"
             loading={saveMutation.isPending}
-            onClick={() => form.submit()}
+            onClick={() => setIsSaveModalOpen(true)}
             style={{ background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)', border: 'none' }}
           >
             保存并应用流图
@@ -1736,6 +1750,40 @@ export function AiModelFlowDesigner() {
 
                   <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
                     <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🧠 AI 大模型全局配置 (LLM)</span>
+                    <Form.Item label={<span className="text-sky-600 dark:text-sky-400 font-bold text-xs">⚡ 快捷选择已配置的 AI 模型</span>}>
+                      <Select
+                        placeholder="点击选择已有的模型配置自动填充"
+                        style={{ width: '100%' }}
+                        onChange={(configId) => {
+                          const conf = configsData?.find((c: any) => c.id === configId)
+                          if (conf) {
+                            nodeForm.setFieldsValue({
+                              llmProvider: conf.provider,
+                              llmModel: conf.modelName,
+                              llmEndpoint: conf.endpoint,
+                              llmApiKey: conf.apiKey,
+                              llmTemperature: conf.temperature,
+                              llmSystemPrompt: conf.systemPrompt
+                            })
+                            handleNodeMetadataChange({
+                              llmProvider: conf.provider,
+                              llmModel: conf.modelName,
+                              llmEndpoint: conf.endpoint,
+                              llmApiKey: conf.apiKey,
+                              llmTemperature: conf.temperature,
+                              llmSystemPrompt: conf.systemPrompt
+                            })
+                            message.success(`已成功应用大模型配置「${conf.name}」`)
+                          }
+                        }}
+                      >
+                        {configsData?.map((c: any) => (
+                          <Select.Option key={c.id} value={c.id}>
+                            🧠 {c.name} ({c.provider} / {c.modelName})
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
                     <Form.Item name="llmProvider" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">大模型服务商 (LLM Provider)</span>}>
                       <Select style={{ width: '100%' }}>
                         <Select.Option value="Cloud枢私有大模型">☁️ 云枢自研私有大模型</Select.Option>
@@ -1965,6 +2013,49 @@ export function AiModelFlowDesigner() {
           </div>
         </div>
       </Drawer>
+      <Modal
+        title="💾 保存并应用智能语音 IVR 流图"
+        open={isSaveModalOpen}
+        onCancel={() => setIsSaveModalOpen(false)}
+        onOk={() => form.submit()}
+        confirmLoading={saveMutation.isPending}
+        okText="确认保存并上线"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={(values) => {
+            saveMutation.mutate(values)
+            setIsSaveModalOpen(false)
+          }}
+          className="mt-4"
+        >
+          <Form.Item
+            name="name"
+            label="话术流程名称"
+            rules={[{ required: true, message: '请输入话术流程名称，便于列表识别' }]}
+          >
+            <Input placeholder="例如: 智能业务导航、话费查询客服" />
+          </Form.Item>
+
+          <Form.Item
+            name="prompt"
+            label="触发 Prompt 提示词"
+            rules={[{ required: true, message: '请输入全局触发提示词' }]}
+          >
+            <Input.TextArea rows={4} placeholder="例如: 你是一个智能客服机器人，根据用户说的话导航业务..." />
+          </Form.Item>
+
+          <Form.Item
+            name="description"
+            label="备注描述"
+          >
+            <Input placeholder="可在此输入话术备注" />
+          </Form.Item>
+        </Form>
+      </Modal>
 
     </div>
   )

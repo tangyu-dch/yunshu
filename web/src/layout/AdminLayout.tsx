@@ -149,7 +149,8 @@ const navItems: NavItem[] = [
     icon: <SettingOutlined />,
     platform: 'merchant',
     children: [
-      { key: '/merchant/ai-model-flow', icon: <SettingOutlined />, label: 'AI 模型流', permission: 'merchant:ai-flow:read' },
+      { key: '/merchant/ai-model-flow', icon: <SettingOutlined />, label: 'AI 流程编排', permission: 'merchant:ai-flow:read' },
+      { key: '/merchant/ai-model-config', icon: <SettingOutlined />, label: 'AI 厂商与模型', permission: 'merchant:ai-flow:read' },
     ],
   },
   {
@@ -201,7 +202,8 @@ const breadcrumbMap: Record<string, string[]> = {
   '/merchant/webrtc-dialpad': ['外呼业务', 'WebRTC 坐席拨号盘'],
   '/merchant/call-record': ['外呼业务', '通话话单查询'],
   '/merchant/phone-group': ['外呼业务', '外呼号码组'],
-  '/merchant/ai-model-flow': ['智能流管理', 'AI 模型流编排'],
+  '/merchant/ai-model-flow': ['智能流管理', 'AI 流程编排'],
+  '/merchant/ai-model-config': ['智能流管理', 'AI 厂商与模型'],
   '/merchant/skill-group': ['坐席技能', '坐席技能组配置'],
   '/merchant/account': ['系统设置', '账号与分权'],
   '/merchant/billing': ['系统设置', '套餐计费账单'],

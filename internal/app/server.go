@@ -73,6 +73,7 @@ type ConsoleRuntime struct {
 	BatchTask        *operatedomain.BatchTaskManagementService
 	CallRecord       *operatedomain.CallRecordManagementService
 	AIFlow           *operatedomain.AIModelFlowManagementService
+	AIConfig         *operatedomain.AIModelConfigManagementService
 	Gateway          *operatedomain.GatewayManagementService
 	Rtpengine        *operatedomain.RtpengineManagementService
 	Extension        *operatedomain.ExtensionManagementService
@@ -203,6 +204,15 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		logger.Warn("未配置 MySQL DSN，运营端 AI 流程管理使用本地内存兜底", "impact", "生产环境必须配置 merchant_ai_model_flow 表仓储")
 	}
 	aiFlowService := &operatedomain.AIModelFlowManagementService{Repository: aiFlowRepository, Logger: logger}
+
+	aiConfigRepository := operatedomain.AIModelConfigRepository(business.NewMemoryAIModelConfigRepository())
+	if gormDB != nil {
+		aiConfigRepository = business.NewAIModelConfigRepository(gormDB, logger)
+		logger.Info("运营端 AI 模型配置将从数据库读取", "table", "merchant_ai_model_config")
+	} else {
+		logger.Warn("未配置 MySQL DSN，运营端 AI 模型配置使用本地内存兜底")
+	}
+	aiConfigService := &operatedomain.AIModelConfigManagementService{Repository: aiConfigRepository, Logger: logger}
 	// 初始化渠道仓储，使用重构后的 resource 包以对齐物理重组规范
 	channelRepository := operatedomain.ChannelRepository(resource.NewMemoryChannelRepository())
 	if gormDB != nil {
@@ -366,6 +376,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		BatchTask:        &operatedomain.BatchTaskManagementService{Repository: batchTaskRepository, Logger: logger},
 		CallRecord:       callRecordService,
 		AIFlow:           aiFlowService,
+		AIConfig:         aiConfigService,
 		Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
 		Rtpengine:        rtpengineService,
 		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, Cache: authCacheInvalidator, Logger: logger},
@@ -479,6 +490,7 @@ func (s *Server) routes() {
 		httpoperate.RegisterBatchDialpadRoutes(s.gin, s.console.BatchTask)
 		httpoperate.RegisterCallRecordRoutes(s.gin, s.console.CallRecord)
 		httpoperate.RegisterAIModelFlowRoutes(s.gin, s.console.AIFlow)
+		httpoperate.RegisterAIModelConfigRoutes(s.gin, s.console.AIConfig)
 		httpoperate.RegisterPhoneGroupRoutes(s.gin, s.console.PhoneGroup)
 		httpoperate.RegisterSkillGroupRoutes(s.gin, s.console.SkillGroup)
 		httpoperate.RegisterGatewayRoutes(s.gin, s.console.Gateway)
@@ -488,7 +500,7 @@ func (s *Server) routes() {
 		httpoperate.RegisterProxyConfigRoutes(s.gin, s.console.ProxyConfig)
 		httpoperate.RegisterAreaCodeRoutes(s.gin, s.console.AreaCode)
 		httpoperate.RegisterInstallerRoutes(s.gin, s.installer)
-		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
+		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
 	default:
 		s.registerCompatibilityRoutes()
 	}
