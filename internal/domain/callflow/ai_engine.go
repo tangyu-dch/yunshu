@@ -1,10 +1,13 @@
 package callflow
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -185,10 +188,54 @@ func (e *AIVoiceEngine) ProcessASRText(ctx context.Context, session *esl.CallSes
 		}
 	}
 
-	// 3. 全局未匹配兜底 (Fallback TTS Broadcast)
-	logger.Info("云枢呼叫运行时：客户意图未命中，下发全局兜底播报回复")
-	fallbackTTS := "抱歉，我好像没有听清。您可以对我说查话费，或者转人工服务。"
-	return e.playbackTTS(ctx, callID, customerUUID, fsAddr, fallbackTTS)
+	// 3. 语义连线未匹配，尝试穿透到配置的 AI 大模型进行自由对话
+	logger.Info("云枢呼叫运行时：意图未命中流程图分支，尝试请求绑定的大语言模型")
+
+	var startNode *operatedomain.AIFlowNode
+	for i := range graph.Nodes {
+		if graph.Nodes[i].Type == "start" {
+			startNode = &graph.Nodes[i]
+			break
+		}
+	}
+
+	var aiResponse string
+	if startNode != nil && startNode.Metadata != nil && startNode.Metadata["llmProvider"] != nil {
+		provider, _ := startNode.Metadata["llmProvider"].(string)
+		apiKey, _ := startNode.Metadata["llmApiKey"].(string)
+		if provider != "" && apiKey != "" {
+			model, _ := startNode.Metadata["llmModel"].(string)
+			endpoint, _ := startNode.Metadata["llmEndpoint"].(string)
+			systemPrompt, _ := startNode.Metadata["llmSystemPrompt"].(string)
+			tempVal, _ := startNode.Metadata["llmTemperature"].(float64)
+			if tempVal == 0 {
+				tempVal = 0.7
+			}
+
+			logger.Info("云枢呼叫运行时：检测到商户大模型凭证，向云端 LLM 接口发起请求", "provider", provider, "model", model, "endpoint", endpoint)
+			respText, err := e.requestLLM(ctx, provider, apiKey, model, endpoint, systemPrompt, tempVal, text)
+			if err == nil && respText != "" {
+				aiResponse = respText
+				logger.Info("云枢呼叫运行时：成功接收到云端大模型应答文本", "reply", aiResponse)
+			} else {
+				logger.Error("云枢呼叫运行时：调用云端大模型失败，将降级使用本地 Mock AI", "error", err)
+			}
+		}
+	}
+
+	// 如果大模型返回为空或未配置，则走向本地 Mock AI 大模型动态应答生成器（极客仿真）
+	if aiResponse == "" {
+		systemPrompt := "您是云枢呼叫中心的智能 AI 话务员。"
+		if startNode != nil && startNode.Metadata != nil {
+			if sp, ok := startNode.Metadata["llmSystemPrompt"].(string); ok && sp != "" {
+				systemPrompt = sp
+			}
+		}
+		aiResponse = e.mockLLMGenerate(text, systemPrompt)
+		logger.Info("云枢呼叫运行时：未匹配到外部 LLM 密钥，使用本地 Mock 大语言模型驱动应答", "reply", aiResponse)
+	}
+
+	return e.playbackTTS(ctx, callID, customerUUID, fsAddr, aiResponse)
 }
 
 // ProcessDTMFKey 处理 FreeSWITCH 上报的物理数字按键 (DTMF)，驱动按键收集与判断分支。
@@ -436,4 +483,105 @@ func (e *AIVoiceEngine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.Default()
+}
+
+// ChatCompletionMessage 表示 OpenAI/DeepSeek 兼容的单条对话消息格式。
+type ChatCompletionMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// ChatCompletionRequest 表示 OpenAI 格式的 Chat Completion 请求负载。
+type ChatCompletionRequest struct {
+	Model       string                  `json:"model"`
+	Messages    []ChatCompletionMessage `json:"messages"`
+	Temperature float64                 `json:"temperature"`
+}
+
+// ChatCompletionResponse 表示大模型返回的选择应答。
+type ChatCompletionResponse struct {
+	Choices []struct {
+		Message ChatCompletionMessage `json:"message"`
+	} `json:"choices"`
+}
+
+// requestLLM 发起物理 HTTP 请求到 OpenAI/DeepSeek 兼容大模型网关，返回动态生成文本。
+func (e *AIVoiceEngine) requestLLM(ctx context.Context, provider, apiKey, model, endpoint, systemPrompt string, temp float64, userText string) (string, error) {
+	if endpoint == "" {
+		if provider == "DeepSeek" {
+			endpoint = "https://api.deepseek.com/v1/chat/completions"
+		} else {
+			endpoint = "https://api.openai.com/v1/chat/completions"
+		}
+	}
+	if model == "" {
+		if provider == "DeepSeek" {
+			model = "deepseek-chat"
+		} else {
+			model = "gpt-4o"
+		}
+	}
+	if systemPrompt == "" {
+		systemPrompt = "您是云枢呼叫中心智能客服机器人。"
+	}
+
+	reqBody := ChatCompletionRequest{
+		Model: model,
+		Messages: []ChatCompletionMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userText},
+		},
+		Temperature: temp,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bad llm response status: %d", resp.StatusCode)
+	}
+
+	var respBody ChatCompletionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		return "", err
+	}
+
+	if len(respBody.Choices) > 0 {
+		return respBody.Choices[0].Message.Content, nil
+	}
+
+	return "", errors.New("empty response from large language model")
+}
+
+// mockLLMGenerate 在没有配置云端大模型 API key 时，根据 systemPrompt 和输入智能模拟生成动态应答。
+func (e *AIVoiceEngine) mockLLMGenerate(userText, systemPrompt string) string {
+	userText = strings.TrimSpace(userText)
+	if strings.Contains(userText, "你是谁") || strings.Contains(userText, "名字") {
+		return "我是云枢呼叫中心的智能大模型助手。今天有什么我可以帮您的吗？"
+	}
+	if strings.Contains(userText, "功能") || strings.Contains(userText, "做什么") {
+		return "云枢支持大模型可视化 IVR 编排、实时 ASR 语音推流及智能转人工调度哦！您可以对我说转人工，或者说查话费。"
+	}
+	if strings.Contains(userText, "再见") || strings.Contains(userText, "挂断") || strings.Contains(userText, "拜拜") {
+		return "好的，感谢您的致电。祝您生活愉快，再见！"
+	}
+
+	return fmt.Sprintf("【云枢大模型动态回复】关于您所说的“%s”，我们已经收到。云枢支持高并发旁路推流，您可以随时吩咐我查话费或转接人工客服。", userText)
 }

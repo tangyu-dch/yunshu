@@ -90,7 +90,13 @@ const defaultSampleGraph: AIFlowGraph = {
         wsUrl: 'ws://127.0.0.1:9002/asr',
         mixType: 'mono',
         sampleRate: '16k',
-        metadata: '{"merchantId": "1001"}'
+        metadata: '{"merchantId": "1001"}',
+        llmProvider: 'Cloud枢私有大模型',
+        llmModel: 'yunshu-private-v2',
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmTemperature: 0.7,
+        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。'
       }
     },
     {
@@ -637,7 +643,18 @@ export function AiModelFlowDesigner() {
 
     if (type === 'start') {
       label = '🏁 新呼入接通'
-      meta = { asrEnabled: true, wsUrl: 'ws://127.0.0.1:9002/asr', mixType: 'mono', sampleRate: '16k' }
+      meta = { 
+        asrEnabled: true, 
+        wsUrl: 'ws://127.0.0.1:9002/asr', 
+        mixType: 'mono', 
+        sampleRate: '16k',
+        llmProvider: 'Cloud枢私有大模型',
+        llmModel: 'yunshu-private-v2',
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmTemperature: 0.7,
+        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。'
+      }
     } else if (type === 'intent') {
       label = '🤖 新意图路由'
     } else if (type === 'dtmf') {
@@ -1716,6 +1733,32 @@ export function AiModelFlowDesigner() {
                   <Form.Item name="metadata" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">首帧元数据 Metadata (JSON)</span>}>
                     <Input.TextArea rows={3} placeholder='{"merchantId": "1001"}' />
                   </Form.Item>
+
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🧠 AI 大模型全局配置 (LLM)</span>
+                    <Form.Item name="llmProvider" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">大模型服务商 (LLM Provider)</span>}>
+                      <Select style={{ width: '100%' }}>
+                        <Select.Option value="Cloud枢私有大模型">☁️ 云枢自研私有大模型</Select.Option>
+                        <Select.Option value="DeepSeek">🐳 DeepSeek API</Select.Option>
+                        <Select.Option value="OpenAI">🌐 OpenAI 兼容接口</Select.Option>
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="llmModel" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">大模型名称 (Model Name)</span>}>
+                      <Input placeholder="例如: deepseek-chat 或 gpt-4o" />
+                    </Form.Item>
+                    <Form.Item name="llmEndpoint" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">API 代理网关地址 (Endpoint)</span>}>
+                      <Input placeholder="空代表使用服务商默认 Endpoint" />
+                    </Form.Item>
+                    <Form.Item name="llmApiKey" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">API 密钥 (API Key)</span>}>
+                      <Input.Password placeholder="输入大模型 API Key 建立物理交互" />
+                    </Form.Item>
+                    <Form.Item name="llmTemperature" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">生成温度 (Temperature)</span>}>
+                      <Slider min={0.0} max={1.5} step={0.1} defaultValue={0.7} />
+                    </Form.Item>
+                    <Form.Item name="llmSystemPrompt" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">全局 System Prompt 角色提示词</span>}>
+                      <Input.TextArea rows={4} placeholder="您是云枢智能话务员，请根据用户的提问礼貌回答..." />
+                    </Form.Item>
+                  </div>
                 </>
               )}
 

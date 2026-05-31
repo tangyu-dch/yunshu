@@ -168,6 +168,78 @@ func RegisterRoutes(r gin.IRoutes, originate *esl.OriginateService, command *esl
 		c.JSON(http.StatusOK, contracts.OK(map[string]bool{"valid": true}))
 	})
 
+	r.POST("/esl/call/asr-detect", func(c *gin.Context) {
+		var req struct {
+			CallID string `json:"callId" binding:"required"`
+			Text   string `json:"text" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		if originate.Events == nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "事件总线未初始化"))
+			return
+		}
+
+		err := originate.Events.Publish(c.Request.Context(), contracts.NewEventEnvelope(
+			"asr-detect:"+req.CallID+":"+strconv.FormatInt(time.Now().UnixNano(), 10),
+			"asr_speech_detected",
+			req.CallID,
+			"call",
+			req.CallID,
+			contracts.ServiceCall,
+			map[string]any{
+				"callId": req.CallID,
+				"text":   req.Text,
+			},
+		))
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "发布 ASR 事件失败: "+err.Error()))
+			return
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(map[string]bool{"dispatched": true}))
+	})
+
+	r.POST("/esl/call/dtmf-detect", func(c *gin.Context) {
+		var req struct {
+			CallID string `json:"callId" binding:"required"`
+			Digit  string `json:"digit" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		if originate.Events == nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "事件总线未初始化"))
+			return
+		}
+
+		err := originate.Events.Publish(c.Request.Context(), contracts.NewEventEnvelope(
+			"dtmf-detect:"+req.CallID+":"+strconv.FormatInt(time.Now().UnixNano(), 10),
+			"dtmf_detected",
+			req.CallID,
+			"call",
+			req.CallID,
+			contracts.ServiceCall,
+			map[string]any{
+				"callId": req.CallID,
+				"digit":  req.Digit,
+			},
+		))
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "发布 DTMF 事件失败: "+err.Error()))
+			return
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(map[string]bool{"dispatched": true}))
+	})
+
 	r.POST("/esl/events/apply", func(c *gin.Context) {
 		var event contracts.TelephonyEvent
 		if err := c.ShouldBindJSON(&event); err != nil {

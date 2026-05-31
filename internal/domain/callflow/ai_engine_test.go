@@ -3,6 +3,7 @@ package callflow
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"yunshu/internal/contracts"
 	"yunshu/internal/domain/esl"
@@ -200,7 +201,7 @@ func TestAIVoiceEngineProcessASRTextFallback(t *testing.T) {
 	// 应该播放全局兜底语音
 	hasFallbackPlayback := false
 	for _, cmd := range executor.Commands {
-		if cmd.Command == "playback" && cmd.Payload["file"] == "tts://抱歉，我好像没有听清。您可以对我说查话费，或者转人工服务。" {
+		if cmd.Command == "playback" && strings.Contains(cmd.Payload["file"].(string), "【云枢大模型动态回复】") {
 			hasFallbackPlayback = true
 		}
 	}

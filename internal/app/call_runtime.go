@@ -57,6 +57,7 @@ type CallRuntime struct {
 	Candidates     cti.CandidateSource
 	Marker         cti.CandidateMarker
 	WSHub          *wsinfra.Hub
+	ASRServer      *wsinfra.ASRServer
 }
 
 // NewCallRuntime 创建 cc-call 运行时依赖。
@@ -163,11 +164,21 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 		logger.Warn("未配置 MySQL DSN，批量外呼调度器未启用", "impact", "生产环境必须配置批量任务表仓储")
 	}
 
+	var asrServer *wsinfra.ASRServer
+	if !runningUnderGoTest() {
+		asrServer = wsinfra.NewASRServer(":9002", bus, session.Store, logger)
+		if err := asrServer.Start(context.Background()); err != nil {
+			logger.Warn("云枢 ASR 旁路推流 WebSocket 服务启动失败，端口可能已被占用", "error", err.Error())
+		} else {
+			logger.Info("云枢 ASR 旁路推流 WebSocket 服务已在端口 9002 启动")
+		}
+	}
+
 	if gormDB != nil && redisClient != nil {
 		go startOfflineExtensionUnbinder(context.Background(), gormDB, redisClient, logger)
 	}
 
-	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub}
+	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub, ASRServer: asrServer}
 }
 
 // openRuntimeDB 打开数据库连接。
