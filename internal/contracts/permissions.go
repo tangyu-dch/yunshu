@@ -238,6 +238,7 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/account", Method: "GET", Permission: PermissionMerchantAccountRead},
 	{Prefix: "/merchant/detail/", Method: "GET", Permission: PermissionMerchantAccountRead},
 	{Prefix: "/merchant/extension/dynamic-bind", Method: "POST", Permission: PermissionMerchantAccountRead},
+	{Prefix: "/merchant/ai-model-flow/providers", Method: "GET", Permission: PermissionMerchantAIFlowRead},
 	{Prefix: "/merchant/ai-model-flow/page", Method: "POST", Permission: PermissionMerchantAIFlowRead},
 	{Prefix: "/merchant/ai-model-flow/detail/", Method: "GET", Permission: PermissionMerchantAIFlowRead},
 	{Prefix: "/merchant/ai-model-flow/delete", Method: "POST", Permission: PermissionMerchantAIFlowDelete},

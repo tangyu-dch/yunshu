@@ -1,4 +1,4 @@
-import { Button, Popconfirm, Space, Tag, Typography, message, Tooltip, Tabs, Modal, Form, Input, Select, Slider, Card } from 'antd'
+import { Button, Popconfirm, Space, Tag, Typography, message, Tooltip, Tabs, Modal, Form, Input, Select, Slider, Card, InputNumber } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
@@ -22,7 +22,9 @@ import {
   fetchAiModelConfigs,
   saveAiModelConfig,
   deleteAiModelConfigs,
-  saveAiFlow
+  saveAiFlow,
+  fetchAiProviders,
+  AiProviderItem
 } from '@/api/operate'
 
 const { Text } = Typography
@@ -81,6 +83,23 @@ export function AiModelFlowPage() {
     queryFn: () => fetchAiModelConfigs(),
     enabled: activeTab === '2',
   })
+
+  // 读取已支持的大模型服务商列表（后端配置驱动，高可扩展性）
+  const { data: providersList } = useQuery({
+    queryKey: ['merchant', 'ai-providers'],
+    queryFn: () => fetchAiProviders(),
+  })
+
+  const DEFAULT_PROVIDERS: AiProviderItem[] = useMemo(() => [
+    { value: 'deepseek', label: 'DeepSeek API', emoji: '🐳', color: 'cyan', implemented: true, supportAsr: false, supportTts: false, supportLlm: true },
+    { value: 'openai', label: 'OpenAI 兼容接口', emoji: '🌐', color: 'purple', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'ali', label: '阿里通义千问 Qwen', emoji: '☁️', color: 'geekblue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'tencent', label: '腾讯混元 Hunyuan', emoji: '🐧', color: 'blue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'mock', label: '云枢自研仿真大模型 (MOCK)', emoji: '🤖', color: 'gold', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
+  ], [])
+
+  const providers = providersList || DEFAULT_PROVIDERS
 
   const queryFields = useMemo(() => [
     { key: 'name', label: '模型流名称', type: 'text' as const, placeholder: '请输入名称模糊搜索' },
@@ -178,7 +197,7 @@ export function AiModelFlowPage() {
     setEditingConfig(null)
     configForm.resetFields()
     configForm.setFieldsValue({
-      provider: 'DeepSeek',
+      provider: 'deepseek',
       temperature: 0.7,
       systemPrompt: '您是云枢智能客服话务员，请根据用户的咨询礼貌作答。'
     })
@@ -497,10 +516,15 @@ export function AiModelFlowPage() {
                       title: '服务商 (Provider)',
                       dataIndex: 'provider',
                       render: (val) => {
-                        let color = 'blue'
-                        if (val === 'DeepSeek') color = 'cyan'
-                        if (val === 'OpenAI') color = 'purple'
-                        return <Tag color={color}>{val}</Tag>
+                        const lowerVal = String(val || '').toLowerCase()
+                        const found = providers.find((p: any) => p.value === lowerVal || (p.value === 'mock' && lowerVal === 'cloud枢私有大模型'))
+                        if (found) {
+                          if (!found.supportLlm) {
+                            return <Tag color="default">⚙️ {found.label} (未接入大模型驱动)</Tag>
+                          }
+                          return <Tag color={found.color}>{found.emoji} {found.label}</Tag>
+                        }
+                        return <Tag color="blue">{val}</Tag>
                       }
                     },
                     {
@@ -565,7 +589,7 @@ export function AiModelFlowPage() {
           onFinish={(values) => saveConfigMutation.mutate({ ...values, id: editingConfig?.id })}
           initialValues={{
             temperature: 0.7,
-            provider: 'DeepSeek'
+            provider: 'deepseek'
           }}
           className="mt-4"
         >
@@ -584,9 +608,11 @@ export function AiModelFlowPage() {
               rules={[{ required: true }]}
             >
               <Select>
-                <Select.Option value="Cloud枢私有大模型">☁️ 云枢自研私有大模型</Select.Option>
-                <Select.Option value="DeepSeek">🐳 DeepSeek API</Select.Option>
-                <Select.Option value="OpenAI">🌐 OpenAI 兼容接口</Select.Option>
+                {providers.map((p: any) => (
+                  <Select.Option key={p.value} value={p.value} disabled={!p.supportLlm}>
+                    {p.emoji} {p.label} {!p.supportLlm && ' ⚠️ (不支持大模型决断)'}
+                  </Select.Option>
+                ))}
               </Select>
             </Form.Item>
 
@@ -627,6 +653,54 @@ export function AiModelFlowPage() {
           >
             <Input.TextArea rows={4} placeholder="您是云枢智能话务员，请根据用户的提问礼貌回答..." />
           </Form.Item>
+
+          <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+            <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🌋 火山引擎豆包语音配置 (ASR/TTS 可选)</span>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <Form.Item
+                name="volcAppId"
+                label="火山语音 AppId"
+              >
+                <Input placeholder="Application ID" />
+              </Form.Item>
+
+              <Form.Item
+                name="volcCluster"
+                label="ASR 集群"
+              >
+                <Input placeholder="ASR 默认 volc_common_asr" />
+              </Form.Item>
+            </div>
+
+            <Form.Item
+              name="volcToken"
+              label="火山语音 Access Token"
+            >
+              <Input.Password placeholder="火山 OpenSpeech 鉴权 Token" />
+            </Form.Item>
+
+            <div className="grid grid-cols-2 gap-4">
+              <Form.Item
+                name="volcVoiceType"
+                label="豆包发音人音色"
+              >
+                <Select style={{ width: '100%' }} placeholder="默认豆包女声">
+                  <Select.Option value="bv001_streaming">🎤 豆包女声 (极具情感)</Select.Option>
+                  <Select.Option value="bv002_streaming">🎙️ 豆包男声 (专业高保真)</Select.Option>
+                  <Select.Option value="bv051_streaming">📚 豆包说书 (自然流畅)</Select.Option>
+                  <Select.Option value="bv004_streaming">🎮 豆包游戏 (朝气灵动)</Select.Option>
+                </Select>
+              </Form.Item>
+
+              <Form.Item
+                name="volcSpeedRatio"
+                label="TTS 朗读语速"
+              >
+                <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+              </Form.Item>
+            </div>
+          </div>
 
           <Form.Item
             name="description"

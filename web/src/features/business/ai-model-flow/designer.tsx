@@ -21,7 +21,9 @@ import {
 import {
   fetchAiFlows,
   saveAiFlow,
-  fetchAiModelConfigs
+  fetchAiModelConfigs,
+  fetchAiProviders,
+  AiProviderItem
 } from '@/api/operate'
 
 const { Title, Text, Paragraph } = Typography
@@ -83,6 +85,37 @@ export type AIFlowGraph = {
   nodes: AIFlowNode[]
   edges: AIFlowEdge[]
 }
+
+// 动态音色元数据 (用于支持前端高度可扩展动态表单渲染)
+export const TTS_VOICES_BY_PROVIDER: Record<string, { label: string; value: string }[]> = {
+  volc: [
+    { label: '🎤 豆包女声 (极具情感)', value: 'bv001_streaming' },
+    { label: '🎙️ 豆包男声 (专业高保真)', value: 'bv002_streaming' },
+    { label: '📚 豆包说书 (自然流畅)', value: 'bv051_streaming' },
+    { label: '🎮 豆包游戏 (朝气灵动)', value: 'bv004_streaming' },
+  ],
+  ali: [
+    { label: '🎤 晓云 (标准女声)', value: 'Xiaoyun' },
+    { label: '🎙️ 小宇 (标准男声)', value: 'Xiaoyu' },
+    { label: '👧 小婷 (甜美客服女声)', value: 'Xiaoting' },
+  ],
+  openai: [
+    { label: '🎤 Alloy (通用女声)', value: 'alloy' },
+    { label: '🎙️ Echo (温柔男声)', value: 'echo' },
+    { label: '📚 Fable (故事讲书)', value: 'fable' },
+    { label: '🎙️ Onyx (低沉男声)', value: 'onyx' },
+    { label: '🎤 Nova (朝气女声)', value: 'nova' },
+    { label: '👧 Shimmer (活泼女声)', value: 'shimmer' },
+  ],
+  tencent: [
+    { label: '🎤 智雅 (标准女声)', value: '101001' },
+    { label: '🎙️ 智宽 (标准男声)', value: '101002' },
+    { label: '👧 智美 (客服女声)', value: '101016' },
+  ],
+  mock: [
+    { label: '🤖 虚拟仿真发声', value: 'mock_voice' }
+  ]
+};
 
 const defaultSampleGraph: AIFlowGraph = {
   nodes: [
@@ -359,6 +392,23 @@ export function AiModelFlowDesigner() {
     queryKey: ['merchant', 'ai-model-configs'],
     queryFn: () => fetchAiModelConfigs(),
   })
+
+  // 读取已支持的大模型服务商列表（后端配置驱动，高可扩展性）
+  const { data: providersList } = useQuery({
+    queryKey: ['merchant', 'ai-providers'],
+    queryFn: () => fetchAiProviders(),
+  })
+
+  const DEFAULT_PROVIDERS: AiProviderItem[] = useMemo(() => [
+    { value: 'deepseek', label: 'DeepSeek API', emoji: '🐳', color: 'cyan', implemented: true, supportAsr: false, supportTts: false, supportLlm: true },
+    { value: 'openai', label: 'OpenAI 兼容接口', emoji: '🌐', color: 'purple', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'ali', label: '阿里通义千问 Qwen', emoji: '☁️', color: 'geekblue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'tencent', label: '腾讯混元 Hunyuan', emoji: '🐧', color: 'blue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'mock', label: '云枢自研仿真大模型 (MOCK)', emoji: '🤖', color: 'gold', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
+  ], [])
+
+  const providers = providersList || DEFAULT_PROVIDERS
 
   const currentFlow = useMemo(() => {
     if (isNew || !flowsData) return null
@@ -1728,6 +1778,75 @@ export function AiModelFlowDesigner() {
                   <Form.Item name="asrEnabled" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">开启 ASR 旁路推流</span>} valuePropName="checked">
                     <Switch />
                   </Form.Item>
+                  <Form.Item name="asrProvider" label={<span className="text-slate-600 dark:text-sky-400 font-bold text-xs">ASR 识别厂商 (ASR Provider)</span>}>
+                    <Select style={{ width: '100%' }} placeholder="默认使用火山语音 ASR">
+                      {providers.map((p: any) => (
+                        <Select.Option key={p.value} value={p.value} disabled={!p.supportAsr}>
+                          {p.emoji} {p.label} {!p.supportAsr && ' ⚠️ (不支持 ASR 识别)'}
+                        </Select.Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+
+                  {/* ⚡ ASR 专属配置动态 Schema 展现 */}
+                  <Form.Item noStyle shouldUpdate={(prev, curr) => prev.asrProvider !== curr.asrProvider}>
+                    {({ getFieldValue }) => {
+                      const provider = getFieldValue('asrProvider') || 'volc';
+                      if (provider === 'volc') {
+                        return (
+                          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                            <span className="text-[10px] font-bold text-slate-400 block mb-2">🌋 火山语音 ASR 专属参数</span>
+                            <Form.Item name="volcAppId" label={<span className="text-slate-500 text-[11px]">火山语音 AppId</span>} style={{ marginBottom: '8px' }}>
+                              <Input placeholder="输入 Application ID" />
+                            </Form.Item>
+                            <Form.Item name="volcToken" label={<span className="text-slate-500 text-[11px]">火山语音 Access Token</span>} style={{ marginBottom: '8px' }}>
+                              <Input.Password placeholder="输入 OpenSpeech Token" />
+                            </Form.Item>
+                            <Form.Item name="volcCluster" label={<span className="text-slate-500 text-[11px]">ASR 集群标识 (Cluster)</span>} style={{ marginBottom: '0px' }}>
+                              <Input placeholder="默认使用 volc_common_asr" />
+                            </Form.Item>
+                          </div>
+                        );
+                      }
+                      if (provider === 'ali') {
+                        return (
+                          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                            <span className="text-[10px] font-bold text-sky-400 block mb-2">☁️ 阿里云一句话识别 ASR 参数</span>
+                            <Form.Item name="aliAppKey" label={<span className="text-slate-500 text-[11px]">阿里语音 AppKey</span>} style={{ marginBottom: '8px' }}>
+                              <Input placeholder="输入阿里云 NLS AppKey" />
+                            </Form.Item>
+                            <Form.Item name="aliToken" label={<span className="text-slate-500 text-[11px]">阿里云 Token (NLS Token)</span>} style={{ marginBottom: '0px' }}>
+                              <Input.Password placeholder="输入阿里云 NLS 鉴权 Token" />
+                            </Form.Item>
+                          </div>
+                        );
+                      }
+                      if (provider === 'tencent') {
+                        return (
+                          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                            <span className="text-[10px] font-bold text-indigo-400 block mb-2">🐧 腾讯云一句话识别 ASR 参数</span>
+                            <Form.Item name="tencentSecretId" label={<span className="text-slate-500 text-[11px]">腾讯云 SecretId</span>} style={{ marginBottom: '8px' }}>
+                              <Input placeholder="输入腾讯 SecretId" />
+                            </Form.Item>
+                            <Form.Item name="tencentSecretKey" label={<span className="text-slate-500 text-[11px]">腾讯云 SecretKey</span>} style={{ marginBottom: '0px' }}>
+                              <Input.Password placeholder="输入腾讯 SecretKey" />
+                            </Form.Item>
+                          </div>
+                        );
+                      }
+                      if (provider === 'openai') {
+                        return (
+                          <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                            <span className="text-[10px] font-bold text-emerald-400 block mb-2">🌐 OpenAI Whisper ASR 参数</span>
+                            <Form.Item name="llmApiKey" label={<span className="text-slate-500 text-[11px]">OpenAI API Key (与 LLM 共用)</span>} style={{ marginBottom: '0px' }}>
+                              <Input.Password placeholder="输入 OpenAI API Key 物理寻路" />
+                            </Form.Item>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  </Form.Item>
                   <Form.Item name="wsUrl" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">WebSocket 旁路地址</span>}>
                     <Input placeholder="ws://127.0.0.1:9002/asr" />
                   </Form.Item>
@@ -1748,6 +1867,100 @@ export function AiModelFlowDesigner() {
                     <Input.TextArea rows={3} placeholder='{"merchantId": "1001"}' />
                   </Form.Item>
 
+                  {/* ⚡ TTS 专属配置与动态音色 Schema 展现 */}
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <Form.Item name="ttsProvider" label={<span className="text-slate-600 dark:text-sky-400 font-bold text-xs">TTS 合成厂商 (TTS Provider)</span>}>
+                      <Select style={{ width: '100%' }} placeholder="默认使用火山语音 TTS">
+                        {providers.map((p: any) => (
+                          <Select.Option key={p.value} value={p.value} disabled={!p.supportTts}>
+                            {p.emoji} {p.label} {!p.supportTts && ' ⚠️ (不支持 TTS 合成)'}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+
+                    <Form.Item noStyle shouldUpdate={(prev, curr) => prev.ttsProvider !== curr.ttsProvider}>
+                      {({ getFieldValue }) => {
+                        const provider = getFieldValue('ttsProvider') || 'volc';
+                        const voices = TTS_VOICES_BY_PROVIDER[provider] || [];
+
+                        if (provider === 'volc') {
+                          return (
+                            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                              <span className="text-[10px] font-bold text-slate-400 block mb-2">🌋 火山 TTS 参数</span>
+                              <Form.Item name="volcAppId" label={<span className="text-slate-500 text-[11px]">火山 AppId (TTS/ASR 共用)</span>} style={{ marginBottom: '8px' }}>
+                                <Input placeholder="输入 Application ID" />
+                              </Form.Item>
+                              <Form.Item name="volcToken" label={<span className="text-slate-500 text-[11px]">火山 Token</span>} style={{ marginBottom: '8px' }}>
+                                <Input.Password placeholder="输入 OpenSpeech Token" />
+                              </Form.Item>
+                              <Form.Item name="volcVoiceType" label={<span className="text-slate-500 text-[11px]">豆包发音人音色</span>} style={{ marginBottom: '8px' }}>
+                                <Select style={{ width: '100%' }} placeholder="选择音色">
+                                  {voices.map((v: any) => <Select.Option key={v.value} value={v.value}>{v.label}</Select.Option>)}
+                                </Select>
+                              </Form.Item>
+                              <Form.Item name="volcSpeedRatio" label={<span className="text-slate-500 text-[11px]">语速比例</span>} style={{ marginBottom: '0px' }}>
+                                <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} />
+                              </Form.Item>
+                            </div>
+                          );
+                        }
+                        if (provider === 'ali') {
+                          return (
+                            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                              <span className="text-[10px] font-bold text-sky-400 block mb-2">☁️ 阿里云一句话语音合成 TTS 参数</span>
+                              <Form.Item name="aliAppKey" label={<span className="text-slate-500 text-[11px]">阿里语音 AppKey (TTS/ASR 共用)</span>} style={{ marginBottom: '8px' }}>
+                                <Input placeholder="输入 AppKey" />
+                              </Form.Item>
+                              <Form.Item name="aliToken" label={<span className="text-slate-500 text-[11px]">阿里云 Token</span>} style={{ marginBottom: '8px' }}>
+                                <Input.Password placeholder="输入 Access Token" />
+                              </Form.Item>
+                              <Form.Item name="aliVoice" label={<span className="text-slate-500 text-[11px]">阿里特有发音人</span>} style={{ marginBottom: '0px' }}>
+                                <Select style={{ width: '100%' }} placeholder="选择阿里发音人">
+                                  {voices.map((v: any) => <Select.Option key={v.value} value={v.value}>{v.label}</Select.Option>)}
+                                </Select>
+                              </Form.Item>
+                            </div>
+                          );
+                        }
+                        if (provider === 'tencent') {
+                          return (
+                            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                              <span className="text-[10px] font-bold text-indigo-400 block mb-2">🐧 腾讯云语音合成 TTS 参数</span>
+                              <Form.Item name="tencentSecretId" label={<span className="text-slate-500 text-[11px]">腾讯云 SecretId (TTS/ASR 共用)</span>} style={{ marginBottom: '8px' }}>
+                                <Input placeholder="输入 SecretId" />
+                              </Form.Item>
+                              <Form.Item name="tencentSecretKey" label={<span className="text-slate-500 text-[11px]">腾讯云 SecretKey</span>} style={{ marginBottom: '8px' }}>
+                                <Input.Password placeholder="输入 SecretKey" />
+                              </Form.Item>
+                              <Form.Item name="tencentVoice" label={<span className="text-slate-500 text-[11px]">腾讯特有发音人</span>} style={{ marginBottom: '0px' }}>
+                                <Select style={{ width: '100%' }} placeholder="选择腾讯发音人">
+                                  {voices.map((v: any) => <Select.Option key={v.value} value={v.value}>{v.label}</Select.Option>)}
+                                </Select>
+                              </Form.Item>
+                            </div>
+                          );
+                        }
+                        if (provider === 'openai') {
+                          return (
+                            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-lg border border-slate-200/50 dark:border-slate-800/80 mb-3">
+                              <span className="text-[10px] font-bold text-emerald-400 block mb-2">🌐 OpenAI 高保真 TTS 参数</span>
+                              <Form.Item name="llmApiKey" label={<span className="text-slate-500 text-[11px]">OpenAI API Key (与 LLM 共用)</span>} style={{ marginBottom: '8px' }}>
+                                <Input.Password placeholder="输入 OpenAI API Key" />
+                              </Form.Item>
+                              <Form.Item name="openaiVoice" label={<span className="text-slate-500 text-[11px]">OpenAI 特有音色</span>} style={{ marginBottom: '0px' }}>
+                                <Select style={{ width: '100%' }} placeholder="选择 OpenAI 音色">
+                                  {voices.map((v: any) => <Select.Option key={v.value} value={v.value}>{v.label}</Select.Option>)}
+                                </Select>
+                              </Form.Item>
+                            </div>
+                          );
+                        }
+                        return null;
+                      }}
+                    </Form.Item>
+                  </div>
+
                   <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
                     <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🧠 AI 大模型全局配置 (LLM)</span>
                     <Form.Item label={<span className="text-sky-600 dark:text-sky-400 font-bold text-xs">⚡ 快捷选择已配置的 AI 模型</span>}>
@@ -1757,22 +1970,39 @@ export function AiModelFlowDesigner() {
                         onChange={(configId) => {
                           const conf = configsData?.find((c: any) => c.id === configId)
                           if (conf) {
-                            nodeForm.setFieldsValue({
-                              llmProvider: conf.provider,
+                            const patch = {
+                              llmProvider: (() => {
+                                const p = String(conf.provider || '').toLowerCase();
+                                if (p === 'deepseek') return 'deepseek';
+                                if (p === 'openai') return 'openai';
+                                if (p === 'ali') return 'ali';
+                                if (p === 'tencent') return 'tencent';
+                                if (p === 'volc') return 'volc';
+                                if (p === 'mock' || p === 'cloud枢私有大模型') return 'mock';
+                                return p;
+                              })(),
                               llmModel: conf.modelName,
                               llmEndpoint: conf.endpoint,
                               llmApiKey: conf.apiKey,
                               llmTemperature: conf.temperature,
-                              llmSystemPrompt: conf.systemPrompt
-                            })
-                            handleNodeMetadataChange({
-                              llmProvider: conf.provider,
-                              llmModel: conf.modelName,
-                              llmEndpoint: conf.endpoint,
-                              llmApiKey: conf.apiKey,
-                              llmTemperature: conf.temperature,
-                              llmSystemPrompt: conf.systemPrompt
-                            })
+                              llmSystemPrompt: conf.systemPrompt,
+                              volcAppId: conf.volcAppId,
+                              volcToken: conf.volcToken,
+                              volcCluster: conf.volcCluster,
+                              volcVoiceType: conf.volcVoiceType,
+                              volcSpeedRatio: conf.volcSpeedRatio,
+                              aliAppKey: conf.volcAppId,
+                              aliToken: conf.volcToken,
+                              aliVoice: conf.volcVoiceType || "Xiaoyun",
+                              tencentSecretId: conf.volcAppId,
+                              tencentSecretKey: conf.volcToken,
+                              tencentVoice: conf.volcVoiceType || "101001",
+                              openaiVoice: conf.volcVoiceType || "alloy",
+                              asrProvider: conf.volcAppId ? "volc" : "mock",
+                              ttsProvider: conf.volcAppId ? "volc" : "mock"
+                            }
+                            nodeForm.setFieldsValue(patch)
+                            handleNodeMetadataChange(patch)
                             message.success(`已成功应用大模型配置「${conf.name}」`)
                           }
                         }}
@@ -1784,11 +2014,13 @@ export function AiModelFlowDesigner() {
                         ))}
                       </Select>
                     </Form.Item>
-                    <Form.Item name="llmProvider" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">大模型服务商 (LLM Provider)</span>}>
+                    <Form.Item name="llmProvider" label={<span className="text-slate-600 dark:text-sky-400 font-bold text-xs">大模型服务商 (LLM Provider)</span>}>
                       <Select style={{ width: '100%' }}>
-                        <Select.Option value="Cloud枢私有大模型">☁️ 云枢自研私有大模型</Select.Option>
-                        <Select.Option value="DeepSeek">🐳 DeepSeek API</Select.Option>
-                        <Select.Option value="OpenAI">🌐 OpenAI 兼容接口</Select.Option>
+                        {providers.map((p: any) => (
+                          <Select.Option key={p.value} value={p.value} disabled={!p.supportLlm}>
+                            {p.emoji} {p.label} {!p.supportLlm && ' ⚠️ (不支持大模型决断)'}
+                          </Select.Option>
+                        ))}
                       </Select>
                     </Form.Item>
                     <Form.Item name="llmModel" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">大模型名称 (Model Name)</span>}>

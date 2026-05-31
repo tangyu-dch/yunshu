@@ -14,16 +14,21 @@ var (
 
 // AIModelConfig 表示 AI 大模型商户配置实体。
 type AIModelConfig struct {
-	ID           int       `json:"id"`
-	Name         string    `json:"name"`         // 配置显示名称，如 "DeepSeek 官方客服"
-	Provider     string    `json:"provider"`     // 服务商: "DeepSeek" | "OpenAI" | "Cloud枢私有大模型"
-	ModelName    string    `json:"modelName"`    // 模型名称，如 "deepseek-chat", "gpt-4o"
-	Endpoint     string    `json:"endpoint"`     // API 网关代理地址
-	ApiKey       string    `json:"apiKey"`       // 密钥 API Key
-	Temperature  float64   `json:"temperature"`  // 温度参数 (0.0 - 1.5)
-	SystemPrompt string    `json:"systemPrompt"` // 全局角色设定 Prompt
-	Description  string    `json:"description"`  // 备注描述
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID             int       `json:"id"`
+	Name           string    `json:"name"`           // 配置显示名称，如 "DeepSeek 官方客服"
+	Provider       string    `json:"provider"`       // 服务商: "DeepSeek" | "OpenAI" | "Cloud枢私有大模型"
+	ModelName      string    `json:"modelName"`      // 模型名称，如 "deepseek-chat", "gpt-4o"
+	Endpoint       string    `json:"endpoint"`       // API 网关代理地址
+	ApiKey         string    `json:"apiKey"`         // 密钥 API Key
+	Temperature    float64   `json:"temperature"`    // 温度参数 (0.0 - 1.5)
+	SystemPrompt   string    `json:"systemPrompt"`   // 全局角色设定 Prompt
+	Description    string    `json:"description"`    // 备注描述
+	VolcAppId      string    `json:"volcAppId"`      // 火山语音 AppId
+	VolcToken      string    `json:"volcToken"`      // 火山语音 Token
+	VolcCluster    string    `json:"volcCluster"`    // 火山语音 Cluster
+	VolcVoiceType  string    `json:"volcVoiceType"`  // 火山语音 TTS 发音人音色
+	VolcSpeedRatio float64   `json:"volcSpeedRatio"` // 火山语音 TTS 语速
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 // AIModelConfigRepository 定义 AI 大模型配置持久化仓储接口。

@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"yunshu/internal/contracts"
+	"yunshu/internal/domain/callflow"
 	"yunshu/internal/domain/esl"
 	operate "yunshu/internal/domain/operate"
 	"yunshu/internal/infra/events"
@@ -141,13 +142,14 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 	var speechActive bool
 	var speechStartFrame int
 	var silenceFrames int
+	var audioBuffer []byte // 协程局部音频字节流收集
 
 	// PCM 采样通常为 20ms 一包，16kHz/16bit mono 帧大小为 640 字节，8kHz/16bit mono 为 320 字节。
 	// 这里设定 RMS 能量检测 VAD 阈值。
 	const (
-		rmsThreshold   = 800.0  // 音量检测阈值
-		silenceLimit   = 50     // 连续 50 帧低能量判定为说话结束（约 1.0 秒静音）
-		minSpeechLimit = 5      // 说话最少需要 5 帧高能量（约 100ms），避免呼吸或环境噪声误判
+		rmsThreshold   = 800.0 // 音量检测 VAD 阈值
+		silenceLimit   = 50    // 连续 50 帧低能量判定为说话结束（约 1.0 秒静音）
+		minSpeechLimit = 5     // 说话最少需要 5 帧高能量（约 100ms），避免呼吸或环境噪声误判
 	)
 
 	utteranceCount := 0
@@ -181,7 +183,6 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 			packetCount++
 			totalBytes += int64(len(data))
 
-			// 如果尚未提取到 callId 且有 metadata 了但仍为空，使用默认名保护
 			if callID == "" {
 				callID = "unknown-session"
 			}
@@ -194,21 +195,31 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 					if speechStartFrame >= minSpeechLimit {
 						speechActive = true
 						s.Logger.Info("云枢 ASR 接收：检测到用户开始说话 (Speech Start)", "callId", callID, "rms", fmt.Sprintf("%.2f", rms))
+						audioBuffer = append(audioBuffer, data...)
 					}
+				} else {
+					audioBuffer = append(audioBuffer, data...)
 				}
 				silenceFrames = 0
 			} else {
 				if speechActive {
+					audioBuffer = append(audioBuffer, data...)
 					silenceFrames++
 					if silenceFrames >= silenceLimit {
-						// 触发整句断句与仿真语义识别
-						s.Logger.Info("云枢 ASR 接收：检测到用户说话结束 (Speech End)，启动断句寻路", "callId", callID)
+						// 触发断句物理与仿真 ASR 转换
+						s.Logger.Info("云枢 ASR 接收：检测到用户说话结束 (Speech End)，启动断句寻路", "callId", callID, "audioBytes", len(audioBuffer))
 						utteranceCount++
-						s.transcribeAndPublish(callID, utteranceCount)
+
+						// 拷贝当前音频 buffer，防止异步并发冲突
+						currentAudio := make([]byte, len(audioBuffer))
+						copy(currentAudio, audioBuffer)
+
+						s.transcribeAndPublish(callID, utteranceCount, currentAudio)
 
 						speechActive = false
 						speechStartFrame = 0
 						silenceFrames = 0
+						audioBuffer = nil
 					}
 				} else {
 					speechStartFrame = 0
@@ -234,9 +245,9 @@ func (s *ASRServer) calculateRMS(data []byte) float64 {
 	return math.Sqrt(sum / float64(samples))
 }
 
-// transcribeAndPublish 根据会话所处的可视化 IVR 卡点节点，智能提取并仿真出匹配的 ASR 文字，
+// transcribeAndPublish 根据会话所处的可视化 IVR 卡点节点，智能提取并物理转写匹配的 ASR 文字，
 // 发送 asr_speech_detected 事件到事件总线，从而推动整个流图自走运转。
-func (s *ASRServer) transcribeAndPublish(callID string, count int) {
+func (s *ASRServer) transcribeAndPublish(callID string, count int, pcmData []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -268,7 +279,6 @@ func (s *ASRServer) transcribeAndPublish(callID string, count int) {
 		currentNodeID = "node-intent" // 默认退回意图节点
 	}
 
-	// 2. 寻找当前意图路由节点的出度连线分支
 	var transcribedText string
 	var currentLabel string
 
@@ -284,38 +294,86 @@ func (s *ASRServer) transcribeAndPublish(callID string, count int) {
 		currentLabel = currentNode.Label
 	}
 
-	// 如果处于意图卡点，我们根据流图中的出度连线 (SourceHandle) 智能化地自动“自驱动”匹配！
-	if currentNode != nil && currentNode.Type == "intent" {
-		var edges []operate.AIFlowEdge
-		for i := range flow.FlowGraph.Edges {
-			if flow.FlowGraph.Edges[i].Source == currentNode.ID {
-				edges = append(edges, flow.FlowGraph.Edges[i])
+	// 2. 物理 ASR 识别机制（火山引擎语音识别）
+	var startNode *operate.AIFlowNode
+	for i := range flow.FlowGraph.Nodes {
+		if flow.FlowGraph.Nodes[i].Type == "start" {
+			startNode = &flow.FlowGraph.Nodes[i]
+			break
+		}
+	}
+
+	if len(pcmData) > 0 && startNode != nil && startNode.Metadata != nil {
+		volcAppId, _ := startNode.Metadata["volcAppId"].(string)
+		volcToken, _ := startNode.Metadata["volcToken"].(string)
+		volcCluster, _ := startNode.Metadata["volcCluster"].(string)
+
+		// 兼容大模型 Key
+		if volcAppId == "" {
+			provider, _ := startNode.Metadata["llmProvider"].(string)
+			apiKey, _ := startNode.Metadata["llmApiKey"].(string)
+			if (strings.Contains(provider, "豆包") || strings.Contains(provider, "火山")) && apiKey != "" {
+				volcToken = apiKey
+				volcAppId = "cloudshu_demo"
 			}
 		}
 
-		if len(edges) > 0 {
-			// 根据说话次数依次选取连线条件作为 ASR 识别出的文本，达成“完美自走测试”！
-			// 例如：第一次说话匹配查话费，第二次说话匹配转人工，以此类推。
-			index := (count - 1) % len(edges)
-			edge := edges[index]
-			if edge.SourceHandle != "" {
-				transcribedText = edge.SourceHandle
-				s.Logger.Info("云枢 ASR 接收：智能流图寻路匹配！自动生成符合意图的 ASR 文本", "callId", callID, "currentNode", currentLabel, "handleText", transcribedText)
+		if volcAppId != "" && volcToken != "" {
+			asrProvider, _ := startNode.Metadata["asrProvider"].(string)
+			if asrProvider == "" {
+				asrProvider = "volc"
+			}
+
+			s.Logger.Info("云枢 ASR 接收：检测到语音识别凭证，通过通用 ASR 引擎转写...", "callId", callID, "provider", asrProvider)
+			wavData := pcmToWav(pcmData, 16000, 1, 16)
+
+			configMap := map[string]any{
+				"volcAppId":   volcAppId,
+				"volcToken":   volcToken,
+				"volcCluster": volcCluster,
+			}
+			asrEng := callflow.GetASREngine(asrProvider)
+			text, err := asrEng.Transcribe(ctx, wavData, "wav", configMap)
+			if err == nil && text != "" {
+				transcribedText = text
+				s.Logger.Info("云枢 ASR 接收：物理 ASR 转译成功！", "callId", callID, "text", transcribedText)
+			} else {
+				s.Logger.Error("云枢 ASR 接收：物理 ASR 接口转译失败，将降级使用仿真寻路", "callId", callID, "error", err)
 			}
 		}
 	}
 
-	// 如果没有分支或者未能匹配成功，提供高拟真智能仿真话术
+	// 如果没有火山 key 或者物理调用失败，采用自驱动仿真匹配
 	if transcribedText == "" {
-		switch count {
-		case 1:
-			transcribedText = "你好，请问你是谁？"
-		case 2:
-			transcribedText = "我想咨询一下你们有什么功能"
-		default:
-			transcribedText = "谢谢，我没有其他问题了，再见。"
+		if currentNode != nil && currentNode.Type == "intent" {
+			var edges []operate.AIFlowEdge
+			for i := range flow.FlowGraph.Edges {
+				if flow.FlowGraph.Edges[i].Source == currentNode.ID {
+					edges = append(edges, flow.FlowGraph.Edges[i])
+				}
+			}
+
+			if len(edges) > 0 {
+				index := (count - 1) % len(edges)
+				edge := edges[index]
+				if edge.SourceHandle != "" {
+					transcribedText = edge.SourceHandle
+					s.Logger.Info("云枢 ASR 接收：智能流图寻路匹配！自动生成符合意图的 ASR 仿真文本", "callId", callID, "currentNode", currentLabel, "handleText", transcribedText)
+				}
+			}
 		}
-		s.Logger.Info("云枢 ASR 接收：未找到匹配的流程出度分支，使用智能拟真通用话术", "callId", callID, "text", transcribedText)
+
+		if transcribedText == "" {
+			switch count {
+			case 1:
+				transcribedText = "你好，请问你是谁？"
+			case 2:
+				transcribedText = "我想咨询一下你们有什么功能"
+			default:
+				transcribedText = "谢谢，我没有其他问题了，再见。"
+			}
+			s.Logger.Info("云枢 ASR 接收：未找到匹配的分支，使用仿真拟真通用话术", "callId", callID, "text", transcribedText)
+		}
 	}
 
 	// 3. 发布 asr_speech_detected 事件到总线
@@ -339,4 +397,66 @@ func (s *ASRServer) transcribeAndPublish(callID string, count int) {
 			s.Logger.Info("云枢 ASR 接收：已成功向系统发布 asr_speech_detected 领域事件", "callId", callID, "text", transcribedText)
 		}
 	}
+}
+
+// pcmToWav 在内存中将 PCM 二进制数据拼装 44-byte 标准 WAV 头。
+func pcmToWav(pcm []byte, sampleRate, channels, bits int) []byte {
+	size := len(pcm)
+	wav := make([]byte, 44+size)
+
+	// RIFF
+	copy(wav[0:4], []byte("RIFF"))
+	totalSize := uint32(36 + size)
+	wav[4] = byte(totalSize)
+	wav[5] = byte(totalSize >> 8)
+	wav[6] = byte(totalSize >> 16)
+	wav[7] = byte(totalSize >> 24)
+	copy(wav[8:12], []byte("WAVE"))
+
+	// fmt
+	copy(wav[12:16], []byte("fmt "))
+	subChunk1Size := uint32(16)
+	wav[16] = byte(subChunk1Size)
+	wav[17] = byte(subChunk1Size >> 8)
+	wav[18] = byte(subChunk1Size >> 16)
+	wav[19] = byte(subChunk1Size >> 24)
+
+	audioFormat := uint16(1)
+	wav[20] = byte(audioFormat)
+	wav[21] = byte(audioFormat >> 8)
+
+	numChannels := uint16(channels)
+	wav[22] = byte(numChannels)
+	wav[23] = byte(numChannels >> 8)
+
+	sRate := uint32(sampleRate)
+	wav[24] = byte(sRate)
+	wav[25] = byte(sRate >> 8)
+	wav[26] = byte(sRate >> 16)
+	wav[27] = byte(sRate >> 24)
+
+	byteRate := uint32(sampleRate * channels * bits / 8)
+	wav[28] = byte(byteRate)
+	wav[29] = byte(byteRate >> 8)
+	wav[30] = byte(byteRate >> 16)
+	wav[31] = byte(byteRate >> 24)
+
+	blockAlign := uint16(channels * bits / 8)
+	wav[32] = byte(blockAlign)
+	wav[33] = byte(blockAlign >> 8)
+
+	bitsPerS := uint16(bits)
+	wav[34] = byte(bitsPerS)
+	wav[35] = byte(bitsPerS >> 8)
+
+	// data
+	copy(wav[36:40], []byte("data"))
+	subChunk2Size := uint32(size)
+	wav[40] = byte(subChunk2Size)
+	wav[41] = byte(subChunk2Size >> 8)
+	wav[42] = byte(subChunk2Size >> 16)
+	wav[43] = byte(subChunk2Size >> 24)
+
+	copy(wav[44:], pcm)
+	return wav
 }

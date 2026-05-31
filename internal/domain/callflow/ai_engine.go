@@ -1,13 +1,12 @@
 package callflow
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -202,8 +201,8 @@ func (e *AIVoiceEngine) ProcessASRText(ctx context.Context, session *esl.CallSes
 	var aiResponse string
 	if startNode != nil && startNode.Metadata != nil && startNode.Metadata["llmProvider"] != nil {
 		provider, _ := startNode.Metadata["llmProvider"].(string)
-		apiKey, _ := startNode.Metadata["llmApiKey"].(string)
-		if provider != "" && apiKey != "" {
+		if provider != "" && provider != "mock" {
+			apiKey, _ := startNode.Metadata["llmApiKey"].(string)
 			model, _ := startNode.Metadata["llmModel"].(string)
 			endpoint, _ := startNode.Metadata["llmEndpoint"].(string)
 			systemPrompt, _ := startNode.Metadata["llmSystemPrompt"].(string)
@@ -212,8 +211,20 @@ func (e *AIVoiceEngine) ProcessASRText(ctx context.Context, session *esl.CallSes
 				tempVal = 0.7
 			}
 
-			logger.Info("云枢呼叫运行时：检测到商户大模型凭证，向云端 LLM 接口发起请求", "provider", provider, "model", model, "endpoint", endpoint)
-			respText, err := e.requestLLM(ctx, provider, apiKey, model, endpoint, systemPrompt, tempVal, text)
+			logger.Info("云枢呼叫运行时：检测到商户大模型绑定，通过通用引擎层发起请求", "provider", provider, "model", model, "endpoint", endpoint)
+			llmEng := GetLLMEngine(provider)
+
+			// 组装完整的 metadata 配置透传
+			configMap := make(map[string]any)
+			for k, v := range startNode.Metadata {
+				configMap[k] = v
+			}
+			configMap["llmApiKey"] = apiKey
+			configMap["llmModel"] = model
+			configMap["llmEndpoint"] = endpoint
+			configMap["llmTemperature"] = tempVal
+
+			respText, err := llmEng.GenerateReply(ctx, systemPrompt, text, configMap)
 			if err == nil && respText != "" {
 				aiResponse = respText
 				logger.Info("云枢呼叫运行时：成功接收到云端大模型应答文本", "reply", aiResponse)
@@ -439,8 +450,82 @@ func (e *AIVoiceEngine) playDefaultPrompt(ctx context.Context, callID string, cu
 	return e.playbackTTS(ctx, callID, customerUUID, fsAddr, defaultText)
 }
 
-// playbackTTS 下发 TTS 语音播报指令给 FreeSWITCH 媒体通道。
+// playbackTTS 下发 TTS 语音播报指令给 FreeSWITCH 媒体通道（支持多厂商物理接入并提供本地 MD5 缓存功能）。
 func (e *AIVoiceEngine) playbackTTS(ctx context.Context, callID string, customerUUID string, fsAddr string, text string) error {
+	var playFile string
+	var volcAppId, volcToken, volcCluster string
+	var volcVoiceType, ttsProvider string
+	var volcSpeedRatio float64 = 1.0
+
+	// 1. 尝试从通话会话元数据中提取 AI 配置
+	session, err := e.SessionStore.Get(ctx, callID)
+	if err == nil {
+		var flow operatedomain.AIModelFlow
+		if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
+			_ = json.Unmarshal([]byte(flowJSON), &flow)
+		}
+		if flow.FlowGraph != nil {
+			var startNode *operatedomain.AIFlowNode
+			for i := range flow.FlowGraph.Nodes {
+				if flow.FlowGraph.Nodes[i].Type == "start" {
+					startNode = &flow.FlowGraph.Nodes[i]
+					break
+				}
+			}
+			if startNode != nil && startNode.Metadata != nil {
+				volcAppId, _ = startNode.Metadata["volcAppId"].(string)
+				volcToken, _ = startNode.Metadata["volcToken"].(string)
+				volcCluster, _ = startNode.Metadata["volcCluster"].(string)
+				volcVoiceType, _ = startNode.Metadata["volcVoiceType"].(string)
+				ttsProvider, _ = startNode.Metadata["ttsProvider"].(string)
+				if val, ok := startNode.Metadata["volcSpeedRatio"].(float64); ok && val > 0 {
+					volcSpeedRatio = val
+				}
+
+				// 尝试兼容大模型 Key 字段作为 ASR/TTS 凭证
+				if volcAppId == "" {
+					provider, _ := startNode.Metadata["llmProvider"].(string)
+					apiKey, _ := startNode.Metadata["llmApiKey"].(string)
+					if (strings.Contains(provider, "豆包") || strings.Contains(provider, "火山")) && apiKey != "" {
+						volcToken = apiKey
+						volcAppId = "cloudshu_demo"
+					}
+				}
+			}
+		}
+	}
+
+	// 2. 如果配置了火山/豆包语音合成凭证，物理启动通用 TTS 引擎
+	if volcAppId != "" && volcToken != "" {
+		configMap := map[string]any{
+			"volcAppId":      volcAppId,
+			"volcToken":      volcToken,
+			"volcCluster":    volcCluster,
+			"volcVoiceType":  volcVoiceType,
+			"volcSpeedRatio": volcSpeedRatio,
+		}
+		if ttsProvider == "" {
+			ttsProvider = "volc"
+		}
+		filePath, err := SynthesizeAndCacheTTS(ctx, text, ttsProvider, configMap)
+		if err == nil {
+			absPath, err := filepath.Abs(filePath)
+			if err == nil {
+				playFile = absPath
+			} else {
+				playFile = filePath
+			}
+		} else {
+			e.logger().Error("云枢呼叫运行时：物理 TTS 引擎合成失败，降级使用虚拟模拟播放", "error", err)
+		}
+	}
+
+	if playFile == "" {
+		playFile = fmt.Sprintf("tts://%s", text)
+	}
+
+	e.logger().Info("云枢呼叫运行时：物理执行 FreeSWITCH 播发命令", "file", playFile)
+
 	cmd := telephony.NewCommand(
 		fmt.Sprintf("playback:%s:tts", callID),
 		"playback",
@@ -450,7 +535,7 @@ func (e *AIVoiceEngine) playbackTTS(ctx context.Context, callID string, customer
 		contracts.LegRoleCustomer,
 		contracts.CallFlowInbound,
 		map[string]any{
-			"file": fmt.Sprintf("tts://%s", text), // 模拟 TTS 播报路径驱动
+			"file": playFile,
 			"both": "aleg",
 		},
 	)
@@ -483,91 +568,6 @@ func (e *AIVoiceEngine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.Default()
-}
-
-// ChatCompletionMessage 表示 OpenAI/DeepSeek 兼容的单条对话消息格式。
-type ChatCompletionMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// ChatCompletionRequest 表示 OpenAI 格式的 Chat Completion 请求负载。
-type ChatCompletionRequest struct {
-	Model       string                  `json:"model"`
-	Messages    []ChatCompletionMessage `json:"messages"`
-	Temperature float64                 `json:"temperature"`
-}
-
-// ChatCompletionResponse 表示大模型返回的选择应答。
-type ChatCompletionResponse struct {
-	Choices []struct {
-		Message ChatCompletionMessage `json:"message"`
-	} `json:"choices"`
-}
-
-// requestLLM 发起物理 HTTP 请求到 OpenAI/DeepSeek 兼容大模型网关，返回动态生成文本。
-func (e *AIVoiceEngine) requestLLM(ctx context.Context, provider, apiKey, model, endpoint, systemPrompt string, temp float64, userText string) (string, error) {
-	if endpoint == "" {
-		if provider == "DeepSeek" {
-			endpoint = "https://api.deepseek.com/v1/chat/completions"
-		} else {
-			endpoint = "https://api.openai.com/v1/chat/completions"
-		}
-	}
-	if model == "" {
-		if provider == "DeepSeek" {
-			model = "deepseek-chat"
-		} else {
-			model = "gpt-4o"
-		}
-	}
-	if systemPrompt == "" {
-		systemPrompt = "您是云枢呼叫中心智能客服机器人。"
-	}
-
-	reqBody := ChatCompletionRequest{
-		Model: model,
-		Messages: []ChatCompletionMessage{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userText},
-		},
-		Temperature: temp,
-	}
-
-	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("bad llm response status: %d", resp.StatusCode)
-	}
-
-	var respBody ChatCompletionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		return "", err
-	}
-
-	if len(respBody.Choices) > 0 {
-		return respBody.Choices[0].Message.Content, nil
-	}
-
-	return "", errors.New("empty response from large language model")
 }
 
 // mockLLMGenerate 在没有配置云端大模型 API key 时，根据 systemPrompt 和输入智能模拟生成动态应答。

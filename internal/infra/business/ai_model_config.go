@@ -14,18 +14,23 @@ import (
 
 // AIModelConfigModel 映射 `cc_biz_ai_model_config` 数据库表。
 type AIModelConfigModel struct {
-	ID           int       `gorm:"column:id;primaryKey"`
-	Name         string    `gorm:"column:name"`
-	Provider     string    `gorm:"column:provider"`
-	ModelName    string    `gorm:"column:model_name"`
-	Endpoint     string    `gorm:"column:endpoint"`
-	ApiKey       string    `gorm:"column:api_key"`
-	Temperature  float64   `gorm:"column:temperature"`
-	SystemPrompt string    `gorm:"column:system_prompt;type:text"`
-	Description  string    `gorm:"column:description"`
-	DelFlag      bool      `gorm:"column:del_flag"`
-	CreatedTime  time.Time `gorm:"column:created_time"`
-	UpdatedTime  time.Time `gorm:"column:updated_time"`
+	ID             int       `gorm:"column:id;primaryKey"`
+	Name           string    `gorm:"column:name"`
+	Provider       string    `gorm:"column:provider"`
+	ModelName      string    `gorm:"column:model_name"`
+	Endpoint       string    `gorm:"column:endpoint"`
+	ApiKey         string    `gorm:"column:api_key"`
+	Temperature    float64   `gorm:"column:temperature"`
+	SystemPrompt   string    `gorm:"column:system_prompt;type:text"`
+	Description    string    `gorm:"column:description"`
+	VolcAppId      string    `gorm:"column:volc_app_id"`
+	VolcToken      string    `gorm:"column:volc_token"`
+	VolcCluster    string    `gorm:"column:volc_cluster"`
+	VolcVoiceType  string    `gorm:"column:volc_voice_type"`
+	VolcSpeedRatio float64   `gorm:"column:volc_speed_ratio"`
+	DelFlag        bool      `gorm:"column:del_flag"`
+	CreatedTime    time.Time `gorm:"column:created_time"`
+	UpdatedTime    time.Time `gorm:"column:updated_time"`
 }
 
 // TableName 返回 AI 模型配置表名。
@@ -164,29 +169,39 @@ func (r *MemoryAIModelConfigRepository) Delete(_ context.Context, ids []int) err
 
 func aiModelConfigFromModel(m AIModelConfigModel) operatedomain.AIModelConfig {
 	return operatedomain.AIModelConfig{
-		ID:           m.ID,
-		Name:         m.Name,
-		Provider:     m.Provider,
-		ModelName:    m.ModelName,
-		Endpoint:     m.Endpoint,
-		ApiKey:       m.ApiKey,
-		Temperature:  m.Temperature,
-		SystemPrompt: m.SystemPrompt,
-		Description:  m.Description,
-		UpdatedAt:    m.UpdatedTime,
+		ID:             m.ID,
+		Name:           m.Name,
+		Provider:       m.Provider,
+		ModelName:      m.ModelName,
+		Endpoint:       m.Endpoint,
+		ApiKey:         m.ApiKey,
+		Temperature:    m.Temperature,
+		SystemPrompt:   m.SystemPrompt,
+		Description:    m.Description,
+		VolcAppId:      m.VolcAppId,
+		VolcToken:      m.VolcToken,
+		VolcCluster:    m.VolcCluster,
+		VolcVoiceType:  m.VolcVoiceType,
+		VolcSpeedRatio: m.VolcSpeedRatio,
+		UpdatedAt:      m.UpdatedTime,
 	}
 }
 
 func aiModelConfigToModel(c operatedomain.AIModelConfig) AIModelConfigModel {
 	return AIModelConfigModel{
-		ID:           c.ID,
-		Name:         c.Name,
-		Provider:     c.Provider,
-		ModelName:    c.ModelName,
-		Endpoint:     c.Endpoint,
-		ApiKey:       c.ApiKey,
-		Temperature:  c.Temperature,
-		SystemPrompt: c.SystemPrompt,
-		Description:  c.Description,
+		ID:             c.ID,
+		Name:           c.Name,
+		Provider:       c.Provider,
+		ModelName:      c.ModelName,
+		Endpoint:       c.Endpoint,
+		ApiKey:         c.ApiKey,
+		Temperature:    c.Temperature,
+		SystemPrompt:   c.SystemPrompt,
+		Description:    c.Description,
+		VolcAppId:      c.VolcAppId,
+		VolcToken:      c.VolcToken,
+		VolcCluster:    c.VolcCluster,
+		VolcVoiceType:  c.VolcVoiceType,
+		VolcSpeedRatio: c.VolcSpeedRatio,
 	}
 }

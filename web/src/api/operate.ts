@@ -1216,6 +1216,11 @@ export type AiModelConfigItem = {
   temperature: number
   systemPrompt: string
   description?: string
+  volcAppId?: string
+  volcToken?: string
+  volcCluster?: string
+  volcVoiceType?: string
+  volcSpeedRatio?: number
 }
 
 export async function fetchAiModelConfigs() {
@@ -1232,6 +1237,22 @@ export async function saveAiModelConfig(payload: AiModelConfigItem) {
 
 export async function deleteAiModelConfigs(ids: number[]) {
   const { data } = await http.post('/merchant/ai-model-config/delete', ids.map(id => ({ id })))
+  return data
+}
+
+export interface AiProviderItem {
+  value: string
+  label: string
+  emoji: string
+  color: string
+  implemented?: boolean
+  supportAsr?: boolean
+  supportTts?: boolean
+  supportLlm?: boolean
+}
+
+export async function fetchAiProviders() {
+  const { data } = await http.get<AiProviderItem[]>('/merchant/ai-model-flow/providers')
   return data
 }
 
