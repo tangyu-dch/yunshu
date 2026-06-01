@@ -111,9 +111,6 @@ export const TTS_VOICES_BY_PROVIDER: Record<string, { label: string; value: stri
     { label: '🎤 智雅 (标准女声)', value: '101001' },
     { label: '🎙️ 智宽 (标准男声)', value: '101002' },
     { label: '👧 智美 (客服女声)', value: '101016' },
-  ],
-  mock: [
-    { label: '🤖 虚拟仿真发声', value: 'mock_voice' }
   ]
 };
 
@@ -404,8 +401,7 @@ export function AiModelFlowDesigner() {
     { value: 'openai', label: 'OpenAI 兼容接口', emoji: '🌐', color: 'purple', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'ali', label: '阿里通义千问 Qwen', emoji: '☁️', color: 'geekblue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'tencent', label: '腾讯混元 Hunyuan', emoji: '🐧', color: 'blue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
-    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
-    { value: 'mock', label: '云枢自研仿真大模型 (MOCK)', emoji: '🤖', color: 'gold', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
+    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
   ], [])
 
   const providers = providersList || DEFAULT_PROVIDERS

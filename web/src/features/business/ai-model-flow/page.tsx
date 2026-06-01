@@ -95,8 +95,7 @@ export function AiModelFlowPage() {
     { value: 'openai', label: 'OpenAI 兼容接口', emoji: '🌐', color: 'purple', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'ali', label: '阿里通义千问 Qwen', emoji: '☁️', color: 'geekblue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'tencent', label: '腾讯混元 Hunyuan', emoji: '🐧', color: 'blue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
-    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
-    { value: 'mock', label: '云枢自研仿真大模型 (MOCK)', emoji: '🤖', color: 'gold', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
+    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
   ], [])
 
   const providers = providersList || DEFAULT_PROVIDERS
@@ -838,31 +837,7 @@ export function AiModelFlowPage() {
                 )
               }
 
-              if (provider === 'mock') {
-                return (
-                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
-                    <span className="text-slate-800 dark:text-sky-400 font-bold text-xs block mb-3">🤖 系统仿真模拟语音设置</span>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <Form.Item
-                        name="volcVoiceType"
-                        label="仿真播报发音人"
-                      >
-                        <Select style={{ width: '100%' }} placeholder="默认仿真模拟音色">
-                          <Select.Option value="mock_voice">🤖 默认高拟真仿真语音</Select.Option>
-                        </Select>
-                      </Form.Item>
 
-                      <Form.Item
-                        name="volcSpeedRatio"
-                        label="TTS 朗读语速"
-                      >
-                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
-                      </Form.Item>
-                    </div>
-                  </div>
-                )
-              }
 
               return null
             }}
