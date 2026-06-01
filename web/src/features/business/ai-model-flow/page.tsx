@@ -654,53 +654,219 @@ export function AiModelFlowPage() {
             <Input.TextArea rows={4} placeholder="您是云枢智能话务员，请根据用户的提问礼貌回答..." />
           </Form.Item>
 
-          <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
-            <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🌋 火山引擎豆包语音配置 (ASR/TTS 可选)</span>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <Form.Item
-                name="volcAppId"
-                label="火山语音 AppId"
-              >
-                <Input placeholder="Application ID" />
-              </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, curr) => prev.provider !== curr.provider}>
+            {({ getFieldValue }) => {
+              const provider = getFieldValue('provider') || 'deepseek'
+              
+              if (provider === 'volc') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🌋 火山引擎豆包语音配置 (ASR/TTS 可选)</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcAppId"
+                        label="火山语音 AppId"
+                      >
+                        <Input placeholder="Application ID" />
+                      </Form.Item>
 
-              <Form.Item
-                name="volcCluster"
-                label="ASR 集群"
-              >
-                <Input placeholder="ASR 默认 volc_common_asr" />
-              </Form.Item>
-            </div>
+                      <Form.Item
+                        name="volcCluster"
+                        label="ASR 集群"
+                      >
+                        <Input placeholder="ASR 默认 volc_common_asr" />
+                      </Form.Item>
+                    </div>
 
-            <Form.Item
-              name="volcToken"
-              label="火山语音 Access Token"
-            >
-              <Input.Password placeholder="火山 OpenSpeech 鉴权 Token" />
-            </Form.Item>
+                    <Form.Item
+                      name="volcToken"
+                      label="火山语音 Access Token"
+                    >
+                      <Input.Password placeholder="火山 OpenSpeech 鉴权 Token" />
+                    </Form.Item>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Form.Item
-                name="volcVoiceType"
-                label="豆包发音人音色"
-              >
-                <Select style={{ width: '100%' }} placeholder="默认豆包女声">
-                  <Select.Option value="bv001_streaming">🎤 豆包女声 (极具情感)</Select.Option>
-                  <Select.Option value="bv002_streaming">🎙️ 豆包男声 (专业高保真)</Select.Option>
-                  <Select.Option value="bv051_streaming">📚 豆包说书 (自然流畅)</Select.Option>
-                  <Select.Option value="bv004_streaming">🎮 豆包游戏 (朝气灵动)</Select.Option>
-                </Select>
-              </Form.Item>
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcVoiceType"
+                        label="豆包发音人音色"
+                      >
+                        <Select style={{ width: '100%' }} placeholder="默认豆包女声">
+                          <Select.Option value="bv001_streaming">🎤 豆包女声 (极具情感)</Select.Option>
+                          <Select.Option value="bv002_streaming">🎙️ 豆包男声 (专业高保真)</Select.Option>
+                          <Select.Option value="bv051_streaming">📚 豆包说书 (自然流畅)</Select.Option>
+                          <Select.Option value="bv004_streaming">🎮 豆包游戏 (朝气灵动)</Select.Option>
+                        </Select>
+                      </Form.Item>
 
-              <Form.Item
-                name="volcSpeedRatio"
-                label="TTS 朗读语速"
-              >
-                <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
-              </Form.Item>
-            </div>
-          </div>
+                      <Form.Item
+                        name="volcSpeedRatio"
+                        label="TTS 朗读语速"
+                      >
+                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                )
+              }
+
+              if (provider === 'ali') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-sky-400 font-bold text-xs block mb-3">☁️ 阿里云 ASR/TTS 语音设置 (可选)</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcAppId"
+                        label="阿里语音 AppKey"
+                      >
+                        <Input placeholder="Ali AppKey" />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcToken"
+                        label="阿里语音 Access Token"
+                      >
+                        <Input.Password placeholder="阿里云 智能语音交互 Token" />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcVoiceType"
+                        label="阿里发音人音色"
+                      >
+                        <Select style={{ width: '100%' }} placeholder="默认使用小云女声">
+                          <Select.Option value="Xiaoyun">🎤 小云 (标准女声)</Select.Option>
+                          <Select.Option value="Xiaoyu">🎙️ 小宇 (温柔女声)</Select.Option>
+                          <Select.Option value="Xiaoting">📚 小婷 (甜美英文)</Select.Option>
+                          <Select.Option value="Siyue">🎙️ 思悦 (温柔男声)</Select.Option>
+                        </Select>
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcSpeedRatio"
+                        label="TTS 朗读语速"
+                      >
+                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                )
+              }
+
+              if (provider === 'tencent') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-sky-400 font-bold text-xs block mb-3">🐧 腾讯云 ASR/TTS 语音设置 (可选)</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcAppId"
+                        label="腾讯云 SecretId"
+                      >
+                        <Input placeholder="SecretId" />
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcToken"
+                        label="腾讯云 SecretKey"
+                      >
+                        <Input.Password placeholder="SecretKey" />
+                      </Form.Item>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcVoiceType"
+                        label="腾讯发音人音色"
+                      >
+                        <Select style={{ width: '100%' }} placeholder="默认使用智雅女声">
+                          <Select.Option value="101001">🎤 智雅 (标准女声)</Select.Option>
+                          <Select.Option value="101002">🎙️ 智宽 (标准男声)</Select.Option>
+                          <Select.Option value="101016">📚 智美 (亲切女声)</Select.Option>
+                        </Select>
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcSpeedRatio"
+                        label="TTS 朗读语速"
+                      >
+                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                )
+              }
+
+              if (provider === 'openai') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-sky-400 font-bold text-xs block mb-3">🌐 OpenAI 语音设置 (使用上方 API Key 物理鉴权)</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcVoiceType"
+                        label="OpenAI 明星发音人"
+                      >
+                        <Select style={{ width: '100%' }} placeholder="默认使用 Alloy 音色">
+                          <Select.Option value="alloy">🎤 Alloy (中性高拟真)</Select.Option>
+                          <Select.Option value="echo">🎙️ Echo (温柔男声)</Select.Option>
+                          <Select.Option value="fable">📚 Fable (动感叙事)</Select.Option>
+                          <Select.Option value="onyx">🎙️ Onyx (低沉男声)</Select.Option>
+                          <Select.Option value="nova">🎤 Nova (明亮女声)</Select.Option>
+                          <Select.Option value="shimmer">🎙️ Shimmer (朝气女声)</Select.Option>
+                        </Select>
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcSpeedRatio"
+                        label="TTS 朗读语速"
+                      >
+                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                )
+              }
+
+              if (provider === 'deepseek') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3 text-slate-500 text-xs bg-slate-50 dark:bg-slate-900/40 p-4 rounded-xl leading-relaxed">
+                    💡 <strong>DeepSeek 厂商专属提示</strong>：DeepSeek 官方主要提供卓越的大语言模型推理决断能力。其语音识别 (ASR) 与合成 (TTS) 服务，建议您在连线流图画布中级联绑定火山或阿里语音服务进行混合推流。此处无需额外配置专属语音参数。
+                  </div>
+                )
+              }
+
+              if (provider === 'mock') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-sky-400 font-bold text-xs block mb-3">🤖 系统仿真模拟语音设置</span>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <Form.Item
+                        name="volcVoiceType"
+                        label="仿真播报发音人"
+                      >
+                        <Select style={{ width: '100%' }} placeholder="默认仿真模拟音色">
+                          <Select.Option value="mock_voice">🤖 默认高拟真仿真语音</Select.Option>
+                        </Select>
+                      </Form.Item>
+
+                      <Form.Item
+                        name="volcSpeedRatio"
+                        label="TTS 朗读语速"
+                      >
+                        <InputNumber min={0.5} max={2.0} step={0.1} style={{ width: '100%' }} placeholder="默认 1.0" />
+                      </Form.Item>
+                    </div>
+                  </div>
+                )
+              }
+
+              return null
+            }}
+          </Form.Item>
 
           <Form.Item
             name="description"
