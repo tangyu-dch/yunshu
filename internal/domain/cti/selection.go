@@ -31,6 +31,7 @@ type NumberCandidate struct {
 	BroadcastTime      int64  `json:"broadcastTime,omitempty"`
 	BroadcastTimeFlag  bool   `json:"broadcastTimeFlag,omitempty"`
 	Concurrency        int    `json:"concurrency"`
+	GatewayConcurrency int    `json:"gatewayConcurrency,omitempty"` // 网关全局物理并发上限限制，用于运行时与号码并发进行双重级联限制校验
 	Available          bool   `json:"available"`
 	RiskAllowed        bool   `json:"riskAllowed"`
 	WhitelistHit       bool   `json:"whitelistHit"`

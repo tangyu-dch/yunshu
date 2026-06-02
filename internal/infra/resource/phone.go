@@ -167,6 +167,7 @@ ORDER BY gw.priority ASC, gw.id ASC, pp.id ASC
 			BroadcastTime:      int64(row.BroadcastTime),
 			BroadcastTimeFlag:  row.BroadcastTimeFlag,
 			Concurrency:        concurrency,
+			GatewayConcurrency: row.GatewayConcurrency,
 			Available:          true,
 			RiskAllowed:        true,
 			Priority:           row.Priority,
