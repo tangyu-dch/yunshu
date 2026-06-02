@@ -356,6 +356,15 @@ cti:
     # 绑定内网私有 IP 进行监听，同时向外宣告外部公网 IP 用于 NAT 穿越
     listen=udp:<KAMAILIO_PRIVATE_IP>:5060 advertise <KAMAILIO_PUBLIC_IP>:5060
     ```
+  - **多租户多域注册鉴权哈希变换 (`kamailio.cfg`)**：
+    当开启多域租户鉴权时，Kamailio 可在脚本中使用变换语法（`{s.md5}`）生成动态哈希，用于与后端 Go 服务自动计算并写入 `cc_res_extension` 表的密文进行安全比对（无需直读明文）：
+    ```kamailio
+    # Kamailio 脚本中变量拼接及 MD5 变换计算语法
+    $var(ha1_v) = $var(username) + ":" + $var(domain) + ":" + $var(password);
+    $var(ha1b_v) = $var(username) + "@" + $var(domain) + ":" + $var(domain) + ":" + $var(password);
+    $var(ha1) = $(var(ha1_v){s.md5});
+    $var(ha1b) = $(var(ha1b_v){s.md5});
+    ```
   - **后端路由与心跳检测 (`dispatcher.list`)**：
     配置后端隐藏的 FreeSWITCH 节点池（使用内网私有 IP 地址），并通过 SIP OPTIONS 包对各节点执行秒级存活心跳探测：
     ```text

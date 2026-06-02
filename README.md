@@ -350,6 +350,15 @@ Here is the integration and configuration modification guide for the core VoIP c
     # Bind to private interface and advertise public IP for NAT traversal
     listen=udp:<KAMAILIO_PRIVATE_IP>:5060 advertise <KAMAILIO_PUBLIC_IP>:5060
     ```
+  - **Multi-Tenant SIP Digest Hashing Transformations (`kamailio.cfg`)**:
+    When multi-domain tenant authentication is enabled, Kamailio scripts can leverage the MD5 transformation syntax (`{s.md5}`) to compute hashes on the fly and verify them against the pre-calculated keys stored in `cc_res_extension` table:
+    ```kamailio
+    # Kamailio routing script variables mapping and MD5 transformation syntax
+    $var(ha1_v) = $var(username) + ":" + $var(domain) + ":" + $var(password);
+    $var(ha1b_v) = $var(username) + "@" + $var(domain) + ":" + $var(domain) + ":" + $var(password);
+    $var(ha1) = $(var(ha1_v){s.md5});
+    $var(ha1b) = $(var(ha1b_v){s.md5});
+    ```
   - **Backend Gateway List (`dispatcher.list`)**:
     Map your hidden FreeSWITCH nodes (using their private IP addresses) and configure SIP OPTIONS pinging to monitor node health dynamically:
     ```text
