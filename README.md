@@ -11,6 +11,13 @@
 
 ---
 
+## 📞 Official Desktop Client: Yunshu-Phone
+
+**Yunshu** has an exclusive, official companion desktop softphone client: **[Yunshu-Phone](https://github.com/tangyu-dch/yunshu-phone.git)**. 
+Built with **Go + Wails v2 + React 18**, it provides a natively compiled, high-performance CTI workspace for telemarketing agents. **Please note that Yunshu-Phone is the ONLY supported desktop client for this backend.**
+
+---
+
 ## 🏗️ 1. Architecture Overview & Component Boundaries
 
 Yunshu adopts a highly cohesive, loosely coupled Domain-Driven Design (DDD) microservices layout. Hotspots can be scaled horizontally and independently in cloud-native production environments, while an All-in-One process launcher (`cc-all`) is provided to spin up all services instantly in development and local staging environments:
@@ -82,6 +89,37 @@ Here is a preview of the Visual AI Flow Designer and the Global AI Provider Conf
 | :---: |
 | ![Start Node - Model Auto-Fill](docs/images/quick_config_fill.png) |
 | *Declarative dynamic schema inspector supporting quick credential autofill* |
+
+#### 🏢 System Operations Portal Gallery (Operator - `/operate`)
+Here is a preview of the core management panels of the System Operations Portal:
+
+| 📊 System Dashboard | 🔌 Softswitch Instance Pool & Leases |
+| :---: | :---: |
+| ![System Dashboard](docs/images/operate_dashboard.png) | ![Softswitch Instance Pool & Leases](docs/images/operate_freeswitch.png) |
+| *Real-time high-concurrency traffic metrics and system throughput overview* | *FreeSWITCH instance heartbeat monitor and active dynamic leasing registry* |
+
+| 🎛️ SIP Gateway Management | 🏢 Merchant Billing & Subscription |
+| :---: | :---: |
+| ![SIP Gateway Management](docs/images/operate_gateway.png) | ![Merchant Billing & Subscription](docs/images/operate_merchant.png) |
+| *Telephony carrier trunk registration and concurrent channel limit management* | *Merchant onboarding, financial ledgers, and billing balance lifecycle* |
+
+| ☎️ SIP Extension Center | ⚙️ Number Selection & Risk Control |
+| :---: | :---: |
+| ![SIP Extension Center](docs/images/operate_extension.png) | ![Number Selection & Risk Control](docs/images/operate_risk_control.png) |
+| *Multi-tenant extension credentials, SIP passwords, and active registration state* | *High-concurrency atomic pool selection, rate limiting, and blacklist guard* |
+
+#### 💼 Merchant Control Center Gallery (Merchant - `/merchant`)
+Here is a preview of the Merchant Portal for bulk dialing, real-time calling, and audio CDR audit:
+
+| 🚀 Automated Outbound Dialing | 📞 WebRTC SIP Webphone Dialpad |
+| :---: | :---: |
+| ![Automated Outbound Dialing](docs/images/merchant_batch_task.png) | ![WebRTC SIP Webphone Dialpad](docs/images/merchant_webrtc_dialpad.png) |
+| *Secure bulk customer contact list import, sanitization, and automated scheduling* | *Built-in SIP stack in a sleek HTML5 web telephone workstation* |
+
+| 🎙️ CDR Logs & Voice Recording Audit | 👥 Agent Skill Group Queue |
+| :---: | :---: |
+| ![CDR Logs & Voice Recording Audit](docs/images/merchant_call_record.png) | ![Agent Skill Group Queue](docs/images/merchant_skill_group.png) |
+| *Real-time call data record streams with embedded audio waveform player* | *Merchant call center agent queuing, queue binding, and call distribution strategy* |
 
 ### 🎙️ mod_audio_stream real-time RTP voice gateway & Native Go VAD
 *   **RTP Voice Stream Bypass**: Fully compliant with FreeSWITCH `mod_audio_stream`. When an ASR state node triggers, `cc-call` commands FreeSWITCH via ESL to stream raw channel audio (16k high-definition, mono) via a low-latency WebSocket connection.

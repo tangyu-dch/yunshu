@@ -83,6 +83,37 @@
 | ![开始节点 - 模型快捷反填展示](docs/images/quick_config_fill.png) |
 | *Start 节点声明式 Schema 动态表单与快捷反填卡片联动* |
 
+#### 🏢 系统运营平台全景画廊 (运营端 - `/operate`)
+以下是云枢电信级系统运营平台的核心管理面板预览：
+
+| 📊 系统总览看板 | 🔌 软交换节点池与状态租约 |
+| :---: | :---: |
+| ![系统总览看板](docs/images/operate_dashboard.png) | ![软交换节点池与状态租约](docs/images/operate_freeswitch.png) |
+| *全局高并发实时话务指标与系统吞吐量总览面板* | *物理 FreeSWITCH 实例心跳监测与动态租约注册表* |
+
+| 🎛️ 主被叫 SIP 网关管理 | 🏢 商户余额与计费授权中心 |
+| :---: | :---: |
+| ![主被叫 SIP 网关管理](docs/images/operate_gateway.png) | ![商户余额与计费授权中心](docs/images/operate_merchant.png) |
+| *电信级中继 SIP 网关注册与物理并发信道限额管理* | *商户主体准入、账户计费流水与余额扣减生命周期管理* |
+
+| ☎️ SIP 分机配置中心 | ⚙️ 动态选号规则与频次风控 |
+| :---: | :---: |
+| ![SIP 分机配置中心](docs/images/operate_extension.png) | ![动态选号规则与频次风控](docs/images/operate_risk_control.png) |
+| *SaaS 分机配置、SIP 密码分发与在线/忙碌注册表实时自省* | *高并发外呼号码源原子级分配、频次盲区过滤与黑白名单机制* |
+
+#### 💼 商户控制台全景画廊 (商户端 - `/merchant`)
+以下是商户端进行批量话务导入、在线 WebRTC 呼叫与通话审计的核心工作台预览：
+
+| 🚀 批量外呼自动化任务调度 | 📞 WebRTC 嵌入式软电话拨号盘 |
+| :---: | :---: |
+| ![批量外呼自动化任务调度](docs/images/merchant_batch_task.png) | ![WebRTC 嵌入式软电话拨号盘](docs/images/merchant_webrtc_dialpad.png) |
+| *批量客户号码文件安全导入、名单清洗与并发自动呼叫引擎* | *内嵌 SIP 协议栈的实时音视频网页电话软终端工作台* |
+
+| 🎙️ 通话记录与录音回放审计 | 👥 技能组坐席与话务分配 |
+| :---: | :---: |
+| ![通话记录与录音回放审计](docs/images/merchant_call_record.png) | ![👥 技能组坐席与话务分配](docs/images/merchant_skill_group.png) |
+| *带可视化音频波形播放器的高并发 CDR 审计与话单推送控制台* | *商户坐席队列绑定、话务转接与负载均衡分配策略中心* |
+
 ### 🎙️ mod_audio_stream 旁路实时推流与 Go 原生 PCM VAD 语音网关
 *   **实时音频推流**：兼容 FreeSWITCH `mod_audio_stream` 实时流媒体协议。在话务流转到 ASR 节点时，自动通过 ESL 下发 `uuid_audio_stream` 指令，在 `16k` 高清和 `mono` 单声道下，将信道中的原始音频（RTP PCM）通过 WebSocket 旁路近乎零延迟投递给大模型服务。
 *   **原生 ASR WebSocket 网关**：内置高性能 WebSocket 服务器（默认监听 `9002` 端口），物理接收 FreeSWITCH 投递过来的 PCM 原始二进制音频帧，物理进行音量能量 RMS 计算。
