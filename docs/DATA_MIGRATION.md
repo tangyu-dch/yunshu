@@ -58,19 +58,21 @@ The Go rewrite adds a supplemental lease table so multiple `cc-call` instances d
 
 ## Extension Table
 
-API outbound must reuse the  `extension` table to resolve the agent extension by `user_id`. The same table now also has a cc-console management surface so operators can create, update, enable, disable, and delete extensions without raw SQL.
+API outbound must reuse the unified `cc_res_extension` table to resolve the agent extension by `user_id`. The same table now also has a cc-console management surface so operators can create, update, enable, disable, and delete extensions without raw SQL.
 
-- table name: `extension`
+- table name: `cc_res_extension`
 -  entity: `com.dolphin.datasource.model.entity.ExtensionDO`
-- Go model: `internal/infra/directory.ExtensionModel`
+- Go model: `internal/infra/resource.ExtensionModel`
 - primary key: `id`
 - soft delete field: `del_flag`
 - enable field: `enable`
 - lookup field: `user_id`
-- business fields: `extension_number`, `password`, `merchant_id`, `bind_type` (1 for Manual, 2 for Dynamic)
+- business fields: `extension_number`, `password`, `merchant_id`, `bind_type` (1 for Manual, 2 for Dynamic), `sip_domain`, `ha1`, `ha1b`
 - time fields: `created_time`, `updated_time`
 
 Production API outbound reads enabled, non-deleted extension rows before building the AGENT_FIRST originate plan. Request `extra.extension` is only a local fallback when no MySQL DSN is configured.
+
+To support secure multi-tenant authentication in Kamailio without exposing plaintext passwords, the table stores pre-calculated `ha1` and `ha1b` digests. These are automatically generated or updated on the Go side when a password changes.
 
 ## Phone Group Table
 
@@ -225,24 +227,13 @@ The Go rewrite adds a Go-native dispatcher management table for `cc-console` ope
 - time fields: `created_time`, `updated_time`
 
 This table is intended for low-QPS management operations and Kamailio reload workflows. It should not become the final SIP routing truth if a production Kamailio sync projection or external control plane is introduced later.
+## Kamailio Subscriber Table (DEPRECATED & MERGED)
 
-## Kamailio Subscriber Table
+The Go rewrite has completely deprecated and removed the standalone `kamailio_subscriber` table. 
 
-The Go rewrite adds a Go-native subscriber management table for Kamailio auth/admin flows.
+To simplify database schemas, eliminate redundant tables, and align with security requirements, the Kamailio SIP authentication and subscriber management have been fully merged into the unified extension table `cc_res_extension`. 
 
-- table name: `kamailio_subscriber`
--  entity: none, Go-native supplemental table
-- Go model: `internal/infra/directory.SubscriberModel`
-- primary key: `id`
-- soft delete field: `del_flag`
-- enable field: `enable`
-- account fields: `username`, `password`, `domain`
-- profile fields: `display_name`, `contact`
-- routing/limit fields: `call_limit`
-- description field: `description`
-- time fields: `created_time`, `updated_time`
-
-`cc-call` invalidates `kamailio:auth:*` after subscriber writes so auth caches do not drift away from the stored account configuration.
+Kamailio connects directly to the `cc_res_extension` table using `auth_db` module parameters, reading `ha1`/`ha1b` pre-calculated digests for SIP Digest authentication. `cc-call` invalidates `kamailio:auth:*` keys in Redis after extension configuration updates to prevent the cache from drifting.
 
 ## Merchant AI Flow Table
 
