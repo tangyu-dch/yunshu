@@ -365,6 +365,26 @@ cti:
     $var(ha1) = $(var(ha1_v){s.md5});
     $var(ha1b) = $(var(ha1b_v){s.md5});
     ```
+  - **开启 auth_db 模块多域及 HA1b 支持 (`kamailio.cfg`)**：
+    为使 Kamailio 能够读取我们重命名后的 `cc_res_extension` 表并进行 HA1b 哈希比对，需在 `auth_db` 模块中进行如下配置：
+    ```kamailio
+    # 加载模块
+    loadmodule "auth.so"
+    loadmodule "auth_db.so"
+
+    # 1. 禁用本地计算（必须设为 0，因为数据库只存 GORM 算好的密文，无明文密码）
+    modparam("auth_db", "calculate_ha1", 0)
+    # 2. 映射哈希字段（无域认证对比 ha1，多租户带域认证对比 ha1b）
+    modparam("auth_db", "password_column", "ha1")
+    modparam("auth_db", "password_column_2", "ha1b")
+    # 3. 启用多域支持（在 SQL 查询中自动拼接域名过滤条件）
+    modparam("auth_db", "use_domain", 1)
+
+    # 4. 对齐云枢自研的分机表名及各列属性名
+    modparam("auth_db", "db_table", "cc_res_extension")
+    modparam("auth_db", "user_column", "extension_number")
+    modparam("auth_db", "domain_column", "sip_domain")
+    ```
   - **后端路由与心跳检测 (`dispatcher.list`)**：
     配置后端隐藏的 FreeSWITCH 节点池（使用内网私有 IP 地址），并通过 SIP OPTIONS 包对各节点执行秒级存活心跳探测：
     ```text

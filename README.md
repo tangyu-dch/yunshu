@@ -359,6 +359,26 @@ Here is the integration and configuration modification guide for the core VoIP c
     $var(ha1) = $(var(ha1_v){s.md5});
     $var(ha1b) = $(var(ha1b_v){s.md5});
     ```
+  - **Enable auth_db Multi-Domain & HA1b Authentication Support (`kamailio.cfg`)**:
+    To allow Kamailio to query the renamed `cc_res_extension` table and authenticate users using the pre-computed HA1b hashes, configure the `auth_db` module as follows:
+    ```kamailio
+    # Load authentication modules
+    loadmodule "auth.so"
+    loadmodule "auth_db.so"
+
+    # 1. Disable local plaintext password hashing (must be 0 since the database stores pre-calculated GORM hashes)
+    modparam("auth_db", "calculate_ha1", 0)
+    # 2. Map target hash columns (ha1 for domain-less auth, ha1b for multi-tenant domain-bound auth)
+    modparam("auth_db", "password_column", "ha1")
+    modparam("auth_db", "password_column_2", "ha1b")
+    # 3. Enable multi-domain filtering in SELECT queries
+    modparam("auth_db", "use_domain", 1)
+
+    # 4. Map the renamed Yunshu extension table and its attributes
+    modparam("auth_db", "db_table", "cc_res_extension")
+    modparam("auth_db", "user_column", "extension_number")
+    modparam("auth_db", "domain_column", "sip_domain")
+    ```
   - **Backend Gateway List (`dispatcher.list`)**:
     Map your hidden FreeSWITCH nodes (using their private IP addresses) and configure SIP OPTIONS pinging to monitor node health dynamically:
     ```text
