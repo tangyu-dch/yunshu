@@ -1,135 +1,134 @@
-# ☁️ Yunshu (云枢) - High-Performance Distributed Intelligent Customer Service & Call Center System
+# ☁️ Yunshu - High-Performance Distributed Intelligent Customer Service & Call Center System
 
-**中文说明** | [中文版](README_zh.md)
+[中文说明](README_zh.md) | **English Version**
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/tangyu-dch/yunshu)](https://golang.org)
 [![Build Status](https://img.shields.io/badge/go--test-passed-brightgreen.svg)](https://golang.org)
 [![Frontend Safety](https://img.shields.io/badge/typescript-typesafe-blue.svg)](https://www.typescriptlang.org)
 [![Design](https://img.shields.io/badge/design-premium--neon-blueviolet.svg)](https://github.com/tangyu-dch/yunshu)
 
-**“云枢” (Yunshu)** is a state-of-the-art **distributed intelligent customer service and call center system** designed for next-generation enterprise-grade high-concurrency, highly-interactive communication scenarios. Completely rewritten on top of Go's high-performance native concurrent runtime, it deeply integrates a bottom-layer CTI concurrent telephony routing engine, a FreeSWITCH ESL signaling control core, and a multi-provider commercial-grade LLM streaming voice IVR visual orchestration workflow. It delivers an elastic, highly reliable, and second-level billing communication core suitable for single-node deployments or cloud-native containerized clusters.
+**Yunshu** is a enterprise-grade distributed customer service and call center orchestration system built for high-concurrency, transactional telephony operations. The backend is completely refactored in Go, integrating a low-latency Computer Telephony Integration (CTI) router, a FreeSWITCH ESL signaling control server, and a visual IVR workflow studio supporting multiple AI providers. It delivers high scalability, high reliability, and real-time billing settlements for enterprise customer interaction centers.
 
 ---
 
-## 📞 Official Desktop Client: Yunshu-Phone
+## 📞 Official Companion App: Yunshu-Phone
 
-**Yunshu** has an exclusive, official companion desktop softphone client: **[Yunshu-Phone](https://github.com/tangyu-dch/yunshu-phone.git)**. 
-Built with **Go + Wails v2 + React 18**, it provides a natively compiled, high-performance CTI workspace for telemarketing agents. **Please note that Yunshu-Phone is the ONLY supported desktop client for this backend.**
+**Yunshu** has a dedicated companion app for desktop agents: **[Yunshu-Phone](https://github.com/tangyu-dch/yunshu-phone.git)**.
+Built with **Go + Wails v2 + React 18**, it provides a compiled desktop agent softphone workspace. **Note: Yunshu-Phone is the only officially supported and compatible desktop terminal for Yunshu.**
 
 ---
 
-## 🏗️ 1. Architecture Overview & Component Boundaries
+## 🏗️ 1. System Architecture & Component Boundaries
 
-Yunshu adopts a highly cohesive, loosely coupled Domain-Driven Design (DDD) microservices layout. Hotspots can be scaled horizontally and independently in cloud-native production environments, while an All-in-One process launcher (`cc-all`) is provided to spin up all services instantly in development and local staging environments:
+Yunshu microservices follow Domain-Driven Design (DDD) patterns to isolate responsibilities. The architecture allows horizontal scaling of bottlenecks in a cloud-native cluster, and also supports one-click, combined-process startup (`cc-all`) for local development:
 
 ```text
                                   ┌────────────────┐
-                                  │ Outbound/Calls │
+                                  │ Telephony Req  │
                                   └───────┬────────┘
                                           │
                                           ▼
                                   ┌────────────────┐
-                                  │    cc-edge     │ (Edge gateway: Auth / Rate Limiting / Proxy)
+                                  │    cc-edge     │ (Perimeter Gateway: Rate Limit & Auth)
                                   └───────┬────────┘
                                           │
-                  ┌───────────────────────┼───────────────────────┐
-                  ▼                       ▼                       ▼
-          ┌───────────────┐       ┌───────────────┐       ┌───────────────┐
-          │  cc-console   │       │    cc-call    │       │   cc-worker   │
-          │ (Admin / APIs)│       │ (Telephony/ESL│       │(Billing/Recs/ │
-          └───────────────┘       │  ACD Control) │       │ Downstream)   │
-                                  └───────┬───────┘       └───────────────┘
-                                          │
-                                          ▼
-                           ┌─────────────────────────────┐
-                           │   FreeSWITCH Media Gateway  │
-                           └─────────────────────────────┘
+                   ┌───────────────────────┼───────────────────────┐
+                   ▼                       ▼                       ▼
+           ┌───────────────┐       ┌───────────────┐       ┌───────────────┐
+           │  cc-console   │       │    cc-call    │       │   cc-worker   │
+           │ (Console &API)│       │ (ESL & CTI)   │       │(Billing/Rec/W)│
+           └───────────────┘       └───────┬───────┘       └───────────────┘
+                                           │
+                                           ▼
+                            ┌─────────────────────────────┐
+                            │    FreeSWITCH Media Cluster │
+                            └─────────────────────────────┘
 ```
 
-### 🛰️ Component Responsibilities
-*   **`cc-edge` (Edge Gateway)**: The unified authentication, security inspection, and rate-limiting gateway. It validates merchant `X-App-Key` and `X-App-Secret` tokens, enforces precise token-bucket rate limits, and reverse-proxies requests to prevent unauthenticated access.
-*   **`cc-console` (Administration Console)**: Self-service portal for merchants and system administrators. Features financial overview charts, extension registration tracking, real-time call monitoring, Call Detail Record (CDR) auditing, and a drag-and-drop Visual AI Flow orchestration studio.
-*   **`cc-call` (Telephony Runtime)**: The real-time communications brain. It maintains high-performance TCP streams to the FreeSWITCH Event Socket Library (ESL) interface, consumes raw telephony leg state machines, handles dual-leg (agent & customer) concurrent bridging, and hosts the active **AIVoiceEngine** for smart IVR navigation.
-*   **`cc-worker` (Async Processor Center)**: Implements a reliable transactional Outbox pattern with lease acquisition (`ClaimDue`) to handle heavy asynchronous workloads with eventual consistency. Responsibilities include CDR persistence, call recording CDN uploads, precise billing settlement, and secure downstream call webhook notifications (with HMAC-SHA256 signatures).
+### Component Breakdown
+*   **`cc-edge` (Perimeter Proxy)**: Enforces access tokens (`X-App-Key` and `X-App-Secret`), token-bucket rate limits, and routes inbound requests to maintain a secure perimeter.
+*   **`cc-console` (Operator Workspace)**: Powers the merchant console and administration dashboard. Manages routing configuration, real-time channels, SIP profiles, CDR audits, and AI flow creation.
+*   **`cc-call` (Call Core)**: telecommunication engine. Manages persistent TCP connections to FreeSWITCH Event Socket interfaces, parses active events, drives outbound call legs (agent & customer), and integrates the **AIVoiceEngine** for smart IVR navigation.
+*   **`cc-worker` (Async Processor)**: Relies on GORM transaction outbox patterns and lease locks (`ClaimDue`) to handle offline CDR finalization, OSS/COS media uploads, prepaid balance adjustments, and downstream Webhook event dispatching (validated via HMAC-SHA256 signatures).
 
 ---
 
 ## 🔍 2. Technology Stack & Design Philosophy
 
-Yunshu bridges the gap between extreme execution speed and premium design aesthetics:
+Yunshu focuses on combining system throughput with interactive dashboards:
 
-### 🛠️ Back-end Architecture
-*   **Native Go Core**: Employs Go's lightweight Goroutines and low GC overhead to manage thousands of active media channels per instance with sub-20ms control latency.
-*   **GORM + MySQL Relational Persistence**: Utilizes GORM as the database abstraction layer, encapsulating strict transaction boundaries for billing ledgers and outbox queue entries.
-*   **Redis Concurrent Locks & Sync**: Relies on Redis atomic transactions and key expires to implement high-speed extension selection, skill-group queuing, and cross-instance synchronizations (via `extension:status` hashes).
+### Backend Engine
+*   **Concurrent Go Scheduler**: Exploits Goroutine scheduling and low GC overhead to run thousands of parallel ESL streams on single instances with <20ms signaling dispatch latency.
+*   **GORM Transaction Safety**: Guarantees atomic prepaid balance updates, outbox event generation, and CDR logging using isolated transactions.
+*   **Redis Selection Allocation**: Ensures atomic caller number pool checks and ACD routing decisions using Redis Lua scripts, and synchronizes real-time status via `extension:status`.
 
-### 🎨 Front-end Aesthetics
-*   **React + Vite Platform**: Built using Vite for instant HMR, combined with React for declarative component views.
-*   **React Flow Neon Engine**: Tailored React Flow layout utilizing dark mode HSL palettes, glassmorphism card surfaces (`backdrop-filter: blur`), and SVG bezier paths. During active call traversal, **animated glowing green charge particles pulse along SVG wires** to visualize real-time flow progression.
+### Frontend Neon Aesthetics
+*   **Vite & React 18 Canvas**: Renders dynamic canvas backdrops with HSL color palettes and custom SVG node routes.
+*   **React Flow Studio**: Telephony pathways in the designer light up dynamically. **Glowing digital charges float along SVG connections** to illustrate active routing logic.
+*   **Glassmorphic Interfaces**: Implements modern CSS backdrop filters (`backdrop-filter: blur`) to create interactive console elements.
 
 ---
 
-## 🌟 3. Product Features & Core Capabilities
+## 🌟 3. Core Features
 
-### 🧠 Decoupled AI Configuration & Model Center
-*   **Architectural Separation**: The dashboard provides two cleanly decoupled spaces:
-    - **🤖 AI Flow Designer**: Visual workspace to manage and publish smart voice IVR graph topographies.
-    - **🧠 AI Providers & Models**: Consolidated credential manager (`cc_biz_ai_model_config`) for cloud provider keys (DeepSeek API, OpenAI API, Tencent Hunyuan, Alibaba Qwen, Volcengine Doubao).
-*   **One-Click Auto-Fill**: Inside the Visual Designer's `Start` node, selecting a configured model automatically loads and locks the endpoint, credentials, temperature, and system prompt into the canvas metadata, removing the security risk of hardcoding API keys in visual diagrams.
+### AI Provider & Model Config Workspace
+*   **Decoupled Model Configuration**: Features a dual-page architecture:
+    - **🤖 AI Flows**: Visually configure node routing topologies in the editor.
+    - **🧠 AI Providers**: Enforce centralized API tokens and keys (DeepSeek API, OpenAI compatibility, Tencent Hunyuan, Alibaba Qwen, etc.) in `cc_biz_ai_model_config`.
+*   **Dynamic Auto-Fill**: In the designer's "Start" node, selecting a configured model auto-fills API endpoints, system prompts, temperature, and tokens using React state forms, keeping keys hidden from raw diagrams.
 
-#### 🎛️ Visual AI Flow & Configuration Gallery
-Here is a preview of the Visual AI Flow Designer and the Global AI Provider Configuration panels:
+#### Visual Designer & AI Configuration Gallery
+A preview of the visual IVR designer and the centralized AI configuration panel:
 
-| 🤖 Visual AI Flow Canvas | 🧠 Global AI Provider Credentials |
+| 🤖 Visual IVR Workflow Studio | 🧠 Unified AI Provider Dashboard |
 | :---: | :---: |
-| ![Visual AI Flow Canvas](docs/images/visual_flow_designer.png) | ![Global AI Provider Credentials](docs/images/ai_model_config.png) |
-| *Visual drag-and-drop orchestration with glowing neon routing paths* | *Decoupled global model configuration and credential manager* |
+| ![Visual IVR Workflow Studio](docs/images/visual_flow_designer.png) | ![Unified AI Provider Dashboard](docs/images/ai_model_config.png) |
+| *Supports neon charging effects and drag-and-drop IVR layout* | *Decoupled credentials and LLM parameter settings* |
 
-| ⚙️ Start Node - Model Auto-Fill |
+| ⚙️ Start Node Auto-Fill Card |
 | :---: |
-| ![Start Node - Model Auto-Fill](docs/images/quick_config_fill.png) |
-| *Declarative dynamic schema inspector supporting quick credential autofill* |
+| ![Start Node Auto-Fill Card](docs/images/quick_config_fill.png) |
+| *Form schema integration with automatic model settings mapping* |
 
-#### 🏢 System Operations Portal Gallery (Operator - `/operate`)
-Here is a preview of the core management panels of the System Operations Portal:
+#### Administration Dashboard Gallery (Operate Panel - `/operate`)
+A view of the operator control interfaces:
 
-| 📊 System Dashboard | 🔌 Softswitch Instance Pool & Leases |
+| 📊 Telephony Analytics Dashboard | 🔌 Node Pool Heartbeat Monitor |
 | :---: | :---: |
-| ![System Dashboard](docs/images/operate_dashboard.png) | ![Softswitch Instance Pool & Leases](docs/images/operate_freeswitch.png) |
-| *Real-time high-concurrency traffic metrics and system throughput overview* | *FreeSWITCH instance heartbeat monitor and active dynamic leasing registry* |
+| ![Telephony Analytics Dashboard](docs/images/operate_dashboard.png) | ![Node Pool Heartbeat Monitor](docs/images/operate_freeswitch.png) |
+| *Outbound traffic statistics and global channel metrics* | *Active FreeSWITCH instance heartbeats and event lease states* |
 
-| 🎛️ SIP Gateway Management | 🏢 Merchant Billing & Subscription |
+| 🎛️ Inbound/Outbound SIP Gateways | 🏢 Billing Ledgers & Merchants |
 | :---: | :---: |
-| ![SIP Gateway Management](docs/images/operate_gateway.png) | ![Merchant Billing & Subscription](docs/images/operate_merchant.png) |
-| *Telephony carrier trunk registration and concurrent channel limit management* | *Merchant onboarding, financial ledgers, and billing balance lifecycle* |
+| ![Inbound/Outbound SIP Gateways](docs/images/operate_gateway.png) | ![Billing Ledgers & Merchants](docs/images/operate_merchant.png) |
+| *Trunk configuration and physical concurrency cap settings* | *Prepaid balances, account validation, and CDR audits* |
 
-| ☎️ SIP Extension Center | ⚙️ Number Selection & Risk Control |
+| ☎️ Multi-Tenant SIP Extensions | ⚙️ Selection Rules & Anti-Harassment |
 | :---: | :---: |
-| ![SIP Extension Center](docs/images/operate_extension.png) | ![Number Selection & Risk Control](docs/images/operate_risk_control.png) |
-| *Multi-tenant extension credentials, SIP passwords, and active registration state* | *High-concurrency atomic pool selection, rate limiting, and blacklist guard* |
+| ![Multi-Tenant SIP Extensions](docs/images/operate_extension.png) | ![Selection Rules & Anti-Harassment](docs/images/operate_risk_control.png) |
+| *Extension provisioning, credentials, and online status monitors* | *Atomic caller routing, blind-spot filters, and blacklist checks* |
 
-#### 💼 Merchant Control Center Gallery (Merchant - `/merchant`)
-Here is a preview of the Merchant Portal for bulk dialing, real-time calling, and audio CDR audit:
+#### Merchant Portal Gallery (Merchant Panel - `/merchant`)
+Merchant workspace preview:
 
-| 🚀 Automated Outbound Dialing | 📞 WebRTC SIP Webphone Dialpad |
+| 🚀 Batch Telephony Automation | 📞 WebRTC Companion Softphone |
 | :---: | :---: |
-| ![Automated Outbound Dialing](docs/images/merchant_batch_task.png) | ![WebRTC SIP Webphone Dialpad](docs/images/merchant_webrtc_dialpad.png) |
-| *Secure bulk customer contact list import, sanitization, and automated scheduling* | *Built-in SIP stack in a sleek HTML5 web telephone workstation* |
+| ![Batch Telephony Automation](docs/images/merchant_batch_task.png) | ![WebRTC Companion Softphone](docs/images/merchant_webrtc_dialpad.png) |
+| *File importing, dialer scheduling, and task orchestration* | *Embedded WebRTC client for dialing directly from the browser* |
 
-| 🎙️ CDR Logs & Voice Recording Audit | 👥 Agent Skill Group Queue |
+| 🎙️ Call History & Audio Auditing | 👥 Skill Groups & ACD Queues |
 | :---: | :---: |
-| ![CDR Logs & Voice Recording Audit](docs/images/merchant_call_record.png) | ![Agent Skill Group Queue](docs/images/merchant_skill_group.png) |
-| *Real-time call data record streams with embedded audio waveform player* | *Merchant call center agent queuing, queue binding, and call distribution strategy* |
+| ![Call History & Audio Auditing](docs/images/merchant_call_record.png) | ![Skill Groups & ACD Queues](docs/images/merchant_skill_group.png) |
+| *CDR tables with built-in audio players for recording inspection* | *Routing policies, queues, and agent status mapping* |
 
-### 🎙️ mod_audio_stream real-time RTP voice gateway & Native Go VAD
-*   **RTP Voice Stream Bypass**: Fully compliant with FreeSWITCH `mod_audio_stream`. When an ASR state node triggers, `cc-call` commands FreeSWITCH via ESL to stream raw channel audio (16k high-definition, mono) via a low-latency WebSocket connection.
-*   **High-Performance WS Audio Gateway**: A built-in WebSocket listener (port `9002`) receives raw binary PCM packets, executing real-time Root Mean Square (RMS) energy metrics.
-*   **Native Silence Detection (VAD)**: A custom Voice Activity Detection (VAD) algorithm calculates user speech initiation (allowing instant agent interrupt) and completion (1.0s silence threshold) without bloated external binary dependencies.
+### WebSocket PCM Streaming & Low-Latency VAD Gateway
+*   **RTP Audio Stream Bypass**: Integrates with FreeSWITCH `mod_audio_stream`. Upon arriving at ASR nodes, it issues `uuid_audio_stream` commands to push raw 16k mono 16-bit PCM frames to the WebSocket ASR server with <10ms delay.
+*   **Go Audio Stream Receiver**: Handles binary RTP PCM WebSocket frames and performs Root Mean Square (RMS) decibel analysis.
+*   **VAD Algorithm**: Uses Voice Activity Detection to capture talk start (allowing interruptions) and talk end (1.0s silence threshold) directly in Go.
 
-### 🚫 Strict Physical Telephony, Zero Mock/Simulation Fallback
-*   **Absolute Fail-Closed Model**: To protect production integrity and merchant financial systems, Yunshu has fully removed any form of mock simulation or mock fallback logic. If credentials are missing, API keys are blank, or external cloud requests (ASR, TTS, or LLM) fail, the engine strictly rejects fallback. Instead, it returns a rigorous physical error to the state machine, triggering a safe, immediate Fail-Closed hangup or human-agent transfer, eliminating system "hallucinations" or mock leakages in production.
-*   **ClaimDue Distributed Lease Workers**: Multi-instance worker orchestration uses database-backed locks to coordinate Outbox task claims, preventing double-billing or downstream notification racing while ensuring automatic recovery of failed tasks.
-*   **Reliable Webhook Deliveries**: Pushes downstream CDRs via custom URLs with index retry limits, exponential backoff, and HMAC-SHA256 signature verification.
+### Strict Fail-Closed Execution (No Mock Fallbacks)
+*   **Rigid Error Handlers**: Fails closed if API keys are missing, cloud services fail, or credentials are invalid. The engine immediately rejects mock simulations, hanging up call legs or transferring to live agents to protect production billings.
+*   **Outbox-Backed Workers**: Pushes downstream CDRs via custom hooks with exponential backoffs and HMAC-SHA256 signatures, ensuring reliable deliveries.
 
 ---
 
@@ -181,7 +180,7 @@ In a distributed production environment, Yunshu components must be grouped into 
 - **Constraint**: Network latency between the signaling core (`cc-call`) and the FreeSWITCH media gateways must be **< 1ms**.
 - **Planning**: Co-locate `cc-call` and FreeSWITCH inside the **exact same private VPC subnet**. For extremely high-concurrency environments, we strongly recommend deploying `cc-call` directly on the FreeSWITCH host as a system daemon, communicating over the local loopback interface (`127.0.0.1`) to eliminate any signaling race conditions.
 
-#### 2. Stateless Scaling & Event Lease High Availability
+#### 2. Scaling & Event Lease High Availability
 - **`cc-call` Stateless Signaling Cluster**: Horizontally deploy 2+ instances of `cc-call`. To prevent multiple instances from racing or consuming the same FreeSWITCH ESL events redundantly, `cc-call` leverages a Redis-backed node registrar to dynamically claim a single active listener lease per FS node. If an instance fails, the lease expires and a standby instance takes over immediately.
 - **`cc-worker` Distributed Task Processor**: Horizontally deploy 2+ instances of `cc-worker`. Outbox queue tasks (billing settlement, recording compression, downstream Webhook pushing) are claimed and processed by competing worker instances via the atomic `ClaimDue` lease mechanic, guaranteeing zero duplicate tasks and automatic failover.
 - **Redis Sentinel & Persistent Storage**: Redis acts as the single source of truth for hot pathways (extension status, atomic balance checks, and double concurrency limits). It **MUST be deployed as a Sentinel or Redis Cluster** in production, with AOF persistence enabled to achieve sub-second state recovery.
@@ -336,55 +335,128 @@ cti:
 
 ---
 
+### 📡 4.4 Telecom-Grade VoIP Clustering (Kamailio + RTPEngine + FreeSWITCH)
+
+In large-scale production environments carrying thousands of concurrent channels, Kamailio is deployed to manage SIP control signaling and routing, RTPEngine executes high-performance kernel-space RTP media forwarding and NAT traversal, and FreeSWITCH operates securely in the private VPC zone to run CTI IVR dialplans, capture audio streams via WebSockets (`mod_audio_stream`), and handle transcoding.
+
+Here is the integration and configuration modification guide for the core VoIP clustering components:
+
+#### 1. Kamailio SIP Proxy & Router Config (`kamailio.cfg`)
+- **Role**: Handles frontend SIP registration, perimeter defense against SIP scanning attacks, and utilizes the `dispatcher` module to load balance calls across the backend FreeSWITCH gateway pool.
+- **Key Modifications**:
+  - **Backend Gateway List (`dispatcher.list`)**:
+    Map your hidden FreeSWITCH nodes and configure SIP OPTIONS pinging to monitor node health dynamically:
+    ```text
+    # setid(1) targets the active backend FreeSWITCH pool
+    1 sip:fs-node1.prod.lan:5060 0 0 weight=50
+    1 sip:fs-node2.prod.lan:5060 0 0 weight=50
+    ```
+  - **RTP Media Relay Integration (`kamailio.cfg`)**:
+    Intercept SDP payloads in the signaling flow and call RTPEngine to hijack media ports and manage NAT relays:
+    ```kamailio
+    # Load rtpengine module
+    loadmodule "rtpengine.so"
+    modparam("rtpengine", "rtpengine_sock", "udp:10.0.10.5:22222") # Address of RTPEngine UDP socket
+
+    # Handle SDP in your routing blocks
+    route[MANAGE_MEDIA] {
+        if (is_request() && has_body("application/sdp")) {
+            rtpengine_manage("trust-address replace-origin replace-session-connection");
+        } else if (is_reply() && has_body("application/sdp")) {
+            rtpengine_manage("trust-address replace-origin replace-session-connection");
+        }
+    }
+    ```
+
+#### 2. RTPEngine Media Forwarder Config (`rtpengine.conf`)
+- **Role**: Kernel-level UDP packet relay forwarding to resolve NAT and firewall traversal for public-to-private connections.
+- **Key Modifications (`/etc/rtpengine/rtpengine.conf`)**:
+  - **Dual Network Interface Binding**: Bind external and internal network interfaces to route traffic securely:
+    ```ini
+    interface = internal/10.0.10.5;external/203.0.113.5
+    ```
+  - **UDP NG Control Port**: Set the listener to match Kamailio's `rtpengine_sock` parameter:
+    ```ini
+    listen-ng = 10.0.10.5:22222
+    ```
+  - **UDP Port Range Allocation**: Keep the RTP UDP port allocation pool wide enough to support high concurrent streams:
+    ```ini
+    port-min = 30000
+    port-max = 40000
+    ```
+
+#### 3. FreeSWITCH Cluster Node Configuration (Private Subnet)
+- **Role**: Runs pure IVR state machines, call recording, audio transcribing, and streaming.
+- **Key Modifications**:
+  - **Deactivate External SIP Registration Authentication**:
+    Since Kamailio already enforces authentication at the edge, configure FreeSWITCH's internal profile (e.g. `sofia.conf.xml`) to blindly accept incoming requests from Kamailio to reduce signaling overhead:
+    ```xml
+    <!-- internal.xml -->
+    <param name="accept-blind-reg" value="true"/>
+    <param name="accept-blind-auth" value="true"/>
+    <param name="apply-inbound-acl" value="kamailio-nodes"/>
+    ```
+  - **White-List Kamailio via Access Control (`acl.conf.xml`)**:
+    Reject any SIP requests that do not originate from the Kamailio cluster:
+    ```xml
+    <list name="kamailio-nodes" default="deny">
+      <node type="allow" cidr="10.0.10.0/24"/>
+    </list>
+    ```
+  - **Bypass Media vs. Active Media IVR Routing**:
+    For direct agent-to-customer bridge calls that require no IVR or recording, apply `bypass_media` in Kamailio routing to allow RTPEngine to relay RTP packets directly (enabling thousands of concurrent calls per box). However, for **AI IVR/conversational voice flows** managed by the Yunshu engine, **you MUST route the media locally through FreeSWITCH** to allow ASR PCM streaming (`mod_audio_stream`) and native VAD break-ins.
+
+---
+
 ## 📂 5. Physical Project Directory Structure
 
 ```text
-├── cmd/                        # Service process entrypoints
-│   ├── cc-call/                # Telephony CTI ESL runtime controller
-│   ├── cc-console/             # Web administration and developer APIs
-│   ├── cc-worker/              # Async distributed billing & CDN uploader
-│   ├── cc-edge/                # Edge authentication & reverse-proxy gateway
-│   ├── cc-all/                 # All-in-One local launcher
-│   └── update-agents/          # Telephony schema code-generator
+├── cmd/                        # Executable entry points for independent microservices
+│   ├── cc-call/                # CTI ESL telephony engine
+│   ├── cc-console/             # Operations and tenant admin panel server
+│   ├── cc-worker/              # Async distributed workers
+│   ├── cc-edge/                # Edge authentication and rate limiting proxy
+│   ├── cc-all/                 # All-in-One combined runtime daemon
+│   └── update-agents/          # Generated contract updates builder
 ├── internal/
-│   ├── app/                    # System dependency assembler & Gin launcher
-│   ├── domain/                 # Core pure business logic (Zero ORM/DB/Redis imports)
-│   │   ├── callflow/           # AIVoiceEngine IVR topology & CDR flows
-│   │   ├── cti/                # ACD skill groups, Redis queues, and routing chains
-│   │   ├── esl/                # FreeSWITCH signaling abstractions & session state machine
-│   │   └── operate/            # AI configurations, billing ledger schemas, and contracts
-│   ├── transport/              # Handler adapters (Gin HTTP & Redis Stream consumers)
-│   ├── contracts/              # Shared event definitions, error codes, and key patterns
-│   └── infra/                  # GORM models, repository patterns, and outbox buffers
-├── pkg/                        # Standard utility wheels (Idempotent locks, state machines)
-├── web/                        # React + Vite visual flow editor workshop
-└── docs/                       # Architectural designs, migration logs, and API guides
+│   ├── app/                    # Dependency injection bindings & shared Gin engines
+│   ├── domain/                 # Pure domain layer (Independent of ORM/Redis)
+│   │   ├── callflow/           # AIVoiceEngine IVR flow execution
+│   │   ├── cti/                # ACD selection, selection rules & concurrency locking
+│   │   ├── esl/                # Event socket state machine and call lifecycles
+│   │   └── operate/            # Flow charts, billing template entities
+│   ├── transport/              # Transport adapters (Gin handlers, Redis Stream consumers)
+│   ├── contracts/              # Shared event envelopes, error definitions, Redis keys
+│   └── infra/                  # GORM repositories, Outbox SQL queues, Redis adapters
+├── pkg/                        # Framework-agnostic modules (Locks, state registers)
+├── web/                        # Vite + React flow workspace
+└── docs/                       # Architecture drafts and sync migration decisions
 ```
 
 ---
 
-## 🛠️ 6. Quick Start (Local Development)
+## 🛠️ 6. Running Locally
 
-### 1. Prerequisites
-*   **Go**: `Version >= 1.21`
-*   **NodeJS**: `Version >= 18`
-*   **MySQL**: `Version >= 5.7`
-*   **Redis**: `Version >= 6.0`
+### 1. Requirements
+*   **Go**: `>= 1.21`
+*   **NodeJS**: `>= 18`
+*   **MySQL**: `>= 5.7`
+*   **Redis**: `>= 6.0`
 
-### 2. Run the Front-End Workspace
+### 2. Launch Client UI
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-### 3. Launch Go Microservices (All-in-One Dev Mode)
-To simplify local debugging, use the `cc-all` launcher to spin up all four backend services in a single console terminal window:
+### 3. One-Click Combined Backend Daemons (All-in-One Mode)
+Yunshu offers a combined process (`cc-all`) which pulls up all four microservices (`cc-edge`, `cc-console`, `cc-call`, `cc-worker`) inside a single shell instance:
 ```bash
-# Copy and update local databases and connections
+# Clone the config file and edit connection details
 cp configs/default.yaml configs/local.yaml
 
-# Run All services concurrently
+# Startup cc-all sharing local parameters
 go run ./cmd/cc-all -config configs/local.yaml
 ```
 
@@ -392,55 +464,54 @@ go run ./cmd/cc-all -config configs/local.yaml
 
 ## 🗺️ 7. Development Roadmap
 
-Yunshu is aggressively migrating and refining its legacy backend modules into this highly optimized Go architecture. The following checklist details our active development milestones, completed features, and upcoming features:
+Yunshu is actively refactoring legacy call center logic into the high-performance Go microservice framework. The following checklists detail our milestones:
 
-### Phase 1: Commercial-Grade AI Decoupling & Security [100% Completed]
-*   ✅ **Multi-Provider Unified Adapters**: Real-world integration of DeepSeek, OpenAI, Tencent Hunyuan, Alibaba Qwen, and Volcengine Doubao.
-*   ✅ **Strict去仿真化 (Fail-Closed Paradigm)**: Removed all mock/simulation fallbacks to ensure production-grade safety and error-handling.
-*   ✅ **Runtime Capability Introspection**: Dynamic API endpoints to self-detect backend registration status and disable unsupported options in UI.
-*   ✅ **Dynamic Schema Cards**: Automatically load specific input fields and voices based on chosen ASR/TTS/LLM providers.
+### Phase 1: Robust AI Engine Adapter Separation [100% Completed]
+*   ✅ **Centralized Credentials Provider**: Managed models and API endpoints in GORM and database tables.
+*   ✅ **Decoupled Workflow Fields**: Eliminated mock LLM options from UI dropdowns and unified forms.
+*   ✅ **Capacity Check Self-Reflection**: Allowed services to check implementation before exposing routes.
+*   ✅ **Strict Fail-Closed Execution**: Prevented mock fallbacks to guarantee production billing logic safety.
 
-### Phase 2: High-Concurrency Telephony Rules & Event Leases [In Progress]
-*   ⏳ **Dynamic Phone Number Search & Weighted Selection**: Redis-backed rules chain to select candidate gateway numbers with atomic rate throttle.
-*   📅 **FreeSWITCH ESL Node Leases**: Claim-due lease management in `cc-call` to prevent double Event Stream subscriptions on multi-instance deployments.
-*   📅 **Early Media & Ringback Hooking**: Full tracking and execution of progress media files before call bridging.
+### Phase 2: Selection Concurrency & Event Registries [In Progress]
+*   ✅ **Double Concurrency Atomicity**: Evaluated concurrent allocations on both Gateway and Extension levels natively in Redis Lua scripts.
+*   ⏳ **Stateless ESL Lease Dispatcher**: Coordinated Event Socket listener leases among multi-instance telephony nodes.
+*   📅 **Early Media / Progress Control**: Visual ACD IVR nodes managing media channels before call leg bridges.
 
-### Phase 3: Distributed Billing Ledgers & Workflow Decoupling [Planned]
-*   ✅ **CDR Outbox Table Setup**: Native reliable outbox queue to stage basic hangup facts.
-*   📅 **Asynchronous Bill Calculation**: Separate MQ billing consumer to handle rate templates and anti-overcharge locking.
-*   📅 **Atomic Balance Deductions**: Redis Lua scripts to execute safe balance deductions with immediate overdrawn notifications.
+### Phase 3: Transaction Billing Workflows [Planned]
+*   ✅ **Durable CDR Outbox**: Buffered raw session events in reliable local database transactional outbox queues.
+*   ⏳ **Distributed Pricing Processors**: Decoupled tariff matching from critical call paths using dedicated workers.
+*   ⏳ **Real-Time Prepaid Safe-Lock**: Applied Redis Lua credits locking to mitigate balance deficits during active dialogs.
 
-### Phase 4: Reliable Asynchronous Workers & Downstream Push [In Progress]
-*   ✅ **ClaimDue Worker Core**: Distributed lock managers to claim and handle outbox queue entries.
-*   ✅ **Reliable Downstream CDR Push**: Downstream Webhooks supporting exponential backoff, state tracking, and HMAC-SHA256 signature verification.
-*   ⏳ **Async Call Recording CDN Uploads**: Background uploader for recordings, mapping upload receipts to final database indexes.
+### Phase 4: Async Compression & Notification Webhooks [In Progress]
+*   ✅ **ClaimDue Outbox Workers**: Competing daemon consumers claiming outbox events safely via DB locks.
+*   ✅ **Verified downstream Webhooks**: Cryptographically signed callback alerts with SHA256 tokens and backoffs.
+*   ⏳ **Media Compression & OSS Uploads**: Scanned and compressed audio records locally, pushing to cloud buckets asynchronously.
 
-### Phase 5: Live Database Permissions & Console Security [In Progress]
-*   ✅ **GORM Models & DB Seeds**: Schema definitions for routing permissions and seed SQL script.
-*   ⏳ **Dynamic Authorization Middleware**: Live middleware verifying operator requests against active MySQL database maps.
+### Phase 5: Dynamic Auth & Operations ACLs [In Progress]
+*   ✅ **Dynamic RBAC Schema**: Outlined console permission mappings and routes database models.
+*   ⏳ **RBAC Middleware Filters**: Load operating agent privileges from database profiles for console route evaluation.
 
 ---
 
-## ⚖️ 8. Service SLA & Disclaimer
+## ⚖️ 8. Apology & Disclaimer
 
-### 👤 Individual Developer Status
-Yunshu is an **independently developed and self-maintained open-source project. It does not belong to any corporate entity, telecom carrier, or commercial agency**. All architecture designs, code updates, and Bug fixes are carried out voluntarily by the developer out of technical passion. Because of this personal project status, please note that we cannot provide corporate-level service contracts, business invoices, or long-term on-site consulting services.
+### Individual Developer Status
+Yunshu is an **open-source refactoring project written and maintained by a single developer. It is not affiliated with any commercial company, carrier network, or enterprise entity.** All architecture rewrites and manuals are published on a voluntary basis. Because of this personal open-source nature, we do not provide enterprise-grade SLAs, commercial billing, or on-site consulting.
 
-### 🙇‍♂️ Support SLA Commitments
-As the project is currently in an active rewrite and migration phase to a high-performance Go runtime, some advanced signaling scenarios, complex dynamic ACD skills, and custom third-party gateways are still undergoing active testing and integration. We sincerely apologize for any temporary inconveniences caused during integration testing!
+### Support Commitments
+Since the system is in active development, certain advanced features are under iteration. We apologize for any temporary bugs during your evaluation.
 
-**🚀 Fast-Response Support SLA**:
-To guarantee a worry-free experience for adopters and community users, we offer high-grade support SLA commitments:
-- **Fast Diagnostic Response**: Bug reports, SIP disconnects, or general feature inquiries submitted via GitHub Issues will receive an engineering response within **2 hours** of submission.
-- **Rapid Bug Patching**: Standard bugs and configuration issues will be resolved, verified, and hotpatched into the main branch within **24 hours**. Complex FreeSWITCH signaling conflicts, high-concurrency race issues, or unique telecom carrier configurations will receive a detailed workaround or custom patch within **48 hours** to keep your business running smoothly.
+**SLA Support Resolutions**:
+- **Response**: We commit to replying to GitHub Issues or bugs within **2 Hours**.
+- **Fixes**: Bug fixes are developed and checked in within **24 Hours** for simple errors, and workarounds or patches are delivered within **48 Hours** for complex ESL signaling issues.
 
-### ⚠️ Legal Disclaimer
-1. **Compliance & Telephony Regulations**: Yunshu is built as a high-performance distributed customer service framework. Users deploying this platform for active outbound calling must strictly comply with all national and local telephony regulations, anti-fraud directives, and user privacy laws. **The developers of Yunshu assume zero liability for direct or indirect legal consequences arising from non-compliant calling campaigns, nuisance calling, database leakage, or overall platform abuse.**
-2. **Generative AI & LLM Warning**: The platform integrates third-party LLM completions. Outputs generated by external language models (e.g., DeepSeek, OpenAI, Tencent Hunyuan) are probabilistic. **Yunshu does not guarantee 100% accuracy, safety, or compliance of AI-generated responses.** Deployers must configure proper ACD transfer nodes, manual supervisor interventions, and strict fail-closed hangup rules to mitigate potential AI "hallucinations."
-3. **No Warranties**: This open-source software is licensed under the **GPL-3.0** license and is provided "AS IS," without warranties or conditions of any kind. Users assume all network and computing resource overhead risks associated with running this platform.
+### Disclaimer
+1. **Compliance**: Yunshu is built for enterprise inbound and outbound customer interaction centers. **You must comply with your region's telecom and privacy regulations**. The developer team assumes no liability for illegal telemarketing, harassment, or data leakages caused by misuse.
+2. **Generative Model AI Outputs**: Conversation nodes rely on third-party LLMs (DeepSeek, OpenAI, Tencent, etc.). **We do not guarantee the correctness or appropriateness of generative replies**. Merchants must implement safe ACD human-transfers and hangups.
+3. **No Warranties**: This open-source software is licensed under **GPL-3.0** "as-is", without warranties of any kind.
 
 ---
 
 ## 📄 9. License
 
-This project is licensed under the **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)**. Full details are available in the [LICENSE](LICENSE) file in the root directory.
+This repository is published under the **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)**. See the [LICENSE](LICENSE) file for more information.
