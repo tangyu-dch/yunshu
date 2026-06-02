@@ -405,6 +405,23 @@ Here is the integration and configuration modification guide for the core VoIP c
     ```
   - **Bypass Media vs. Active Media IVR Routing**:
     For direct agent-to-customer bridge calls that require no IVR or recording, apply `bypass_media` in Kamailio routing to allow RTPEngine to relay RTP packets directly (enabling thousands of concurrent calls per box). However, for **AI IVR/conversational voice flows** managed by the Yunshu engine, **you MUST route the media locally through FreeSWITCH** to allow ASR PCM streaming (`mod_audio_stream`) and native VAD break-ins.
+  - **SIP Profile NAT Mapping & Network Boundary Segregation**:
+    When FreeSWITCH is deployed behind NAT (only binding to private IP interfaces) and needs to interface with external networks, you must explicitly declare the public IP address. Failure to do so will result in FreeSWITCH exposing its internal IP in the SIP/SDP headers, causing "one-way audio" or "complete silence" issues:
+    *   **External Communications (`sip_profiles/external.xml`)**: Designed to interface with external SIP endpoints (e.g., remote softphone agents or carrier gateways):
+        ```xml
+        <!-- Replace values with your actual external public IP -->
+        <param name="ext-rtp-ip" value="<YOUR_PUBLIC_IP>"/>
+        <param name="ext-sip-ip" value="<YOUR_PUBLIC_IP>"/>
+        ```
+    *   **Internal Communications (`sip_profiles/internal.xml`)**: Designed for trusted internal networks (e.g., matching the same VPC as the Kamailio proxy) while translating addresses correctly when launching calls outbox:
+        ```xml
+        <!-- 1. Bind listener interfaces to internal addresses -->
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <!-- 2. Force outbound SIP and SDP packets to map to public address for NAT traversal -->
+        <param name="ext-rtp-ip" value="<YOUR_PUBLIC_IP>"/>
+        <param name="ext-sip-ip" value="<YOUR_PUBLIC_IP>"/>
+        ```
 
 ---
 

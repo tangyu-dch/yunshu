@@ -411,6 +411,23 @@ cti:
     ```
   - **媒体旁路 (Bypass Media) 与 IVR 音频捕获调优**：
     对于普通的坐席/分机双腿桥接通话，若无需录音或 IVR 交互，可在 Kamailio 处下发 `bypass_media`，让 RTP 媒体不经过 FreeSWITCH 而是由 RTPEngine 纯内核直接转发，以实现单机数千路的超高性能指标；但对于云枢系统调度的 **IVR 智能大模型对话流程**，由于需要进行 PCM 语音推流（mod_audio_stream）与 VAD 断句，**必须禁用旁路媒体，确保媒体流经过 FreeSWITCH 本地**，保障 AI 语音网关的完美捕获。
+  - **SIP Profile 内外网隔离与公网 IP 映射 (NAT 穿越)**：
+    当 FreeSWITCH 部署于云服务器的 NAT 环境下（网卡仅有内网 IP）且需要直接与外网进行信令与媒体交互时，必须正确宣告外部公网 IP，否则会导致外网终端因无法将语音包发回服务器而出现“单通”或“完全无声”问题：
+    *   **外部通信配置 (`sip_profiles/external.xml`)**：专门用于对接外部的 SIP 实体（如外网坐席终端、外部互联公网网关等）：
+        ```xml
+        <!-- 强制将对外的 SIP 信令和 SDP 媒体 IP 替换为您的公网 IP -->
+        <param name="ext-rtp-ip" value="<YOUR_PUBLIC_IP>"/>
+        <param name="ext-sip-ip" value="<YOUR_PUBLIC_IP>"/>
+        ```
+    *   **内部通信配置 (`sip_profiles/internal.xml`)**：主要接管系统内网可信任设备（如同 VPC 的 Kamailio 节点），并在呼叫出局时进行正确的 NAT 穿越：
+        ```xml
+        <!-- 1. 绑定内网 IP 监听，确保与 Kamailio 在内网快速通信，避免绕行公网 -->
+        <param name="rtp-ip" value="$${local_ip_v4}"/>
+        <param name="sip-ip" value="$${local_ip_v4}"/>
+        <!-- 2. 出局宣告或响应外部终端时，强制提供公网 IP 进行 NAT 穿越 -->
+        <param name="ext-rtp-ip" value="<YOUR_PUBLIC_IP>"/>
+        <param name="ext-sip-ip" value="<YOUR_PUBLIC_IP>"/>
+        ```
 
 ---
 
