@@ -129,10 +129,10 @@ SELECT
 	CONCAT(gw.realm, ':', gw.port) AS gateway_region
 FROM gateway gw
 INNER JOIN pool p ON gw.id = p.gateway_id AND p.enable = 1 AND p.del_flag = 0
-INNER JOIN pool_phone pp ON p.id = pp.pool_id AND pp.enable = 1 AND pp.del_flag = 0
-INNER JOIN pool_phone_skill_group ppsg ON ppsg.pool_phone_id = pp.id
-INNER JOIN skill_group sg ON sg.id = ppsg.skill_group_id AND sg.enable = 1 AND sg.del_flag = 0
-INNER JOIN user_skill_group usg ON usg.skill_group_id = sg.id
+INNER JOIN cc_res_pool_phone pp ON p.id = pp.pool_id AND pp.enable = 1 AND pp.del_flag = 0
+INNER JOIN cc_res_pool_phone_skill_group ppsg ON ppsg.pool_phone_id = pp.id
+INNER JOIN cc_res_skill_group sg ON sg.id = ppsg.skill_group_id AND sg.enable = 1 AND sg.del_flag = 0
+INNER JOIN cc_res_user_skill_group usg ON usg.skill_group_id = sg.id
 WHERE usg.user_id = ? AND gw.enable = 1 AND gw.del_flag = 0
 ORDER BY gw.priority ASC, gw.id ASC, pp.id ASC
 `, userID).Scan(&rows).Error

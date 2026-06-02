@@ -3,6 +3,7 @@ package resource
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,10 +97,15 @@ func TestOutboundGuardAllowsIdleExtension(t *testing.T) {
 }
 
 func TestOutboundGuardValidateAPICall(t *testing.T) {
-	// 初始化 SQLite 内存数据库作为全真测试环境
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// 初始化独占隔离且共享缓存的 SQLite 内存数据库作为全真测试环境，并配置 busy_timeout
+	db, err := gorm.Open(sqlite.Open("file:extension_test_db?mode=memory&cache=shared&_busy_timeout=10000"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("failed to open sqlite database: %v", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 
 	// 自动迁移所有相关的物理表结构
@@ -171,7 +177,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		req := contracts.ApiCallReq{UserID: 103, Callee: "13800000000"}
 		// 传给 ValidateAPICall 的分机其 UserID 绑定的是 999 (不匹配当前用户 103)
 		mismatchExt := defaultExt
-		mismatchExt.UserID = 999 
+		mismatchExt.UserID = 999
 
 		err := guard.ValidateAPICall(context.Background(), req, mismatchExt)
 		if err == nil || !errors.Is(err, esl.ErrOutboundRejected) {
@@ -193,7 +199,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
 		req := contracts.ApiCallReq{UserID: 104, Callee: "13800000000"}
-		
+
 		noMchExt := defaultExt
 		noMchExt.UserID = 104
 		noMchExt.MerchantID = 99999
@@ -225,7 +231,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
 		req := contracts.ApiCallReq{UserID: 105, Callee: "13800000000"}
-		
+
 		disabledMchExt := defaultExt
 		disabledMchExt.UserID = 105
 		disabledMchExt.MerchantID = 502
@@ -259,7 +265,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
 		guard.Now = func() time.Time { return now }
 		req := contracts.ApiCallReq{UserID: 106, Callee: "13800000000"}
-		
+
 		expiredMchExt := defaultExt
 		expiredMchExt.UserID = 106
 		expiredMchExt.MerchantID = 503
@@ -299,7 +305,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
 		guard.Now = func() time.Time { return now }
 		req := contracts.ApiCallReq{UserID: 107, Callee: "13800000000"}
-		
+
 		debtMchExt := defaultExt
 		debtMchExt.UserID = 107
 		debtMchExt.MerchantID = 504
@@ -332,7 +338,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusRinging, ok: true}, nil)
 		guard.Now = func() time.Time { return now }
 		req := contracts.ApiCallReq{UserID: 108, Callee: "13800000000"}
-		
+
 		busyMchExt := defaultExt
 		busyMchExt.UserID = 108
 		busyMchExt.MerchantID = 505
@@ -373,7 +379,7 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
 		guard.Now = func() time.Time { return now }
 		req := contracts.ApiCallReq{UserID: 109, Callee: "13800000000"}
-		
+
 		successExt := defaultExt
 		successExt.UserID = 109
 		successExt.MerchantID = 506
@@ -382,6 +388,67 @@ func TestOutboundGuardValidateAPICall(t *testing.T) {
 		err := guard.ValidateAPICall(context.Background(), req, successExt)
 		if err != nil {
 			t.Fatalf("expected validation success (nil), got %v", err)
+		}
+	})
+
+	t.Run("高并发API外呼兜底压力测试", func(t *testing.T) {
+		user := MerchantUserModel{
+			ID:         110,
+			MerchantID: 507,
+			Username:   "stress_light_user",
+			Enable:     true,
+			DelFlag:    false,
+		}
+		merchant := MerchantModel{
+			ID:     507,
+			Name:   "压力商户",
+			Enable: true,
+		}
+		billing := MerchantBillingOverviewModel{
+			MerchantID:     507,
+			PaymentMode:    paymentModePrepaid,
+			CurrentBalance: 500.0, // 正常余额
+			CreditLimit:    50.0,
+		}
+		db.Create(&user)
+		db.Create(&merchant)
+		db.Create(&billing)
+		defer db.Delete(&user)
+		defer db.Delete(&merchant)
+		defer db.Delete(&billing)
+
+		guard := NewOutboundGuard(db, fakeStatusReader{status: esl.ExtensionStatusIdle, ok: true}, nil)
+		guard.Now = func() time.Time { return now }
+		req := contracts.ApiCallReq{UserID: 110, Callee: "13800000000"}
+
+		successExt := defaultExt
+		successExt.UserID = 110
+		successExt.MerchantID = 507
+		successExt.ExtensionNumber = "8004"
+
+		// 启动 100 个并发 goroutine 竞争校验外呼
+		var wg sync.WaitGroup
+		concurrency := 100
+		wg.Add(concurrency)
+
+		errChan := make(chan error, concurrency)
+
+		for i := 0; i < concurrency; i++ {
+			go func() {
+				defer wg.Done()
+				err := guard.ValidateAPICall(context.Background(), req, successExt)
+				if err != nil {
+					errChan <- err
+				}
+			}()
+		}
+
+		wg.Wait()
+		close(errChan)
+
+		// 验证没有产生任何报错
+		for err := range errChan {
+			t.Fatalf("unexpected outbound guard concurrent validate failure: %v", err)
 		}
 	})
 }

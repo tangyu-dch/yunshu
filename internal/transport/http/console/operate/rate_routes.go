@@ -45,7 +45,7 @@ func RegisterRateRoutes(r gin.IRoutes, service *operatedomain.RateManagementServ
 			dbRepo, ok := service.Repository.(*merchant.RateRepository)
 			if ok {
 				var count int64
-				err := dbRepo.DB.WithContext(c.Request.Context()).Table("call_rate_merchant").
+				err := dbRepo.DB.WithContext(c.Request.Context()).Table("cc_mch_rate_ref").
 					Where("rate_id = ? AND merchant_id = ?", id, tenant.MerchantID).Count(&count).Error
 				if err != nil || count == 0 {
 					c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "无权访问此费率套餐详情"))
@@ -128,7 +128,7 @@ func RegisterRateRoutes(r gin.IRoutes, service *operatedomain.RateManagementServ
 				var boundRate struct {
 					RateID int `gorm:"column:rate_id"`
 				}
-				err := dbRepo.DB.WithContext(c.Request.Context()).Table("call_rate_merchant").
+				err := dbRepo.DB.WithContext(c.Request.Context()).Table("cc_mch_rate_ref").
 					Where("merchant_id = ?", tenant.MerchantID).First(&boundRate).Error
 				if err != nil {
 					// 未绑定费率，返回空分页

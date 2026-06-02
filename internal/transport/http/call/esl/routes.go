@@ -115,7 +115,7 @@ func RegisterRoutes(r gin.IRoutes, originate *esl.OriginateService, command *esl
 					var cdr struct {
 						MerchantID int
 					}
-					dbErr := gormDB.WithContext(c.Request.Context()).Table("call_cdr_record").
+					dbErr := gormDB.WithContext(c.Request.Context()).Table("cc_biz_cdr").
 						Select("merchant_id").
 						Where("call_id = ? AND del_flag = ?", req.CallID, false).
 						First(&cdr).Error
