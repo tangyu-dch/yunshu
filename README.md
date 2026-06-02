@@ -133,81 +133,206 @@ Here is a preview of the Merchant Portal for bulk dialing, real-time calling, an
 
 ---
 
-## 🚀 4. Deployment Recommendations & Installation Guide
+## 🚀 4. Production Deployment Roadmap & Configuration Guide
 
-To achieve telecom-grade stability, sub-millisecond signaling speeds, and smooth media file handling, strict adherence to the following deployment recommendations is highly recommended.
+To guarantee telecom-grade high availability, sub-millisecond signaling latency, and seamless media file synchronization in production, you must adhere to the following deployment architecture recommendations and `production.yaml` configuration guidelines.
 
-### 📡 4.1 Which Components Must Be Co-Located on the Same Server as FreeSWITCH?
+### 📡 4.1 Production Topology & Clustering
 
-In production, **the `cc-call` and `cc-worker` microservices MUST either be deployed on the exact same physical/virtual host as FreeSWITCH, or have access to a shared high-performance Network File System (e.g., NFS, NAS, GlusterFS) mapped to the same absolute directory paths**.
+In a distributed production environment, Yunshu components must be grouped into distinct network boundaries and clustered for high availability:
 
-The engineering rationale is as follows:
+```text
+       DMZ / Public Zone [Firewall Filtered]        VPC Private Zone [Ultra-Low Latency, High-Speed Link]
+    ┌──────────────────────┐        ┌────────────────────────────────────────────────────────┐
+    │       cc-edge        ├───────►│    cc-console Cluster (2+ Nodes, Load Balanced)        │
+    │ (Auth/Limit/Proxy)   │       │   ┌──────────────────────────────────────────────┐     │
+    └──────────────────────┘        │   │                                              │     │
+                                    │   ▼                                              ▼     │
+                                    │ ┌───────────────┐                          ┌─────────┐ │
+                                    │ │ MySQL Cluster │                          │  Redis  │ │
+                                    │ │ (Primary/Sec) │                          │ Sentinel│ │
+                                    │ └───────────────┘                          └────┬────┘ │
+                                    │                                                 ▲      │
+                                    │   ┌─────────────────────────────────────────────┘      │
+                                    │   ▼                                                    │
+                                    │ ┌───────────────┐   ESL Long Conn (<1ms) ┌────────────┐ │
+                                    │ │    cc-call    ├─────────────────────►│ FreeSWITCH │ │
+                                    │ │ (2+ Node Clu) │                      │ GW Cluster │ │
+                                    │ └───────┬───────┘                      └─────┬──────┘ │
+                                    │         │                                    │         │
+                                    │         └──────────┐              ┌──────────┘         │
+                                    │                    │Mount Shared  │                    │
+                                    │                    ▼              ▼                    │
+                                    │               ┌────────────────────────┐               │
+                                    │               │   NFS / NAS Storage    │               │
+                                    │               │ (TTS Cache & Recs)     │               │
+                                    │               └────────────────────────┘               │
+                                    │                            ▲                           │
+                                    │                            │Mount Shared               │
+                                    │                            │                           │
+                                    │                      ┌─────┴──────┐                    │
+                                    │                      │ cc-worker  │                    │
+                                    │                      │ (2+ Nodes) │                    │
+                                    │                      └────────────┘                    │
+                                    └────────────────────────────────────────────────────────┘
+```
 
-#### 1. Shared TTS Voice Synthesis Cache (Required)
-When the AI voice engine translates text to speech using configured cloud APIs (Alibaba, Tencent, OpenAI, Volcengine), the microservice writes the synthesized `.mp3`/`.wav` file directly to a local cache directory (e.g., `/var/lib/yunshu/tts_cache`).
-FreeSWITCH plays this audio by invoking ESL's `playback /var/lib/yunshu/tts_cache/xxxx.mp3`.
-*   **Deployment Constraint**: **FreeSWITCH must have immediate, direct filesystem access to these files.** Therefore, `cc-call` and FreeSWITCH must either share the local disk of a single host, or mount an NFS network volume to the **exact same absolute folder path** on both servers.
+#### 1. Microsecond Latency Constraint (VPC Network Planning)
+- **Constraint**: Network latency between the signaling core (`cc-call`) and the FreeSWITCH media gateways must be **< 1ms**.
+- **Planning**: Co-locate `cc-call` and FreeSWITCH inside the **exact same private VPC subnet**. For extremely high-concurrency environments, we strongly recommend deploying `cc-call` directly on the FreeSWITCH host as a system daemon, communicating over the local loopback interface (`127.0.0.1`) to eliminate any signaling race conditions.
 
-#### 2. Call Recording Uploads (Required for `cc-worker`)
-When a call is answered, FreeSWITCH records the conversation and saves the resulting audio locally (e.g., `/var/log/freeswitch/recordings/xxxx.wav`).
-Upon hangup, `cc-worker` reads this audio file, compresses/transcribes it, and uploads it to the merchant's cloud CDN bucket (OSS/COS).
-*   **Deployment Constraint**: **`cc-worker` requires direct read/write permission to FreeSWITCH's recording output directory.** It must either run directly on the FreeSWITCH host as a system daemon, or share filesystem access via a low-latency NFS mount.
+#### 2. Stateless Scaling & Event Lease High Availability
+- **`cc-call` Stateless Signaling Cluster**: Horizontally deploy 2+ instances of `cc-call`. To prevent multiple instances from racing or consuming the same FreeSWITCH ESL events redundantly, `cc-call` leverages a Redis-backed node registrar to dynamically claim a single active listener lease per FS node. If an instance fails, the lease expires and a standby instance takes over immediately.
+- **`cc-worker` Distributed Task Processor**: Horizontally deploy 2+ instances of `cc-worker`. Outbox queue tasks (billing settlement, recording compression, downstream Webhook pushing) are claimed and processed by competing worker instances via the atomic `ClaimDue` lease mechanic, guaranteeing zero duplicate tasks and automatic failover.
+- **Redis Sentinel & Persistent Storage**: Redis acts as the single source of truth for hot pathways (extension status, atomic balance checks, and double concurrency limits). It **MUST be deployed as a Sentinel or Redis Cluster** in production, with AOF persistence enabled to achieve sub-second state recovery.
 
-#### 3. Sub-Millisecond ESL Control Latency (Highly Recommended)
-`cc-call` communicates with FreeSWITCH via active TCP sockets on the ESL port (`8021`). Telephony SIP signaling is extremely latency-sensitive. A round-trip command delay exceeding 5ms can lead to race conditions, SIP bridging failures, and sluggish key (DTMF) menu responses.
-*   **Deployment Constraint**: Keep `cc-call` and FreeSWITCH in the **same physical server or inside a dedicated high-speed VPC** to guarantee latency under **1ms**.
-
-#### 4. Real-Time RTP WebSocket Push (`mod_audio_stream`)
-FreeSWITCH pushes high-frequency PCM audio payloads over WebSocket streams to the ASR Gateway (port `9002`).
-*   **Deployment Constraint**: The WebSocket receiver must be co-located or linked in a ultra-low-jitter local network with FreeSWITCH to avoid packet dropouts and broken AI sentence segmentations.
+#### 3. Low-Latency Shared Filesystem (TTS & Recordings)
+- **TTS Cache**: `cc-call` synthesizes LLM voice answers and writes MP3 files locally. FreeSWITCH must playback these files via absolute paths instantly.
+- **Recordings**: FreeSWITCH records dual-stream calls locally, and `cc-worker` must read them to transcode and upload to Alibaba Cloud OSS or Tencent Cloud COS.
+- **Planning**: Enforce a low-latency **NFS / NAS shared volume** mapped to the **exact same absolute folder path** (e.g. `/var/lib/yunshu/shared`) across all FreeSWITCH, `cc-call`, and `cc-worker` hosts, with complete `r/w` permissions.
 
 ---
 
-### 🛠️ 4.2 Step-by-Step Deployment Workflow
+### ⚙️ 4.2 Production Config Guidelines (production.yaml)
 
-#### Step 1: Prepare Database & Middlewares
-1. Provision a high-performance Linux server (Ubuntu 20.04+ / CentOS 7+).
-2. Install and launch:
-   - **MySQL (>= 5.7)**: Establish database credentials and import the Yunshu schema.
-   - **Redis (>= 6.0)**: Ensure it is running as the single source of truth for extension status and locks.
-3. If running distributed hosts, configure an **NFS server** and mount the shared directory (e.g., mapped to `/var/yunshu/shared`) to the same local mount points on both FreeSWITCH and the Go microservice hosts.
+For production environments, copy `configs/default.yaml` to `configs/production.yaml` and configure the following parameters to ensure performance and isolation:
 
-#### Step 2: Configure FreeSWITCH
-1. Install FreeSWITCH and configure `event_socket.conf.xml` (allow internal network IPs and enforce a strong ESL password).
-2. Enable `mod_audio_stream` in `modules.conf.xml` and restart FreeSWITCH to allow raw audio pushes.
-3. Ensure the FreeSWITCH system user has proper read and write permissions to the call recordings folder.
+```yaml
+# =====================================================================
+# 1. Relational Database & Connection Pool Optimization (MySQL)
+# =====================================================================
+database:
+  # REQUIRED: Point to your production MySQL primary VIP with strong credentials
+  dsn: "yunshu_prod:SecurePass123!@tcp(mysql-vip.prod.lan:3306)/yunshu?charset=utf8mb4&parseTime=True&loc=Local"
+  # OPTIMIZATION: Tune connection pool sizes to handle high call volumes
+  max_open_conns: 100        # Max active DB connections to avoid transactional waiting queues
+  max_idle_conns: 20         # Max idle connections to minimize TCP socket recycle cost
+  conn_max_lifetime: 3600    # Connection lifetime limit in seconds
 
-#### Step 3: Compile and Deploy Frontend
-1. Navigate to the `web/` workspace:
+# =====================================================================
+# 2. Redis Cache & Concurrency Locking (Sentinel/Cluster)
+# =====================================================================
+redis:
+  # REQUIRED: Point to your production Redis Sentinel VIP or cluster entry point
+  addr: "redis-sentinel.prod.lan:6379"
+  # REQUIRED: Strong production Redis password
+  password: "RedisStrongPassword456$"
+  db: 0
+  pool_size: 150             # OPTIMIZATION: Scale up connection pool to support high-frequency Lua concurrent allocations
+
+# =====================================================================
+# 3. Edge Gateway Security & Access Control (cc-edge)
+# =====================================================================
+edge:
+  port: 8080                 # Exposed proxy API port
+  rate_limit:
+    enable: true
+    capacity: 200            # Enforced maximum bucket capacity (burst limit for outbound API per merchant)
+    rate: 50                 # Token replenishment rate per second
+
+# =====================================================================
+# 4. FreeSWITCH ESL & Audio Stream Configurations
+# =====================================================================
+freeswitch:
+  # REQUIRED: Enforce strong credentials for ESL (Do NOT use default ClueCon)
+  esl_addr: "fs-node1.prod.lan:8021"
+  esl_password: "FsSuperSecurePassword789!"
+  # REQUIRED: Point mod_audio_stream websocket push target to the cc-call production IP
+  audio_stream_ws: "ws://cc-call-internal-vip.prod.lan:9002/audio"
+
+# =====================================================================
+# 5. Shared Storage Path Mappings (TTS & Recording NFS Mounts)
+# =====================================================================
+storage:
+  # REQUIRED: Shared NFS/NAS mount path, identical across all servers
+  shared_root: "/var/lib/yunshu/shared"
+  # REQUIRED: Shared path for TTS synthesis files
+  tts_cache_dir: "/var/lib/yunshu/shared/tts_cache"
+  # REQUIRED: Shared path matching FreeSWITCH recording destination
+  recordings_dir: "/var/lib/yunshu/shared/recordings"
+
+# =====================================================================
+# 6. Async Worker & Downstream Webhook Pushing (cc-worker)
+# =====================================================================
+worker:
+  billing:
+    enable: true
+    # WARNING: Fallback rate. Production billing enforces exact templates; unconfigured accounts trigger system warnings
+    default_rate_per_min: 0.15 
+  recording:
+    enable: true
+    oss_bucket: "yunshu-recordings-prod"
+    oss_endpoint: "oss-cn-shenzhen.aliyuncs.com"
+  downstream:
+    # REQUIRED: Endpoint for pushing customer CDR data securely
+    webhook_url: "https://api.merchant-platform.com/callbacks/cdr"
+    # OPTIMIZATION: SHA256 signing secret for pushing validation
+    signature_secret: "MerchantSecretKeySignatureXYZ"
+
+# =====================================================================
+# 7. Outbound Telecom-Grade Concurrency Orchestration (CTI Engine)
+# =====================================================================
+cti:
+  concurrency:
+    # WARNING: Redis selection locks lease duration (Recommend 30 mins to avoid locking leaks)
+    claim_ttl_ms: 1800000 
+    # REQUIRED: Enforce simultaneous double concurrency limitations (both Gateway and Phone levels)
+    enable_double_limit: true
+```
+
+---
+
+### 🛠️ 4.3 Step-by-Step Production Deployment Steps
+
+#### Step 1: Initialize Network & Storage Volumes
+1. Provision high-performance Linux hosts (Ubuntu 20.04+ / CentOS 7+).
+2. Set up high-availability MySQL & Redis clusters.
+3. Configure a low-latency **NFS/NAS shared file share**. Mount it under `/var/lib/yunshu/shared` on the FreeSWITCH, `cc-call`, and `cc-worker` hosts, granting full read/write permission (`chmod -R 777`).
+
+#### Step 2: Configure FreeSWITCH Gateway
+1. Edit `autoload_configs/event_socket.conf.xml` to restrict IP access and set a robust password.
+2. Enable `mod_audio_stream` for WebSocket raw RTP PCM pushes.
+3. Enforce the Shared Recording volume as the default destination for recording files (`/var/lib/yunshu/shared/recordings`).
+
+#### Step 3: Build & Deploy Frontend (Nginx)
+1. Build the static workspace inside `web/`:
    ```bash
    cd web
    npm install
    npm run build
    ```
-2. Copy the compiled static files (`dist/`) to your web server (e.g., Nginx) and set up HTML5 history routing fallback.
+2. Copy the resulting `dist/` directory to Nginx, routing fallback paths to `index.html`.
 
-#### Step 4: Compile and Configure Go Microservices
-1. Build the microservices binaries from the Go root directory:
+#### Step 4: Compile & Run Go Microservices
+1. Compile Go binaries from the repository root:
    ```bash
    go build -o bin/cc-edge ./cmd/cc-edge
    go build -o bin/cc-console ./cmd/cc-console
    go build -o bin/cc-call ./cmd/cc-call
    go build -o bin/cc-worker ./cmd/cc-worker
    ```
-2. Copy `configs/default.yaml` to `configs/production.yaml`.
-3. Edit `configs/production.yaml` with your production details:
-   - Enter your MySQL DSN and Redis host addresses.
-   - Provide the FreeSWITCH ESL credentials (host, port, and password).
-   - Verify that the `tts_cache` directory configurations perfectly align between the Go services and the FreeSWITCH host mount.
-   - Map the `cc-worker` recording paths to FreeSWITCH's active folder.
+2. Copy `configs/default.yaml` to `configs/production.yaml` and configure it according to **4.2 Production Config Guidelines**.
 
-#### Step 5: Process Daemonization
-1. Launch the respective services on their target machines:
-   - **Console Host**: Start `cc-console`.
-   - **Telephony Host (Co-located with FreeSWITCH)**: Start `cc-call`.
-   - **Worker Host (Co-located with FreeSWITCH or via shared storage)**: Start `cc-worker`.
-   - **Edge Gateway Host**: Start `cc-edge`.
-2. Configure system process managers (like `Systemd` or `Supervisor`) to monitor and automatically restart the Yunshu services in case of failure, ensuring 24/7 telecom-grade SLA availability.
+#### Step 5: Enforce Systemd System Service Availability
+1. Manage microservices using **Systemd** to achieve automatic recovery. Create `/etc/systemd/system/cc-call.service`:
+   ```ini
+   [Unit]
+   Description=Yunshu CallCenter Telephony Engine
+   After=network.target
+
+   [Service]
+   Type=simple
+   User=root
+   WorkingDirectory=/var/yunshu
+   ExecStart=/var/yunshu/bin/cc-call -config /var/yunshu/configs/production.yaml
+   Restart=always
+   RestartSec=5
+   LimitNOFILE=65535
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+2. Reload system configurations with `systemctl daemon-reload` and start all services, ensuring 24/7 self-healing and service reliability.
 
 ---
 
