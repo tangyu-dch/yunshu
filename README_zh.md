@@ -70,6 +70,19 @@
     - **🧠 AI 厂商与模型**：集中创建和管理不同大模型厂商的 API 凭证（如 DeepSeek API、OpenAI 接口、腾讯混元大模型等），妥善存入 `cc_biz_ai_model_config` 物理表中。
 *   **零代码快捷反填**：在 AI 画布的“开始”节点中，商户只需下拉快捷选择配置好的 AI 模型，系统会自动利用 Form 受控模式反填大模型服务商、Endpoint、密钥、Temperature 以及全局 System Prompt 并增量保存入连线图 Metadata，避免金钥在流图中四处散落的维护隐患。
 
+#### 🎛️ 可视化 AI 流程与大模型配置画廊
+以下是智能可视化 AI 画布以及全局大模型厂商配置面板的预览：
+
+| 🤖 智能可视化 AI 流程画布 | 🧠 全局大模型厂商配置中心 |
+| :---: | :---: |
+| ![智能可视化 AI 流程画布](docs/images/visual_flow_designer.png) | ![全局大模型厂商配置中心](docs/images/ai_model_config.png) |
+| *支持霓虹科技电荷流动的拖拽式可视化 IVR 编排工作坊* | *完全解耦的模型参数配置与凭证密钥管理器* |
+
+| ⚙️ 开始节点 - 模型快捷反填展示 |
+| :---: |
+| ![开始节点 - 模型快捷反填展示](docs/images/quick_config_fill.png) |
+| *Start 节点声明式 Schema 动态表单与快捷反填卡片联动* |
+
 ### 🎙️ mod_audio_stream 旁路实时推流与 Go 原生 PCM VAD 语音网关
 *   **实时音频推流**：兼容 FreeSWITCH `mod_audio_stream` 实时流媒体协议。在话务流转到 ASR 节点时，自动通过 ESL 下发 `uuid_audio_stream` 指令，在 `16k` 高清和 `mono` 单声道下，将信道中的原始音频（RTP PCM）通过 WebSocket 旁路近乎零延迟投递给大模型服务。
 *   **原生 ASR WebSocket 网关**：内置高性能 WebSocket 服务器（默认监听 `9002` 端口），物理接收 FreeSWITCH 投递过来的 PCM 原始二进制音频帧，物理进行音量能量 RMS 计算。

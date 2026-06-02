@@ -70,6 +70,19 @@ Yunshu bridges the gap between extreme execution speed and premium design aesthe
     - **🧠 AI Providers & Models**: Consolidated credential manager (`cc_biz_ai_model_config`) for cloud provider keys (DeepSeek API, OpenAI API, Tencent Hunyuan, Alibaba Qwen, Volcengine Doubao).
 *   **One-Click Auto-Fill**: Inside the Visual Designer's `Start` node, selecting a configured model automatically loads and locks the endpoint, credentials, temperature, and system prompt into the canvas metadata, removing the security risk of hardcoding API keys in visual diagrams.
 
+#### 🎛️ Visual AI Flow & Configuration Gallery
+Here is a preview of the Visual AI Flow Designer and the Global AI Provider Configuration panels:
+
+| 🤖 Visual AI Flow Canvas | 🧠 Global AI Provider Credentials |
+| :---: | :---: |
+| ![Visual AI Flow Canvas](docs/images/visual_flow_designer.png) | ![Global AI Provider Credentials](docs/images/ai_model_config.png) |
+| *Visual drag-and-drop orchestration with glowing neon routing paths* | *Decoupled global model configuration and credential manager* |
+
+| ⚙️ Start Node - Model Auto-Fill |
+| :---: |
+| ![Start Node - Model Auto-Fill](docs/images/quick_config_fill.png) |
+| *Declarative dynamic schema inspector supporting quick credential autofill* |
+
 ### 🎙️ mod_audio_stream real-time RTP voice gateway & Native Go VAD
 *   **RTP Voice Stream Bypass**: Fully compliant with FreeSWITCH `mod_audio_stream`. When an ASR state node triggers, `cc-call` commands FreeSWITCH via ESL to stream raw channel audio (16k high-definition, mono) via a low-latency WebSocket connection.
 *   **High-Performance WS Audio Gateway**: A built-in WebSocket listener (port `9002`) receives raw binary PCM packets, executing real-time Root Mean Square (RMS) energy metrics.

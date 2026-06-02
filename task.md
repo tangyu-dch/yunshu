@@ -1,0 +1,44 @@
+# 任务进度表 - 云枢多厂商 AI 引擎解耦与高可扩展架构重构
+
+- [x] 后端物理与高保真仿真驱动补齐与可扩展架构
+  - [x] 新建 `internal/domain/callflow/deepseek.go` 实现物理 DeepSeek 接入与去仿真化
+  - [x] 完善 `internal/domain/callflow/ali.go` 实现阿里云 ASR、TTS、LLM 物理接入，根据 `aliVoice` 参数（如 `xiaoyun`, `xiaoyu`, `xiaoting`）调整音色，无凭证时严格报错拒绝仿真退避
+  - [x] 完善 `internal/domain/callflow/openai.go` 实现 OpenAI Whisper、TTS、ChatGPT 物理 HTTP 接入，根据 `openaiVoice` 指定音色（`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`），无凭证严格物理报错
+  - [x] 完善 `internal/domain/callflow/tencent.go` 实现腾讯云 ASR、TTS、混元大模型物理接入，根据 `tencentVoice`（如 `101001`, `101002`, `101016`）调整音色，完全移除仿真与 mock 退化兜底
+- [x] 话务运行时与演示沙盒端点级联优化
+  - [x] 修改 `internal/domain/callflow/ai_engine.go` 优化 LLM 发起逻辑，如果云端大模型接口请求报错或返回空内容，系统坚决拒绝仿真退避，直接严格报错；完全物理删除 `mockLLMGenerate` 方法，彻底清除仿真印记
+  - [x] 修改 `internal/transport/http/console/operate/ai_model_flow_routes.go` 中的物理演示端点 `/merchant/ai-model-flow/demo-voice`，动态解析前端传来的多厂商 asrProvider, ttsProvider, llmProvider 及各自的配置，自适应混合级联路由
+- [x] 前端动态 Schema 属性配置与 UI 面板升级 (高可扩展性设计)
+  - [x] 升级 `web/src/features/business/ai-model-flow/designer.tsx`，设计厂商专属字段与音色的声明式元数据配置表
+  - [x] 升级 Start 节点参数表单，由静态元素渲染改为由 Provider 驱动的声明式 Schema 动态表单组件，支持多厂商 Key 及特有音色下拉展示
+  - [x] 升级“快捷配置填充”的反填策略以及麦克风录音沙盒的参数传递，将所选厂商的参数动态拼装请求后端 `/demo-voice`
+- [x] 大模型配置与前端厂商类型选择终极配置化优化 (自省注册表与精细化能力联动)
+  - [x] 后端支持 `/merchant/ai-model-flow/providers` 动态自省 API，作为全站支持大模型厂商的单一真实源（Source of Truth）
+  - [x] 在 `internal/domain/callflow/ai_engine_providers.go` 中，设计 `IsAsrImplemented`、`IsTtsImplemented` 和 `IsLlmImplemented` 三大功能追踪函数，分别动态自省底层各多态 Registry 注册表的就绪状态
+  - [x] 在 [ai_model_flow_routes.go](file:///Users/tangyu/Projects/yunshu/internal/transport/http/console/operate/ai_model_flow_routes.go) 中重构接口响应，以优雅的切片遍历结合运行时自省函数，动态且非硬编码形式渲染每一个厂商在 ASR, TTS, LLM 等维度的物理就绪状态
+  - [x] 升级前端 `AiProviderItem` 接口类型并打通 React 视图端 API
+  - [x] 升级大模型全局配置表单与表格列渲染，根据 `supportLlm`（大模型决断能力）实现置灰禁用及 Tag 状态变灰联动
+  - [x] 升级流程画布 Start 节点的 **ASR Provider** (ASR 厂商)、**TTS Provider** (TTS 厂商)、**LLM Provider** (大模型服务商) 下拉框，彻底消灭写死选项，完美根据已注册能力自适应置灰禁用
+- [x] 大模型配置 Modal 表单动态自适应卡片设计 (ASR/TTS 字段完美切换)
+  - [x] 在 `page.tsx` 的“新增/编辑大模型配置”表单中引入 `shouldUpdate` 监听器，依据选定的“大模型服务商”类型自适应展现其专属的配置小卡片区
+  - [x] 当选择 **☁️ 阿里通义千问 Qwen** 时，动态显示“阿里云 ASR/TTS 语音设置 (可选)”，并渲染阿里专属“阿里语音 AppKey”、“阿里语音 Access Token”以及“阿里发音人音色”
+  - [x] 当选择 **🐧 腾讯混元 Hunyuan** 时，显示腾讯云专属“腾讯云 SecretId/SecretKey”与腾讯专属音色列表
+  - [x] 当选择 **🌋 火山引擎“豆包”大模型** 时，展示火山专属 AppId、Cluster、Token 及豆包音色
+  - [x] 当选择 **🌐 OpenAI 兼容接口** 时，展示 OpenAI TTS 明星发音人音色，并支持直接使用上方的通用 API Key 物理鉴权
+  - [x] 当选择 **🐳 DeepSeek API** 时，展示精美的“DeepSeek 厂商专属提示”块，提示操作员该厂商主要专注于大语言模型推理，ASR/TTS 可在画布中级联绑定其它语音厂商
+- [x] 【新增】彻底删除“自研仿真模拟大模型 (MOCK)”
+  - [x] 从后端 `/merchant/ai-model-flow/providers` 接口中，物理删除了 `"mock"` 服务商项，保持生产线只选用物理商用级引擎
+  - [x] 清理了前端配置管理 `page.tsx` 和连线画布 `designer.tsx` 里的 fallback 常量 `DEFAULT_PROVIDERS` 中的 mock 属性
+  - [x] 从新增大模型配置的 Form `shouldUpdate` 自适应卡片列表里彻底删除了 `provider === 'mock'` 的卡片块
+  - [x] 清理了 `designer.tsx` 中 `TTS_VOICES_BY_PROVIDER` 里的 `mock` 静态仿真音色项
+- [x] 【新增】全站文档国际化升级与 FreeSWITCH 高性能物理部署架构指导说明
+  - [x] 将根目录默认的 `README.md` 重构为全英文专业版，全面抹除 `Self-Driving Sandbox` 等仿真自驾驶表述
+  - [x] 新建 `README_zh.md` 为全新中文版说明文档，中英文 README 顶部各自提供一键式无缝互通切换锚点
+  - [x] 在中英文 README 中分别新增**高性能生产部署建议与具体工作流（Deployment Recommendations & Workflow）**，极其深刻地向架构师说明了哪些微服务需要与 FreeSWITCH 部署在同一服务器上（如 TTS 缓存物理共享、`cc-worker` 录音文件读写转储权限、ESL 控制信令的 <1ms 超低延迟内网交互，以及 `mod_audio_stream` 旁路推流 WebSocket 网关）
+- [x] 全量回归测试与格式化
+  - [x] 运行 `go test ./...` 确保后端全仓 100% 绿灯回归，重构 fallback 测试以适应物理严格报错
+  - [x] 运行 `go vet ./...` 确保后端静态语法与未定义导入完全通过
+  - [x] 运行 `npx tsc --noEmit` 确保前端流程画布全量静态编译零警告
+  - [x] 运行 `gofmt -w .` 确保 Go 后端格式化完美
+  - [x] 代码全面提交 Git 仓库
+  - [x] 交付 `walkthrough.md` 总结交付物
