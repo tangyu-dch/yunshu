@@ -227,7 +227,38 @@ go run ./cmd/cc-all -config configs/local.yaml
 
 ---
 
-## ⚖️ 7. Service SLA & Disclaimer
+## 🗺️ 7. Development Roadmap
+
+Yunshu is aggressively migrating and refining its legacy backend modules into this highly optimized Go architecture. The following checklist details our active development milestones, completed features, and upcoming features:
+
+### Phase 1: Commercial-Grade AI Decoupling & Security [100% Completed]
+*   [x] **Multi-Provider Unified Adapters**: Real-world integration of DeepSeek, OpenAI, Tencent Hunyuan, Alibaba Qwen, and Volcengine Doubao.
+*   [x] **Strict去仿真化 (Fail-Closed Paradigm)**: Removed all mock/simulation fallbacks to ensure production-grade safety and error-handling.
+*   [x] **Runtime Capability Introspection**: Dynamic API endpoints to self-detect backend registration status and disable unsupported options in UI.
+*   [x] **Dynamic Schema Cards**: Automatically load specific input fields and voices based on chosen ASR/TTS/LLM providers.
+
+### Phase 2: High-Concurrency Telephony Rules & Event Leases [In Progress]
+*   [/] **Dynamic Phone Number Search & Weighted Selection**: Redis-backed rules chain to select candidate gateway numbers with atomic rate throttle.
+*   [ ] **FreeSWITCH ESL Node Leases**: Claim-due lease management in `cc-call` to prevent double Event Stream subscriptions on multi-instance deployments.
+*   [ ] **Early Media & Ringback Hooking**: Full tracking and execution of progress media files before call bridging.
+
+### Phase 3: Distributed Billing Ledgers & Workflow Decoupling [Planned]
+*   [x] **CDR Outbox Table Setup**: Native reliable outbox queue to stage basic hangup facts.
+*   [ ] **Asynchronous Bill Calculation**: Separate MQ billing consumer to handle rate templates and anti-overcharge locking.
+*   [ ] **Atomic Balance Deductions**: Redis Lua scripts to execute safe balance deductions with immediate overdrawn notifications.
+
+### Phase 4: Reliable Asynchronous Workers & Downstream Push [In Progress]
+*   [x] **ClaimDue Worker Core**: Distributed lock managers to claim and handle outbox queue entries.
+*   [x] **Reliable Downstream CDR Push**: Downstream Webhooks supporting exponential backoff, state tracking, and HMAC-SHA256 signature verification.
+*   [/] **Async Call Recording CDN Uploads**: Background uploader for recordings, mapping upload receipts to final database indexes.
+
+### Phase 5: Live Database Permissions & Console Security [In Progress]
+*   [x] **GORM Models & DB Seeds**: Schema definitions for routing permissions and seed SQL script.
+*   [/] **Dynamic Authorization Middleware**: Live middleware verifying operator requests against active MySQL database maps.
+
+---
+
+## ⚖️ 8. Service SLA & Disclaimer
 
 ### 👤 Individual Developer Status
 Yunshu is an **independently developed and self-maintained open-source project. It does not belong to any corporate entity, telecom carrier, or commercial agency**. All architecture designs, code updates, and Bug fixes are carried out voluntarily by the developer out of technical passion. Because of this personal project status, please note that we cannot provide corporate-level service contracts, business invoices, or long-term on-site consulting services.
@@ -247,6 +278,6 @@ To guarantee a worry-free experience for adopters and community users, we offer 
 
 ---
 
-## 📄 8. License
+## 📄 9. License
 
 This project is licensed under the **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)**. Full details are available in the [LICENSE](LICENSE) file in the root directory.
