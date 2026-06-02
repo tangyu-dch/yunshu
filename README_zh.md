@@ -350,19 +350,25 @@ cti:
 #### 1. Kamailio 负载均衡与 SIP 信令控制配置 (kamailio.cfg)
 - **职责**：作为前置 SIP 代理与防火墙，负责外网 SIP 端口暴露与安全防骚扰过滤，并通过 `dispatcher` 模块轮询负载均衡给后端的 FreeSWITCH 节点池。
 - **关键修改**：
+  - **信令网口绑定与公网宣告 (NAT 穿越) (`kamailio.cfg`)**：
+    在云服务器环境下，指定 Kamailio 绑定在私有内网 IP 上，但向外发送信令时对外宣告公网 IP，确保外网终端正常交互：
+    ```kamailio
+    # 绑定内网私有 IP 进行监听，同时向外宣告外部公网 IP 用于 NAT 穿越
+    listen=udp:<KAMAILIO_PRIVATE_IP>:5060 advertise <KAMAILIO_PUBLIC_IP>:5060
+    ```
   - **后端路由与心跳检测 (`dispatcher.list`)**：
-    配置后端隐藏的 FreeSWITCH 节点池，并通过 SIP OPTIONS 包对各节点执行秒级存活心跳探测：
+    配置后端隐藏的 FreeSWITCH 节点池（使用内网私有 IP 地址），并通过 SIP OPTIONS 包对各节点执行秒级存活心跳探测：
     ```text
-    # setid(1) 代表后端 FreeSWITCH 媒体网关池
-    1 sip:fs-node1.prod.lan:5060 0 0 weight=50
-    1 sip:fs-node2.prod.lan:5060 0 0 weight=50
+    # setid(1) 代表后端 FreeSWITCH 媒体网关池，配置为内网私网地址
+    1 sip:<FREESWITCH1_PRIVATE_IP>:5060 0 0 weight=50
+    1 sip:<FREESWITCH2_PRIVATE_IP>:5060 0 0 weight=50
     ```
   - **RTP 媒体劫持与 NAT 接管 (`kamailio.cfg`)**：
     在信令流中截获 SDP 媒体参数，调用 RTPEngine 进行 RTP 端口接管代理，打通外网终端与内网网关：
     ```kamailio
     # 加载 rtpengine 模块
     loadmodule "rtpengine.so"
-    modparam("rtpengine", "rtpengine_sock", "udp:10.0.10.5:22222") # 指向 RTPEngine UDP 监听
+    modparam("rtpengine", "rtpengine_sock", "udp:<RTPENGINE_PRIVATE_IP>:22222") # 指向 RTPEngine 的内网 UDP 监听地址
 
     # 在 route 逻辑中拦截并接管 SDP 媒体流
     route[MANAGE_MEDIA] {
@@ -379,11 +385,11 @@ cti:
 - **关键修改 (`/etc/rtpengine/rtpengine.conf`)**：
   - **双网卡 IP 绑定**：绑定内网 IP 与外网 IP，供外网软电话直接连通内网媒体：
     ```ini
-    interface = internal/10.0.10.5;external/203.0.113.5
+    interface = internal/<RTPENGINE_PRIVATE_IP>;external/<RTPENGINE_PUBLIC_IP>
     ```
   - **控制通信配置**：与 Kamailio 中 `rtpengine_sock` 对接的 UDP 协议 NG 端口：
     ```ini
-    listen-ng = 10.0.10.5:22222
+    listen-ng = <RTPENGINE_PRIVATE_IP>:22222
     ```
   - **UDP 媒体端口范围**：配置充足的端口以支撑超高并发：
     ```ini

@@ -344,19 +344,25 @@ Here is the integration and configuration modification guide for the core VoIP c
 #### 1. Kamailio SIP Proxy & Router Config (`kamailio.cfg`)
 - **Role**: Handles frontend SIP registration, perimeter defense against SIP scanning attacks, and utilizes the `dispatcher` module to load balance calls across the backend FreeSWITCH gateway pool.
 - **Key Modifications**:
+  - **SIP Signal Bindings & Public IP Advertising (NAT Traversal) (`kamailio.cfg`)**:
+    Under NAT/Cloud deployments, force Kamailio to listen to its private IP interface but advertise its public IP address for external SIP endpoints:
+    ```kamailio
+    # Bind to private interface and advertise public IP for NAT traversal
+    listen=udp:<KAMAILIO_PRIVATE_IP>:5060 advertise <KAMAILIO_PUBLIC_IP>:5060
+    ```
   - **Backend Gateway List (`dispatcher.list`)**:
-    Map your hidden FreeSWITCH nodes and configure SIP OPTIONS pinging to monitor node health dynamically:
+    Map your hidden FreeSWITCH nodes (using their private IP addresses) and configure SIP OPTIONS pinging to monitor node health dynamically:
     ```text
-    # setid(1) targets the active backend FreeSWITCH pool
-    1 sip:fs-node1.prod.lan:5060 0 0 weight=50
-    1 sip:fs-node2.prod.lan:5060 0 0 weight=50
+    # setid(1) targets the active backend FreeSWITCH pool using internal private IPs
+    1 sip:<FREESWITCH1_PRIVATE_IP>:5060 0 0 weight=50
+    1 sip:<FREESWITCH2_PRIVATE_IP>:5060 0 0 weight=50
     ```
   - **RTP Media Relay Integration (`kamailio.cfg`)**:
     Intercept SDP payloads in the signaling flow and call RTPEngine to hijack media ports and manage NAT relays:
     ```kamailio
     # Load rtpengine module
     loadmodule "rtpengine.so"
-    modparam("rtpengine", "rtpengine_sock", "udp:10.0.10.5:22222") # Address of RTPEngine UDP socket
+    modparam("rtpengine", "rtpengine_sock", "udp:<RTPENGINE_PRIVATE_IP>:22222") # Address of RTPEngine private UDP socket
 
     # Handle SDP in your routing blocks
     route[MANAGE_MEDIA] {
@@ -373,11 +379,11 @@ Here is the integration and configuration modification guide for the core VoIP c
 - **Key Modifications (`/etc/rtpengine/rtpengine.conf`)**:
   - **Dual Network Interface Binding**: Bind external and internal network interfaces to route traffic securely:
     ```ini
-    interface = internal/10.0.10.5;external/203.0.113.5
+    interface = internal/<RTPENGINE_PRIVATE_IP>;external/<RTPENGINE_PUBLIC_IP>
     ```
   - **UDP NG Control Port**: Set the listener to match Kamailio's `rtpengine_sock` parameter:
     ```ini
-    listen-ng = 10.0.10.5:22222
+    listen-ng = <RTPENGINE_PRIVATE_IP>:22222
     ```
   - **UDP Port Range Allocation**: Keep the RTP UDP port allocation pool wide enough to support high concurrent streams:
     ```ini
