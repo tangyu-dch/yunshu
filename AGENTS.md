@@ -12,10 +12,86 @@ This repository is the Go rewrite workspace for Yunshu CallCenter. Build the who
 - Do not treat `yunshu-cmd` as a complete or authoritative implementation. It may only be used as historical context after  code has already been checked.
 - When  and `yunshu-cmd` differ, follow  unless the user explicitly approves a new Go-native design.
 - FreeSWITCH production node configuration must come from the -compatible database table `freeswitch`; YAML node entries are only a local development fallback when no MySQL DSN is configured.
-- API outbound agent extension resolution must come from the -compatible database table `extension`; request `extra` may only be used as a local fallback when database configuration is absent.
+- API outbound agent extension resolution must come from the unified database table `cc_res_extension` (old `extension` and `kamailio_subscriber` are completely deprecated and merged); request `extra` may only be used as a local fallback when database configuration is absent.
 - ESL internal API outbound must keep  `OutboundRequestGuard` semantics: validate merchant user, merchant status and expiry, prepaid balance, and extension availability before sending originate.
 - Extension online/busy state must use the -compatible Redis hash `extension:status`; missing/offline, pre-ring, ringing, and talking states must reject API outbound before originate.
-- 管理端权限不能只停留在代码常量里。`cc-console` 有数据库时必须优先读取 `console_permission`、`console_role_permission` 和 `console_route_permission`，静态 `PermissionRules` 只能作为迁移期兜底；新增运营管理路由必须同步落权限码和数据库种子。
+- 管理端权限不能只停留在代码常量里。`cc-console` 有数据库时必须优先读取 `console_permission`、`console_role_permission` 和 `console_route_permission`，静态 `PermissionRules` 只能作为迁移期兜底；新增运营管理路由必须同步落权限码 and 数据库种子。
+
+## Database Schema and Table Rules
+
+### 核心设计与废弃表声明 (Core Design & Deprecated Tables)
+- **统一分机表模式**：废弃并物理删除独立的 `kamailio_subscriber` 与老 `extension` 表。
+- 所有分机鉴权、SIP 参数、密码、商户与用户绑定统一存放在 `cc_res_extension` 中。
+- Go 业务侧在修改密码或分机信息时，必须在业务代码中**闭环**自动计算 `ha1` 和 `ha1b` 并写入 `cc_res_extension`，绝对不能依赖外部或 Kamailio 自行计算。
+- Kamailio 采用 `use_domain=1` 并通过 `ha1b` 进行域绑定鉴权，物理隔离多租户同名分机冲突。
+
+### 数据库版本控制 (Schema Versioning)
+- `version` 表是 Kamailio 启动和鉴权模块的强制依赖，必须播种且包含记录：
+  * `('cc_res_extension', 7)` - 对应统一分机表在 Kamailio `auth_db` 中的标准版本校验。
+  * `('location', 9)` - 对应 Usrloc 动态位置注册表。
+  * `('kamailio_dispatcher', 4)` - 对应信令网关负载均衡探测表。
+  * `('kamailio_rtpengine', 1)` - 对应媒体代理节点配置表。
+
+### 数据表名及 GORM 模型规范 (Table Names & GORM Models)
+进行 Go 重写和数据操作时，**必须严格遵循以下物理表名和规则**，严禁私自变更或引入旧表：
+
+1. **统一分机表 `cc_res_extension`**
+   - 对应 Go 模型：`internal/infra/resource.ExtensionModel` (表名 `cc_res_extension`)
+   - 关键字段：`id`, `extension_number` (分机号/SIP用户名), `password` (明文备份), `sip_domain` (SIP注册域), `ha1` (标准MD5), `ha1b` (带域绑定的MD5), `merchant_id` (商户ID), `user_id` (绑定坐席用户ID), `enable`, `del_flag`
+   - 唯一索引：`idx_extension_merchant` (`extension_number`, `merchant_id`)
+   - 作用：API 外呼通过 `user_id` 匹配此表以获取分机；Kamailio 注册通过此表进行 HA1b 鉴权。
+
+2. **信令网关探测表 `kamailio_dispatcher`**
+   - 对应 Go 模型：`internal/infra/directory.DispatcherModel`
+   - 字段：`id`, `set_id`, `destination` (格式 `sip:host:port`), `flags`, `priority`, `attrs`, `description`, `enable`, `del_flag`
+   - 作用：Kamailio 从该表加载媒体节点并做负载均衡和心跳探测。
+
+3. **媒体代理配置表 `kamailio_rtpengine`**
+   - 对应 Go 模型：GORM 管理表
+   - 字段：`id`, `set_id`, `rtpengine_sock` (格式 `udp:host:port`), `disabled`, `weight`, `description`, `del_flag`
+   - 作用：Kamailio 从该表加载 RTP 代理地址。
+
+4. **媒体节点配置表 `freeswitch`**
+   - 对应 Go 模型：`internal/infra/fsregistry.FreeswitchModel`
+   - 字段：`id`, `address`, `local_address`, `esl_port`, `sip_port`, `password`, `setid`, `weight`, `canary`, `enable`, `del_flag`
+   - 作用：Go 后端 CTI 加载此表配置以通过 ESL 控制 FreeSWITCH。
+
+5. **媒体事件租约表 `freeswitch_event_lease`**
+   - 对应 Go 模型：`internal/infra/fsregistry.FreeswitchEventLeaseModel`
+   - 字段：`fs_addr` (主键), `owner` (实例持有者), `lease_expiry` (租约过期时间)
+   - 作用：`cc-call` 多实例高可用消费 FS 事件的租约表，防止重复消费。
+
+6. **控制台账号与权限表 (Console Account & Permissions)**
+   - 账号表：`console_account` (唯一登录与账号控制，支持 `merchant_id` 物理隔离)
+   - 权限定义表：`console_permission`
+   - 角色权限表：`console_role_permission`
+   - 路由权限表：`console_route_permission`
+
+7. **商户与计费表 (Merchant & Billing)**
+   - 商户表：`merchant` (包含 `whitelist_domains` 域名白名单以做防刷/鉴权)
+   - 坐席用户表：`merchant_user`
+   - 计费总览表：`merchant_billing_overview`
+   - 充值流水表：`merchant_billing_recharge`
+
+8. **业务选号与策略表 (Number Selection & Routing)**
+   - 号码池表：`pool_phone`
+   - 号码技能组关系表：`pool_phone_skill_group`
+   - 技能组表：`skill_group`
+   - 坐席技能组绑定表：`user_skill_group`
+   - 通道网关配置表：`channel`, `gateway`, `pool`
+
+9. **黑白名单表 (Blacklist & Whitelist)**
+   - 黑名单库：`blacklist`，网关映射：`blacklist_gateway`
+   - 白名单库：`whitelist_data`，商户映射：`whitelist_data_merchant`
+
+10. **分布式与异步流程持久化表 (Durable Workflow & Async Outbox)**
+    - 事务型信箱表：`message_outbox` (实现高并发推送、WebSocket、回调、CDR 发布等幂等可靠投递)
+    - 呼叫话单记录表：`call_cdr_record` (ESL 挂机后可靠落盘的话单事实)
+    - 计费账单表：`call_billing_ledger`
+    - 结算任务表：`call_billing_settlement_job`
+    - 录音上传任务表：`call_recording_job`
+    - 话单投影表：`call_report_projection`
+    - 下游推送任务表：`call_downstream_push_job`
 
 ## Migration Thinking Rules
 

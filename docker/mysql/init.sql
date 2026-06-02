@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS `version` (
 INSERT INTO `version` (`table_name`, `table_version`) 
 VALUES ('kamailio_dispatcher', 4),
        ('location', 9),
-       ('kamailio_rtpengine', 1)
+       ('kamailio_rtpengine', 1),
+       ('cc_res_extension', 7)
 ON DUPLICATE KEY UPDATE `table_version` = VALUES(`table_version`);
 
 -- Kamailio Usrloc 动态分机位置注册映射表 (必须包含 ruid 唯一记录字段)
@@ -153,9 +154,9 @@ VALUES ('freeswitch', 'freeswitch', 8021, 5060, 'ClueCon', 1, 1);
 
 -- 播种分机及账号：供测试终端注册 (1001 & 1002，使用 HA1/HA1b 哈希鉴权)
 INSERT INTO `cc_res_extension` (`extension_number`, `password`, `sip_domain`, `ha1`, `ha1b`, `merchant_id`, `user_id`, `enable`, `bind_type`)
-VALUES ('1001', '123456', 'sip.yunshu.local', '911d5196a061bdebf371a2106c58ab51', '36e61b804dd88fbd03f813409600b1f2', 1, 7, 1, 2),
-       ('1002', '123456', 'sip.yunshu.local', '222d08151cdc54c2fdd179f82bd3f8da', '8350d2aae13cec6092dd2850462ab11a', 1, 8, 1, 2)
-ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `ha1` = VALUES(`ha1`), `ha1b` = VALUES(`ha1b`);
+VALUES ('1001', '123456', 'sip.yunshu.local', '911d5196a061bdebf371a2106c58ab51', '36e61b804dd88fbd03f813409600b1f2', 1001, 2001, 1, 2),
+       ('1002', '123456', 'sip.yunshu.local', '222d08151cdc54c2fdd179f82bd3f8da', '8350d2aae13cec6092dd2850462ab11a', 1001, 2002, 1, 2)
+ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `ha1` = VALUES(`ha1`), `ha1b` = VALUES(`ha1b`), `merchant_id` = VALUES(`merchant_id`), `user_id` = VALUES(`user_id`);
 
 -- 播种 Kamailio RTPEngine 媒体代理节点
 INSERT INTO `kamailio_rtpengine` (`set_id`, `rtpengine_sock`, `disabled`, `weight`, `description`) 
