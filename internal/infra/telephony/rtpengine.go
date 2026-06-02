@@ -28,7 +28,7 @@ type RtpengineModel struct {
 
 // TableName 返回 rtpengine 表名。
 func (RtpengineModel) TableName() string {
-	return "cc_tel_rtpengine"
+	return "cc_res_rtpengine"
 }
 
 // RtpengineRepository 基于 GORM 的 rtpengine 仓储实现。

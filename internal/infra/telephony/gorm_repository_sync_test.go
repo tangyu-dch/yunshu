@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// DummyDispatcherModel 用于在测试中模拟 kamailio_dispatcher 表结构，避免循环依赖
+// DummyDispatcherModel 用于在测试中模拟 cc_tel_freeswitch 表结构，避免循环依赖
 type DummyDispatcherModel struct {
 	ID          int       `gorm:"column:id;primaryKey"`
 	SetID       int       `gorm:"column:set_id"`
@@ -25,7 +25,7 @@ type DummyDispatcherModel struct {
 }
 
 func (DummyDispatcherModel) TableName() string {
-	return "kamailio_dispatcher"
+	return "cc_res_freeswitch"
 }
 
 func TestFreeswitchModelAutoSyncToKamailioDispatcher(t *testing.T) {
@@ -36,7 +36,7 @@ func TestFreeswitchModelAutoSyncToKamailioDispatcher(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. 迁移 freeswitch 和 kamailio_dispatcher 模拟表
+	// 1. 迁移 freeswitch 和 cc_res_freeswitch 模拟表
 	if err := db.AutoMigrate(&FreeswitchModel{}, &DummyDispatcherModel{}); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestFreeswitchModelAutoSyncToKamailioDispatcher(t *testing.T) {
 		t.Fatalf("Upsert failed: %v", err)
 	}
 
-	// 验证 kamailio_dispatcher 是否成功创建了对应记录
+	// 验证 cc_res_freeswitch 是否成功创建了对应记录
 	var disp DummyDispatcherModel
 	err = db.Where("description = ?", "FS-Node:101").First(&disp).Error
 	if err != nil {
@@ -117,7 +117,7 @@ func TestFreeswitchModelSyncNoTableSafety(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 仅迁移 freeswitch 表，故意不迁移 kamailio_dispatcher
+	// 仅迁移 freeswitch 表，故意不迁移 cc_tel_freeswitch
 	if err := db.AutoMigrate(&FreeswitchModel{}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +138,9 @@ func TestFreeswitchModelSyncNoTableSafety(t *testing.T) {
 		Enable:       true,
 	}
 
-	// 应当成功执行，由于检测到没有 kamailio_dispatcher 表，直接安全返回 nil 从而不报错
+	// 应当成功执行，由于检测到没有 cc_res_freeswitch 表，直接安全返回 nil 从而不报错
 	err = registry.Upsert(ctx, node)
 	if err != nil {
-		t.Fatalf("Upsert should be safe and succeed even if kamailio_dispatcher is missing: %v", err)
+		t.Fatalf("Upsert should be safe and succeed even if cc_res_freeswitch is missing: %v", err)
 	}
 }

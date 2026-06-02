@@ -35,7 +35,7 @@ func TestGormModelMapsFreeswitchTable(t *testing.T) {
 	if node.SetID != 2 || node.Weight != 80 || node.RWeight != 60 || !node.Canary {
 		t.Fatalf("unexpected node mapping: %+v", node)
 	}
-	if (FreeswitchModel{}).TableName() != "cc_tel_freeswitch" {
+	if (FreeswitchModel{}).TableName() != "cc_res_freeswitch_node" {
 		t.Fatalf("unexpected table name")
 	}
 }

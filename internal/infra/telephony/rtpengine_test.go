@@ -13,7 +13,7 @@ import (
 func TestRtpengineModelMapsNewTable(t *testing.T) {
 	t.Parallel()
 
-	if (RtpengineModel{}).TableName() != "cc_tel_rtpengine" {
+	if (RtpengineModel{}).TableName() != "cc_res_rtpengine" {
 		t.Fatalf("unexpected rtpengine table")
 	}
 }

@@ -314,9 +314,9 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	rtpengineRepository := operatedomain.RtpengineRepository(telephony.NewMemoryRtpengineRepository())
 	if gormDB != nil {
 		rtpengineRepository = telephony.NewRtpengineRepository(gormDB, logger)
-		logger.Info("运营端 Kamailio rtpengine 配置将从数据库读取", "table", "kamailio_rtpengine")
+		logger.Info("运营端 Kamailio rtpengine 配置将从数据库读取", "table", "cc_res_rtpengine")
 	} else {
-		logger.Warn("未配置 MySQL DSN，运营端 Kamailio rtpengine 管理使用本地内存兜底", "impact", "生产环境必须配置 kamailio_rtpengine 表仓储")
+		logger.Warn("未配置 MySQL DSN，运营端 Kamailio rtpengine 管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_rtpengine 表仓储")
 	}
 	riskControlRepository := operatedomain.RiskControlRepository(security.NewMemoryRiskControlRepository())
 	if gormDB != nil {

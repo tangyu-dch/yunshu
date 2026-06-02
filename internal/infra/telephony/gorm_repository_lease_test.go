@@ -51,7 +51,7 @@ func TestGormRegistryClaimsAndReleasesLease(t *testing.T) {
 func TestFreeswitchEventLeaseModelTableName(t *testing.T) {
 	t.Parallel()
 
-	if (FreeswitchEventLeaseModel{}).TableName() != "cc_tel_fs_lease" {
+	if (FreeswitchEventLeaseModel{}).TableName() != "cc_res_fs_lease" {
 		t.Fatalf("unexpected lease table name")
 	}
 }

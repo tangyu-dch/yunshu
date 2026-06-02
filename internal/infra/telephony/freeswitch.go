@@ -45,12 +45,12 @@ type FreeswitchEventLeaseModel struct {
 
 // TableName 返回 FS 事件租约表名。
 func (FreeswitchEventLeaseModel) TableName() string {
-	return "cc_tel_fs_lease"
+	return "cc_res_fs_lease"
 }
 
-// TableName 返回  生产库中的 FreeSWITCH 节点表名。
+// TableName 返回 云枢 生产库中的 FreeSWITCH 节点表名。
 func (FreeswitchModel) TableName() string {
-	return "cc_tel_freeswitch"
+	return "cc_res_freeswitch_node"
 }
 
 // GormRegistry 从 MySQL 的 `freeswitch` 表读取和维护 FS 节点配置。
@@ -287,9 +287,9 @@ func translateGormErr(err error) error {
 	return err
 }
 
-// AfterSave 在 FreeSWITCH 节点创建/更新/逻辑删除时，自动级联同步至 kamailio_dispatcher 路由表
+// AfterSave 在 FreeSWITCH 节点创建/更新/逻辑删除时，自动级联同步至 cc_res_freeswitch 路由表
 func (m *FreeswitchModel) AfterSave(tx *gorm.DB) (err error) {
-	if !tx.Migrator().HasTable("kamailio_dispatcher") {
+	if !tx.Migrator().HasTable("cc_res_freeswitch") {
 		return nil
 	}
 
@@ -305,7 +305,7 @@ func (m *FreeswitchModel) AfterSave(tx *gorm.DB) (err error) {
 
 	if m.DelFlag {
 		// 同步逻辑删除状态，同时将 flags 标记为 1 (inactive)
-		err = tx.Table("kamailio_dispatcher").
+		err = tx.Table("cc_res_freeswitch").
 			Where("description = ?", description).
 			Updates(map[string]any{
 				"flags":        flags,
@@ -318,14 +318,14 @@ func (m *FreeswitchModel) AfterSave(tx *gorm.DB) (err error) {
 
 	// 检查是否已存在对应 description (FS-Node:ID) 的记录
 	var count int64
-	err = tx.Table("kamailio_dispatcher").Where("description = ?", description).Count(&count).Error
+	err = tx.Table("cc_res_freeswitch").Where("description = ?", description).Count(&count).Error
 	if err != nil {
 		return err
 	}
 
 	if count == 0 {
 		// 新增路由记录
-		err = tx.Table("kamailio_dispatcher").Create(map[string]any{
+		err = tx.Table("cc_res_freeswitch").Create(map[string]any{
 			"set_id":       m.SetID,
 			"destination":  destination,
 			"flags":        flags,
@@ -341,7 +341,7 @@ func (m *FreeswitchModel) AfterSave(tx *gorm.DB) (err error) {
 	}
 
 	// 更新现有路由记录
-	err = tx.Table("kamailio_dispatcher").
+	err = tx.Table("cc_res_freeswitch").
 		Where("description = ?", description).
 		Updates(map[string]any{
 			"set_id":       m.SetID,

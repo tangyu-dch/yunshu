@@ -26,13 +26,13 @@ Before implementing a repository for an entity, document:
 - Data repair commands need dry-run mode.
 - Every migration needs a verification query.
 
-## FreeSWITCH Node Table
+## FreeSWITCH Node Table (cc_res_freeswitch_node)
 
-The Go rewrite must reuse the  `freeswitch` table for production FS node configuration.
+The Go rewrite must reuse the  `cc_res_freeswitch_node` table for production FS node configuration.
 
-- table name: `freeswitch`
+- table name: `cc_res_freeswitch_node`
 -  entity: `com.dolphin.datasource.model.entity.FreeswitchDO`
-- Go model: `internal/infra/fsregistry.FreeswitchModel`
+- Go model: `internal/infra/telephony.FreeswitchModel`
 - primary key: `id`
 - soft delete field: `del_flag`
 - enable field: `enable`
@@ -43,13 +43,13 @@ The Go rewrite must reuse the  `freeswitch` table for production FS node configu
 
 Production `cc-call` loads enabled, non-deleted nodes from this table. YAML node configuration is only a local development fallback when `mysql.dsn` is empty.
 
-## FreeSWITCH Event Lease Table
+## FreeSWITCH Event Lease Table (cc_res_fs_lease)
 
 The Go rewrite adds a supplemental lease table so multiple `cc-call` instances do not consume the same FS event stream.
 
-- table name: `freeswitch_event_lease`
+- table name: `cc_res_fs_lease`
 -  entity: none, Go-native supplemental table
-- Go model: `internal/infra/fsregistry.FreeswitchEventLeaseModel`
+- Go model: `internal/infra/telephony.FreeswitchEventLeaseModel`
 - primary key: `fs_addr`
 - ownership fields: `owner`, `lease_expiry`
 - time fields: `created_time`, `updated_time`
@@ -212,11 +212,11 @@ Go management routes now expose CRUD and relation maintenance for `channel`, `po
 
 `cc-call` can read this relation for compatibility validation, but direct SQL joins must not become the final high-concurrency selection design. Production selection should move the joined candidate set into Redis/materialized projections and use atomic allocation for caller/gateway counters.
 
-## Kamailio Dispatcher Table
+## Kamailio Dispatcher Table (cc_res_freeswitch)
 
 The Go rewrite adds a Go-native dispatcher management table for `cc-console` operational control.
 
-- table name: `kamailio_dispatcher`
+- table name: `cc_res_freeswitch`
 -  entity: none, Go-native supplemental table
 - Go model: `internal/infra/directory.DispatcherModel`
 - primary key: `id`

@@ -28,12 +28,12 @@ This repository is the Go rewrite workspace for Yunshu CallCenter. Build the who
 ### 数据库版本控制 (Schema Versioning)
 - `version` 表是 Kamailio 启动和鉴权模块的强制依赖，必须播种且包含记录：
   * `('cc_res_extension', 7)` - 对应统一分机表在 Kamailio `auth_db` 中的标准版本校验。
-  * `('location', 9)` - 对应 Usrloc 动态位置注册表。
-  * `('kamailio_dispatcher', 4)` - 对应信令网关负载均衡探测表。
-  * `('kamailio_rtpengine', 1)` - 对应媒体代理节点配置表。
+  * `('cc_res_location', 9)` - 对应 Usrloc 动态位置注册表。
+  * `('cc_res_freeswitch', 4)` - 对应信令网关负载均衡探测表。
+  * `('cc_res_rtpengine', 1)` - 对应媒体代理节点配置表。
 
 ### 数据表名及 GORM 模型规范 (Table Names & GORM Models)
-进行 Go 重写和数据操作时，**必须严格遵循以下物理表名和规则**，严禁私自变更或引入旧表：
+进行 Go 重写 and 数据操作时，**必须严格遵循以下物理表名和规则**，严禁私自变更或引入旧表：
 
 1. **统一分机表 `cc_res_extension`**
    - 对应 Go 模型：`internal/infra/resource.ExtensionModel` (表名 `cc_res_extension`)
@@ -41,23 +41,28 @@ This repository is the Go rewrite workspace for Yunshu CallCenter. Build the who
    - 唯一索引：`idx_extension_merchant` (`extension_number`, `merchant_id`)
    - 作用：API 外呼通过 `user_id` 匹配此表以获取分机；Kamailio 注册通过此表进行 HA1b 鉴权。
 
-2. **信令网关探测表 `kamailio_dispatcher`**
-   - 对应 Go 模型：`internal/infra/directory.DispatcherModel`
+2. **信令网关探测表 `cc_res_freeswitch`**
+   - 对应 Go 模型：`cc_res_freeswitch` 物理表 (由 `internal/infra/telephony/freeswitch.go` 的 `AfterSave` 级联维护，以前叫 `kamailio_dispatcher`)
    - 字段：`id`, `set_id`, `destination` (格式 `sip:host:port`), `flags`, `priority`, `attrs`, `description`, `enable`, `del_flag`
    - 作用：Kamailio 从该表加载媒体节点并做负载均衡和心跳探测。
 
-3. **媒体代理配置表 `kamailio_rtpengine`**
-   - 对应 Go 模型：GORM 管理表
+3. **媒体代理配置表 `cc_res_rtpengine`**
+   - 对应 Go 模型：`internal/infra/telephony.RtpengineModel` (表名 `cc_res_rtpengine`，以前叫 `kamailio_rtpengine`)
    - 字段：`id`, `set_id`, `rtpengine_sock` (格式 `udp:host:port`), `disabled`, `weight`, `description`, `del_flag`
    - 作用：Kamailio 从该表加载 RTP 代理地址。
 
-4. **媒体节点配置表 `freeswitch`**
-   - 对应 Go 模型：`internal/infra/fsregistry.FreeswitchModel`
+4. **媒体节点配置表 `cc_res_freeswitch_node`**
+   - 对应 Go 模型：`internal/infra/telephony.FreeswitchModel` (表名 `cc_res_freeswitch_node`，以前叫 `freeswitch`)
    - 字段：`id`, `address`, `local_address`, `esl_port`, `sip_port`, `password`, `setid`, `weight`, `canary`, `enable`, `del_flag`
    - 作用：Go 后端 CTI 加载此表配置以通过 ESL 控制 FreeSWITCH。
 
-5. **媒体事件租约表 `freeswitch_event_lease`**
-   - 对应 Go 模型：`internal/infra/fsregistry.FreeswitchEventLeaseModel`
+5. **分机动态注册位置表 `cc_res_location`**
+   - 对应 Go 模型：无，由 Kamailio `usrloc` 自动读写，旧称 `location`
+   - 关键字段：`ruid`, `username`, `domain`, `contact`, `expires`, `user_agent`
+   - 作用：保存坐席当前分机动态注册的 NAT 穿透 IP 与端口路由映射。
+
+6. **媒体事件租约表 `cc_res_fs_lease`**
+   - 对应 Go 模型：`internal/infra/telephony.FreeswitchEventLeaseModel` (表名 `cc_res_fs_lease`，以前叫 `freeswitch_event_lease`)
    - 字段：`fs_addr` (主键), `owner` (实例持有者), `lease_expiry` (租约过期时间)
    - 作用：`cc-call` 多实例高可用消费 FS 事件的租约表，防止重复消费。
 

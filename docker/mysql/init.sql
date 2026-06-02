@@ -15,14 +15,14 @@ CREATE TABLE IF NOT EXISTS `version` (
 
 -- 播种 Kamailio 的各模块表版本号 (Kamailio v6.1.2 标准)
 INSERT INTO `version` (`table_name`, `table_version`) 
-VALUES ('kamailio_dispatcher', 4),
-       ('location', 9),
-       ('kamailio_rtpengine', 1),
+VALUES ('cc_res_freeswitch', 4),
+       ('cc_res_location', 9),
+       ('cc_res_rtpengine', 1),
        ('cc_res_extension', 7)
 ON DUPLICATE KEY UPDATE `table_version` = VALUES(`table_version`);
 
 -- Kamailio Usrloc 动态分机位置注册映射表 (必须包含 ruid 唯一记录字段)
-CREATE TABLE IF NOT EXISTS `location` (
+CREATE TABLE IF NOT EXISTS `cc_res_location` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `username` VARCHAR(64) NOT NULL DEFAULT '',
   `domain` VARCHAR(64) DEFAULT NULL,
@@ -56,8 +56,8 @@ CREATE TABLE IF NOT EXISTS `location` (
 
 -- Note: kamailio_subscriber table removed; authentication utilizes the unified cc_res_extension table directly.
 
--- Dispatcher 负载均衡与心跳探测网关表 (直接对接 Go 后端管理的 GORM 表 kamailio_dispatcher)
-CREATE TABLE IF NOT EXISTS `kamailio_dispatcher` (
+-- Dispatcher 负载均衡与心跳探测网关表 (直接对接 Go 后端管理的 GORM 表 cc_res_freeswitch)
+CREATE TABLE IF NOT EXISTS `cc_res_freeswitch` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `set_id` INT NOT NULL DEFAULT 1,
   `destination` VARCHAR(192) NOT NULL DEFAULT '',
@@ -71,8 +71,8 @@ CREATE TABLE IF NOT EXISTS `kamailio_dispatcher` (
   `updated_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- RTPEngine 媒体代理节点配置表 (直接对接 Go 后端管理的 GORM 表 kamailio_rtpengine)
-CREATE TABLE IF NOT EXISTS `kamailio_rtpengine` (
+-- RTPEngine 媒体代理节点配置表 (直接对接 Go 后端管理的 GORM 表 cc_res_rtpengine)
+CREATE TABLE IF NOT EXISTS `cc_res_rtpengine` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `set_id` INT NOT NULL DEFAULT 1,
   `rtpengine_sock` VARCHAR(192) NOT NULL DEFAULT '',
@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS `kamailio_rtpengine` (
 -- =========================================================================
 
 -- FreeSWITCH 媒体节点配置表
-CREATE TABLE IF NOT EXISTS `freeswitch` (
+CREATE TABLE IF NOT EXISTS `cc_res_freeswitch_node` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `address` VARCHAR(128) NOT NULL DEFAULT '',
   `local_address` VARCHAR(128) NOT NULL DEFAULT '',
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS `freeswitch` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- FreeSWITCH 事件租约表 (多实例高可用分配)
-CREATE TABLE IF NOT EXISTS `freeswitch_event_lease` (
+CREATE TABLE IF NOT EXISTS `cc_res_fs_lease` (
   `fs_addr` VARCHAR(128) NOT NULL PRIMARY KEY,
   `owner` VARCHAR(128) NOT NULL,
   `lease_expiry` DATETIME NOT NULL,
@@ -144,12 +144,12 @@ CREATE TABLE IF NOT EXISTS `cc_res_extension` (
 -- =========================================================================
 
 -- 播种 Kamailio Dispatcher：让信令网关把呼叫路由给名为 freeswitch 的容器
-INSERT INTO `kamailio_dispatcher` (`set_id`, `destination`, `flags`, `priority`, `attrs`, `description`, `enable`, `del_flag`) 
+INSERT INTO `cc_res_freeswitch` (`set_id`, `destination`, `flags`, `priority`, `attrs`, `description`, `enable`, `del_flag`) 
 VALUES (1, 'sip:freeswitch:5060', 0, 1, 'max-concurrency=100', 'Docker Internal FreeSWITCH Media Server', 1, 0)
 ON DUPLICATE KEY UPDATE `destination` = VALUES(`destination`);
 
 -- 播种 FreeSWITCH 节点：让 Go 后端 CTI 连接名为 freeswitch:8021 的容器 ESL 控制面
-INSERT INTO `freeswitch` (`address`, `local_address`, `esl_port`, `sip_port`, `password`, `setid`, `enable`)
+INSERT INTO `cc_res_freeswitch_node` (`address`, `local_address`, `esl_port`, `sip_port`, `password`, `setid`, `enable`)
 VALUES ('freeswitch', 'freeswitch', 8021, 5060, 'ClueCon', 1, 1);
 
 -- 播种分机及账号：供测试终端注册 (1001 & 1002，使用 HA1/HA1b 哈希鉴权)
@@ -159,6 +159,6 @@ VALUES ('1001', '123456', 'sip.yunshu.local', '911d5196a061bdebf371a2106c58ab51'
 ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `ha1` = VALUES(`ha1`), `ha1b` = VALUES(`ha1b`), `merchant_id` = VALUES(`merchant_id`), `user_id` = VALUES(`user_id`);
 
 -- 播种 Kamailio RTPEngine 媒体代理节点
-INSERT INTO `kamailio_rtpengine` (`set_id`, `rtpengine_sock`, `disabled`, `weight`, `description`) 
+INSERT INTO `cc_res_rtpengine` (`set_id`, `rtpengine_sock`, `disabled`, `weight`, `description`) 
 VALUES (1, 'udp:rtpengine:2223', 0, 1, 'Default RTPEngine Media Proxy')
 ON DUPLICATE KEY UPDATE `rtpengine_sock` = VALUES(`rtpengine_sock`);
