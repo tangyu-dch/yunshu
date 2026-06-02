@@ -86,6 +86,34 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		MerchantID: r.URL.Query().Get("merchantId"),
 		TaskID:     r.URL.Query().Get("taskId"),
 	}
+	token := r.URL.Query().Get("token")
+	if sub.MerchantID == "" && token != "" {
+		if h.Client == nil {
+			h.Logger.Warn("从 Redis Token 会话提取商户ID失败: Client 为 nil", "token", token)
+		} else {
+			key := "console:auth:session:" + token
+			raw, err := h.Client.Get(r.Context(), key).Result()
+			if err != nil {
+				h.Logger.Warn("从 Redis 读取 Token 会话出错", "token", token, "key", key, "error", err.Error())
+			} else if raw == "" {
+				h.Logger.Warn("从 Redis 读取 Token 会话为空", "token", token, "key", key)
+			} else {
+				h.Logger.Info("从 Redis 读取 Token 会话成功，开始解析", "raw", raw)
+				var ticket struct {
+					Tenant struct {
+						MerchantID string `json:"merchantId"`
+					} `json:"tenant"`
+				}
+				if err := json.Unmarshal([]byte(raw), &ticket); err != nil {
+					h.Logger.Warn("解析 Redis Token 会话 JSON 失败", "error", err.Error(), "raw", raw)
+				} else {
+					sub.MerchantID = ticket.Tenant.MerchantID
+					h.Logger.Info("从 Redis Token 会话自动提取商户ID结果", "token", token, "merchantId", sub.MerchantID)
+				}
+			}
+		}
+	}
+
 	if sub.MerchantID == "" {
 		h.Logger.Warn("CTI WebSocket 连接缺少商户订阅范围，拒绝升级", "remoteAddr", r.RemoteAddr, "taskId", sub.TaskID)
 		http.Error(w, "缺少 merchantId", http.StatusUnauthorized)

@@ -1,164 +1,239 @@
-# ☁️ 云枢 (Yunshu) - 高性能分布式智能客服与呼叫中心系统
+# ☁️ Yunshu (云枢) - High-Performance Distributed Intelligent Customer Service & Call Center System
+
+**中文说明** | [中文版](README_zh.md)
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/tangyu-dch/yunshu)](https://golang.org)
 [![Build Status](https://img.shields.io/badge/go--test-passed-brightgreen.svg)](https://golang.org)
 [![Frontend Safety](https://img.shields.io/badge/typescript-typesafe-blue.svg)](https://www.typescriptlang.org)
 [![Design](https://img.shields.io/badge/design-premium--neon-blueviolet.svg)](https://github.com/tangyu-dch/yunshu)
 
-**“云枢”** 是专为新一代企业级高并发、强交互通信场景设计的**分布式智能客服与呼叫中心系统**。系统完全基于 Go 语言原生高性能并发架构重构，深度融合底层 CTI 话务并发调度引擎、FreeSWITCH ESL 信令控制核心、大模型智能流式语音 IVR 可视化编排设计工坊，在单机或云原生集群环境下提供极具弹性、高可靠、秒级结算的智能客服中枢。
+**“云枢” (Yunshu)** is a state-of-the-art **distributed intelligent customer service and call center system** designed for next-generation enterprise-grade high-concurrency, highly-interactive communication scenarios. Completely rewritten on top of Go's high-performance native concurrent runtime, it deeply integrates a bottom-layer CTI concurrent telephony routing engine, a FreeSWITCH ESL signaling control core, and a multi-provider commercial-grade LLM streaming voice IVR visual orchestration workflow. It delivers an elastic, highly reliable, and second-level billing communication core suitable for single-node deployments or cloud-native containerized clusters.
 
 ---
 
-## 🏗️ 1. 全景组件架构与物理边界
+## 🏗️ 1. Architecture Overview & Component Boundaries
 
-云枢系统在微服务设计上遵循高内聚、低耦合的领域驱动设计（DDD）规范，支持在云原生集群中针对热点模块单独分布式水平扩展，也可在开发与单机测试时通过合并进程（`cc-all`）一键拉起全套组件：
+Yunshu adopts a highly cohesive, loosely coupled Domain-Driven Design (DDD) microservices layout. Hotspots can be scaled horizontally and independently in cloud-native production environments, while an All-in-One process launcher (`cc-all`) is provided to spin up all services instantly in development and local staging environments:
 
 ```text
                                   ┌────────────────┐
-                                  │  外呼与话务请求  │
+                                  │ Outbound/Calls │
                                   └───────┬────────┘
                                           │
                                           ▼
                                   ┌────────────────┐
-                                  │    cc-edge     │ (边缘网关鉴权/限流/逆向代理)
+                                  │    cc-edge     │ (Edge gateway: Auth / Rate Limiting / Proxy)
                                   └───────┬────────┘
                                           │
                   ┌───────────────────────┼───────────────────────┐
                   ▼                       ▼                       ▼
           ┌───────────────┐       ┌───────────────┐       ┌───────────────┐
           │  cc-console   │       │    cc-call    │       │   cc-worker   │
-          │ (管理后台及API)│       │ (话务与ESL控制)│       │(计费/录音/推送)│
-          └───────────────┘       └───────┬───────┘       └───────────────┘
+          │ (Admin / APIs)│       │ (Telephony/ESL│       │(Billing/Recs/ │
+          └───────────────┘       │  ACD Control) │       │ Downstream)   │
+                                  └───────┬───────┘       └───────────────┘
                                           │
                                           ▼
                            ┌─────────────────────────────┐
-                           │   FreeSWITCH 媒体网关集群    │
+                           │   FreeSWITCH Media Gateway  │
                            └─────────────────────────────┘
 ```
 
-### 🛰️ 物理边界职责界定
-*   **`cc-edge` (边缘通信网关)**：对外统一暴露的鉴权与物理拦截卡口。校验第三方商户 `X-App-Key` 和 `X-App-Secret` 凭证，实施高灵敏度令牌桶限流与逆向代理路由，防止非法越权与高并发穿透。
-*   **`cc-console` (管理后台)**：商户自助控制台与运营管理端。收口商户财务总览、分机管理、实时话务监控、通话记录（CDR）查询以及可视化 AI 流程工作坊的 CRUD、模型管理与发布。
-*   **`cc-call` (通信运行时)**：话务实时控制大脑。并发连接 FreeSWITCH 网关集群，实时消费底层 ESL 信道信令并驱动双腿（坐席腿、客户腿）的并发起呼与桥接，内置高度动态的 **AIVoiceEngine（智能语音 IVR 寻路引擎）**。
-*   **`cc-worker` (异步任务中心)**：基于 Reliable Outbox（可靠本地出件箱）与租约竞争（ClaimDue）模式，提供最终一致性保障的离线重试处理：包含话单持久化结算、录音转储 CDN、商户余额精确抵扣以及话单下游三方 Webhook 可靠推送（支持 HMAC-SHA256 签名）。
+### 🛰️ Component Responsibilities
+*   **`cc-edge` (Edge Gateway)**: The unified authentication, security inspection, and rate-limiting gateway. It validates merchant `X-App-Key` and `X-App-Secret` tokens, enforces precise token-bucket rate limits, and reverse-proxies requests to prevent unauthenticated access.
+*   **`cc-console` (Administration Console)**: Self-service portal for merchants and system administrators. Features financial overview charts, extension registration tracking, real-time call monitoring, Call Detail Record (CDR) auditing, and a drag-and-drop Visual AI Flow orchestration studio.
+*   **`cc-call` (Telephony Runtime)**: The real-time communications brain. It maintains high-performance TCP streams to the FreeSWITCH Event Socket Library (ESL) interface, consumes raw telephony leg state machines, handles dual-leg (agent & customer) concurrent bridging, and hosts the active **AIVoiceEngine** for smart IVR navigation.
+*   **`cc-worker` (Async Processor Center)**: Implements a reliable transactional Outbox pattern with lease acquisition (`ClaimDue`) to handle heavy asynchronous workloads with eventual consistency. Responsibilities include CDR persistence, call recording CDN uploads, precise billing settlement, and secure downstream call webhook notifications (with HMAC-SHA256 signatures).
 
 ---
 
-## 🔍 2. 技术栈选型与系统设计哲学
+## 🔍 2. Technology Stack & Design Philosophy
 
-云枢在选型与设计上追求“极致性能”与“高级视觉体验”的有机结合：
+Yunshu bridges the gap between extreme execution speed and premium design aesthetics:
 
-### 🛠️ 后端架构选型
-*   **高性能 Go 核心**：利用 Go 原生并发 Goroutine 调度模型与低 GC 开销，在单机并发控制上万路呼叫信道，满足电信级超低延时（<20ms）控制要求。
-*   **GORM + MySQL 关系型持久化**：采用 GORM 作为 ORM 映射层，封装底层的财务交易隔离事务与 Reliable Outbox 出件箱，保障商户资金与计费明细的绝对一致。
-*   **Redis 原子高并发锁与会话同步**：利用 Redis 的单线程原子性实现分机高并发抢线选号、ACD 技能组资源分配，并提供 `extension:status` 多实例分机在线状态同步。
+### 🛠️ Back-end Architecture
+*   **Native Go Core**: Employs Go's lightweight Goroutines and low GC overhead to manage thousands of active media channels per instance with sub-20ms control latency.
+*   **GORM + MySQL Relational Persistence**: Utilizes GORM as the database abstraction layer, encapsulating strict transaction boundaries for billing ledgers and outbox queue entries.
+*   **Redis Concurrent Locks & Sync**: Relies on Redis atomic transactions and key expires to implement high-speed extension selection, skill-group queuing, and cross-instance synchronizations (via `extension:status` hashes).
 
-### 🎨 前端科技美学
-*   **React + Vite 高性能构建**：基于 Vite 极速构建热更新，采用 React 声明式 UI 进行高频状态机的视图投射。
-*   **React Flow + Canvas 霓虹特效**：深度定制 React Flow。网格背景采用精心调和的 HSL 暗色科技色调，连接线以 SVG 贝塞尔曲线呈现，且在**高亮传导时发射绿色发光电荷粒子沿着线路循环流动**，展现完美的话务轨迹。
-*   **毛玻璃拟态 UI (Glassmorphism)**：运用现代 CSS `backdrop-filter: blur` 与精心搭配的渐变投影，构建极具科技感与立体感的控制卡片，wow 用户的每一次交互。
-
----
-
-## 🌟 3. 产品核心特色与硬核能力
-
-### 🧠 全局配置化 AI 厂商与模型中心
-*   **配置与编排完全解耦**：控制台提供两个平行独立的功能页面，确保业务逻辑分离：
-    - **🤖 AI 流程编排**：管理已设计好的智能 IVR 拓扑流，快速跳转进可视化画布进行节点物理编排。
-    - **🧠 AI 厂商与模型**：集中创建和管理不同大模型厂商的 API 凭证（如 DeepSeek API、OpenAI 接口或云枢自研大模型），妥善存入 `cc_biz_ai_model_config` 物理表中。
-*   **零代码快捷反填**：在 AI 画布的“开始”节点中，商户只需下拉快捷选择配置好的 AI 模型，系统会自动利用 Form 受控模式反填大模型服务商、Endpoint、密钥、Temperature 以及全局 System Prompt 并增量保存入连线图 Metadata，避免金钥在流图中四处散落的维护隐患。
-
-### 🎙️ mod_audio_stream 旁路实时推流与 Go 原生 PCM VAD 语音网关
-*   **实时音频推流**：兼容 FreeSWITCH `mod_audio_stream` 实时流媒体协议。在话务流转到 ASR 节点时，自动通过 ESL 下发 `uuid_audio_stream` 指令，在 `16k` 高清和 `mono` 单声道下，将信道中的原始音频（RTP PCM）通过 WebSocket 旁路近乎零延迟投递给大模型服务。
-*   **原生 ASR WebSocket 网关**：内置高性能 WebSocket 服务器（默认监听 `9002` 端口），物理接收 FreeSWITCH 投递过来的 PCM 原始二进制音频帧，物理进行音量能量 RMS 计算。
-*   **静音检测 VAD 算法**：网关运行高敏 VAD（Voice Activity Detection）算法，灵敏判断用户说话开始（VAD 开启，支持打断）与结束（持续静音 1.0 秒自动断句），无需依赖第三方臃肿组件。
-
-### 🔌 自驱动仿真测试沙盒 (Self-Driving Sandbox)
-*   **全自动自驾驶寻路**：检测到用户说话结束后，网关能依据该通话在 Session 缓存中的 AI 可视化流图节点，**自动解析其后置的所有出度 Handle 条件，自动生成符合分支意图的 transcribed ASR 文本**，自动向系统派发 `asr_speech_detected` 领域事件，实现话术流图的完美“自驾游式模拟跑通”。
-*   **真人声学仿真拨号盘 (DTMF Simulation)**：物理点击利用 Web AudioContext 合成真实电话双音多频按键音效，测试 DTMF 物理按键分支路由。
-*   **TTS 发音回音壁**：仿真播报时，自动调用浏览器自带的语音合成引擎（SpeechSynthesis）大声朗读 TTS 文本，并展现极具视觉震撼的绿色高动态声波图跳动。
-
-### 🎛️ 电信级异步租约计费与 Webhook 话单推送
-*   **ClaimDue 多实例竞争租约**：为了防止多实例 Worker 裸扫 Outbox 话单表导致重复计费或消息乱序，cc-worker 在投递前必须先通过 ClaimDue 机制在 MySQL 中竞争领取租约（锁定 `locked_by` 与 `locked_until`），从而在崩溃发生时允许其它 Worker 自动重领并进行数据修复。
-*   **高并发计费与 CDN 录音转储**：计费默认费率完全来自配置，支持 rated 估算审计，最终结算必须拆为余额精确扣减与 settlement ledger 写入独立节点。缺少录音路径自动标记为可修复，录音上传确认后标记 `uploaded`，失败进入 outbox 自动重试。
--   **Webhook 可靠交付**：配置 `DOWNSTREAM_CDR_URL` 后，话单下游推送必须有任务状态和确认语义，支持 HMAC-SHA256 签名校验，失败时写入 last_error 并以指数退避重试，确保话单 100% 不丢。
+### 🎨 Front-end Aesthetics
+*   **React + Vite Platform**: Built using Vite for instant HMR, combined with React for declarative component views.
+*   **React Flow Neon Engine**: Tailored React Flow layout utilizing dark mode HSL palettes, glassmorphism card surfaces (`backdrop-filter: blur`), and SVG bezier paths. During active call traversal, **animated glowing green charge particles pulse along SVG wires** to visualize real-time flow progression.
 
 ---
 
-## 📂 4. 项目物理目录结构
+## 🌟 3. Product Features & Core Capabilities
+
+### 🧠 Decoupled AI Configuration & Model Center
+*   **Architectural Separation**: The dashboard provides two cleanly decoupled spaces:
+    - **🤖 AI Flow Designer**: Visual workspace to manage and publish smart voice IVR graph topographies.
+    - **🧠 AI Providers & Models**: Consolidated credential manager (`cc_biz_ai_model_config`) for cloud provider keys (DeepSeek API, OpenAI API, Tencent Hunyuan, Alibaba Qwen, Volcengine Doubao).
+*   **One-Click Auto-Fill**: Inside the Visual Designer's `Start` node, selecting a configured model automatically loads and locks the endpoint, credentials, temperature, and system prompt into the canvas metadata, removing the security risk of hardcoding API keys in visual diagrams.
+
+### 🎙️ mod_audio_stream real-time RTP voice gateway & Native Go VAD
+*   **RTP Voice Stream Bypass**: Fully compliant with FreeSWITCH `mod_audio_stream`. When an ASR state node triggers, `cc-call` commands FreeSWITCH via ESL to stream raw channel audio (16k high-definition, mono) via a low-latency WebSocket connection.
+*   **High-Performance WS Audio Gateway**: A built-in WebSocket listener (port `9002`) receives raw binary PCM packets, executing real-time Root Mean Square (RMS) energy metrics.
+*   **Native Silence Detection (VAD)**: A custom Voice Activity Detection (VAD) algorithm calculates user speech initiation (allowing instant agent interrupt) and completion (1.0s silence threshold) without bloated external binary dependencies.
+
+### 🚫 Strict Physical Telephony, Zero Mock/Simulation Fallback
+*   **Absolute Fail-Closed Model**: To protect production integrity and merchant financial systems, Yunshu has fully removed any form of mock simulation or mock fallback logic. If credentials are missing, API keys are blank, or external cloud requests (ASR, TTS, or LLM) fail, the engine strictly rejects fallback. Instead, it returns a rigorous physical error to the state machine, triggering a safe, immediate Fail-Closed hangup or human-agent transfer, eliminating system "hallucinations" or mock leakages in production.
+*   **ClaimDue Distributed Lease Workers**: Multi-instance worker orchestration uses database-backed locks to coordinate Outbox task claims, preventing double-billing or downstream notification racing while ensuring automatic recovery of failed tasks.
+*   **Reliable Webhook Deliveries**: Pushes downstream CDRs via custom URLs with index retry limits, exponential backoff, and HMAC-SHA256 signature verification.
+
+---
+
+## 🚀 4. Deployment Recommendations & Installation Guide
+
+To achieve telecom-grade stability, sub-millisecond signaling speeds, and smooth media file handling, strict adherence to the following deployment recommendations is highly recommended.
+
+### 📡 4.1 Which Components Must Be Co-Located on the Same Server as FreeSWITCH?
+
+In production, **the `cc-call` and `cc-worker` microservices MUST either be deployed on the exact same physical/virtual host as FreeSWITCH, or have access to a shared high-performance Network File System (e.g., NFS, NAS, GlusterFS) mapped to the same absolute directory paths**.
+
+The engineering rationale is as follows:
+
+#### 1. Shared TTS Voice Synthesis Cache (Required)
+When the AI voice engine translates text to speech using configured cloud APIs (Alibaba, Tencent, OpenAI, Volcengine), the microservice writes the synthesized `.mp3`/`.wav` file directly to a local cache directory (e.g., `/var/lib/yunshu/tts_cache`).
+FreeSWITCH plays this audio by invoking ESL's `playback /var/lib/yunshu/tts_cache/xxxx.mp3`.
+*   **Deployment Constraint**: **FreeSWITCH must have immediate, direct filesystem access to these files.** Therefore, `cc-call` and FreeSWITCH must either share the local disk of a single host, or mount an NFS network volume to the **exact same absolute folder path** on both servers.
+
+#### 2. Call Recording Uploads (Required for `cc-worker`)
+When a call is answered, FreeSWITCH records the conversation and saves the resulting audio locally (e.g., `/var/log/freeswitch/recordings/xxxx.wav`).
+Upon hangup, `cc-worker` reads this audio file, compresses/transcribes it, and uploads it to the merchant's cloud CDN bucket (OSS/COS).
+*   **Deployment Constraint**: **`cc-worker` requires direct read/write permission to FreeSWITCH's recording output directory.** It must either run directly on the FreeSWITCH host as a system daemon, or share filesystem access via a low-latency NFS mount.
+
+#### 3. Sub-Millisecond ESL Control Latency (Highly Recommended)
+`cc-call` communicates with FreeSWITCH via active TCP sockets on the ESL port (`8021`). Telephony SIP signaling is extremely latency-sensitive. A round-trip command delay exceeding 5ms can lead to race conditions, SIP bridging failures, and sluggish key (DTMF) menu responses.
+*   **Deployment Constraint**: Keep `cc-call` and FreeSWITCH in the **same physical server or inside a dedicated high-speed VPC** to guarantee latency under **1ms**.
+
+#### 4. Real-Time RTP WebSocket Push (`mod_audio_stream`)
+FreeSWITCH pushes high-frequency PCM audio payloads over WebSocket streams to the ASR Gateway (port `9002`).
+*   **Deployment Constraint**: The WebSocket receiver must be co-located or linked in a ultra-low-jitter local network with FreeSWITCH to avoid packet dropouts and broken AI sentence segmentations.
+
+---
+
+### 🛠️ 4.2 Step-by-Step Deployment Workflow
+
+#### Step 1: Prepare Database & Middlewares
+1. Provision a high-performance Linux server (Ubuntu 20.04+ / CentOS 7+).
+2. Install and launch:
+   - **MySQL (>= 5.7)**: Establish database credentials and import the Yunshu schema.
+   - **Redis (>= 6.0)**: Ensure it is running as the single source of truth for extension status and locks.
+3. If running distributed hosts, configure an **NFS server** and mount the shared directory (e.g., mapped to `/var/yunshu/shared`) to the same local mount points on both FreeSWITCH and the Go microservice hosts.
+
+#### Step 2: Configure FreeSWITCH
+1. Install FreeSWITCH and configure `event_socket.conf.xml` (allow internal network IPs and enforce a strong ESL password).
+2. Enable `mod_audio_stream` in `modules.conf.xml` and restart FreeSWITCH to allow raw audio pushes.
+3. Ensure the FreeSWITCH system user has proper read and write permissions to the call recordings folder.
+
+#### Step 3: Compile and Deploy Frontend
+1. Navigate to the `web/` workspace:
+   ```bash
+   cd web
+   npm install
+   npm run build
+   ```
+2. Copy the compiled static files (`dist/`) to your web server (e.g., Nginx) and set up HTML5 history routing fallback.
+
+#### Step 4: Compile and Configure Go Microservices
+1. Build the microservices binaries from the Go root directory:
+   ```bash
+   go build -o bin/cc-edge ./cmd/cc-edge
+   go build -o bin/cc-console ./cmd/cc-console
+   go build -o bin/cc-call ./cmd/cc-call
+   go build -o bin/cc-worker ./cmd/cc-worker
+   ```
+2. Copy `configs/default.yaml` to `configs/production.yaml`.
+3. Edit `configs/production.yaml` with your production details:
+   - Enter your MySQL DSN and Redis host addresses.
+   - Provide the FreeSWITCH ESL credentials (host, port, and password).
+   - Verify that the `tts_cache` directory configurations perfectly align between the Go services and the FreeSWITCH host mount.
+   - Map the `cc-worker` recording paths to FreeSWITCH's active folder.
+
+#### Step 5: Process Daemonization
+1. Launch the respective services on their target machines:
+   - **Console Host**: Start `cc-console`.
+   - **Telephony Host (Co-located with FreeSWITCH)**: Start `cc-call`.
+   - **Worker Host (Co-located with FreeSWITCH or via shared storage)**: Start `cc-worker`.
+   - **Edge Gateway Host**: Start `cc-edge`.
+2. Configure system process managers (like `Systemd` or `Supervisor`) to monitor and automatically restart the Yunshu services in case of failure, ensuring 24/7 telecom-grade SLA availability.
+
+---
+
+## 📂 5. Physical Project Directory Structure
 
 ```text
-├── cmd/                        # 物理服务独立进程启动入口
-│   ├── cc-call/                # 实时 CTI ESL 通信服务入口
-│   ├── cc-console/             # 运营管理及商户后台服务入口
-│   ├── cc-worker/              # 异步分布式计费与流处理器入口
-│   ├── cc-edge/                # 边缘通信鉴权网关入口
-│   ├── cc-all/                 # All-in-One 一键合并启动入口
-│   └── update-agents/          # 系统契约自动生成工具
+├── cmd/                        # Service process entrypoints
+│   ├── cc-call/                # Telephony CTI ESL runtime controller
+│   ├── cc-console/             # Web administration and developer APIs
+│   ├── cc-worker/              # Async distributed billing & CDN uploader
+│   ├── cc-edge/                # Edge authentication & reverse-proxy gateway
+│   ├── cc-all/                 # All-in-One local launcher
+│   └── update-agents/          # Telephony schema code-generator
 ├── internal/
-│   ├── app/                    # 微服务进程依赖组装中心与共享 Gin 引擎
-│   ├── domain/                 # 核心纯净业务领域层 (不依赖任何外部 GORM/Redis)
-│   │   ├── callflow/           # AIVoiceEngine IVR 话务寻路及 CDR 流程编排
-│   │   ├── cti/                # 智能高并发调度、Redis 原子选号、规则过滤链
-│   │   ├── esl/                # FreeSWITCH ESL 信令构建、通话 Lifecycle 状态机
-│   │   └── operate/            # AI 流程拓扑、商户计费、大模型厂商配置领域实体
-│   ├── transport/              # 传输适配层 (Gin HTTP Handlers、Redis Stream 事件消费)
-│   ├── contracts/              # 契约层 (定义共享事件、统一业务错误码、Redis KEY 规范)
-│   └── infra/                  # 基础设施层 (GORM 模型及仓储、Redis/PubSub 适配器、Outbox 物理队列)
-├── pkg/                        # 系统级共享独立轮子 (ID 幂等锁、流程引擎组件、状态机)
-├── web/                        # 前端 React + Vite 可视化编辑器工作坊
-└── docs/                       # 系统架构设计、双写迁移决策及三方接入指南
+│   ├── app/                    # System dependency assembler & Gin launcher
+│   ├── domain/                 # Core pure business logic (Zero ORM/DB/Redis imports)
+│   │   ├── callflow/           # AIVoiceEngine IVR topology & CDR flows
+│   │   ├── cti/                # ACD skill groups, Redis queues, and routing chains
+│   │   ├── esl/                # FreeSWITCH signaling abstractions & session state machine
+│   │   └── operate/            # AI configurations, billing ledger schemas, and contracts
+│   ├── transport/              # Handler adapters (Gin HTTP & Redis Stream consumers)
+│   ├── contracts/              # Shared event definitions, error codes, and key patterns
+│   └── infra/                  # GORM models, repository patterns, and outbox buffers
+├── pkg/                        # Standard utility wheels (Idempotent locks, state machines)
+├── web/                        # React + Vite visual flow editor workshop
+└── docs/                       # Architectural designs, migration logs, and API guides
 ```
 
 ---
 
-## 🛠️ 5. 本地开发极速运行
+## 🛠️ 6. Quick Start (Local Development)
 
-### 1. 物理环境依赖
-*   **Go**：`>= 1.21`
-*   **NodeJS**：`>= 18`
-*   **MySQL**：`>= 5.7`
-*   **Redis**：`>= 6.0` (负责分机注册状态同步及原子高并发选号占位)
+### 1. Prerequisites
+*   **Go**: `Version >= 1.21`
+*   **NodeJS**: `Version >= 18`
+*   **MySQL**: `Version >= 5.7`
+*   **Redis**: `Version >= 6.0`
 
-### 2. 启动前端工作区
+### 2. Run the Front-End Workspace
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-### 3. 一键启动后端全套微服务 (All-in-One 模式)
-云枢提供了一个专门的 `cc-all` 合并进程入口，支持在单个控制台下一键拉起 `cc-edge`、`cc-console` 、`cc-call`、`cc-worker` 四个微服务进程，免去繁琐的多终端维护：
+### 3. Launch Go Microservices (All-in-One Dev Mode)
+To simplify local debugging, use the `cc-all` launcher to spin up all four backend services in a single console terminal window:
 ```bash
-# 复制默认配置并填写您的 MySQL / Redis 物理地址
+# Copy and update local databases and connections
 cp configs/default.yaml configs/local.yaml
 
-# 一键并发拉起四个微服务，共享 local 配置文件
+# Run All services concurrently
 go run ./cmd/cc-all -config configs/local.yaml
 ```
 
 ---
 
-## ⚖️ 6. 致歉与免责声明 (Apology & Disclaimer)
+## ⚖️ 7. Service SLA & Disclaimer
 
-### 👤 个人开发者身份声明 (Individual Developer Status)
-云枢（Yunshu）项目是一个**由独立个人开发者自研、自主维护的开源重构项目，不属于任何公司、企业主体、电信运营商或商业机构**。本系统所有的架构重构、功能开发、文档指南及社区 Bug 修复，均为开发者基于个人技术热情的无偿开源奉献。项目不具备任何企业机构背景，因此无法提供公司级别的商业合同签署、发票开具或长线企业外派服务，请在评估和使用时明确知晓该个人开发属性。
+### 👤 Individual Developer Status
+Yunshu is an **independently developed and self-maintained open-source project. It does not belong to any corporate entity, telecom carrier, or commercial agency**. All architecture designs, code updates, and Bug fixes are carried out voluntarily by the developer out of technical passion. Because of this personal project status, please note that we cannot provide corporate-level service contracts, business invoices, or long-term on-site consulting services.
 
-### 🙇‍♂️ 开发者致歉与服务承诺
-由于本项目正处于从旧系统向 Go 原生高性能架构的重写与快速迁移阶段，目前部分电信级高级信令控制、复杂 ACD 坐席动态分配算法及第三方增值话务网关的对接功能仍处于积极完善与迭代补强中。对于现阶段系统未完备性给商户测试及本地集成带来的不便，我们深表歉意！
+### 🙇‍♂️ Support SLA Commitments
+As the project is currently in an active rewrite and migration phase to a high-performance Go runtime, some advanced signaling scenarios, complex dynamic ACD skills, and custom third-party gateways are still undergoing active testing and integration. We sincerely apologize for any temporary inconveniences caused during integration testing!
 
-**🚀 问题解决时效保障（SLA & Support）**：
-为了免除您的后顾之忧，项目团队正式承诺提供高标准的技术支持服务保障：
-- **快速响应**：对于商户及开源社区反馈的系统 Bug、呼叫故障或功能缺失，我们将在接收到 Issue 反馈后的 **2 小时内** 物理响应，启动首轮技术排查。
-- **极速修复**：对于常规程序缺陷（Bug）与环境配置问题，我们承诺在 **24 小时内** 完成物理修复、全量测试回归并向主分支交付热更新补丁；对于涉及复杂 FreeSWITCH 信令编排、高并发抢线竞态或运营商网关物理对接等深水区难题，我们将在 **48 小时内** 物理提供系统规避方案或定制化补丁，全力保障商户的话务及计费业务连续性。
+**🚀 Fast-Response Support SLA**:
+To guarantee a worry-free experience for adopters and community users, we offer high-grade support SLA commitments:
+- **Fast Diagnostic Response**: Bug reports, SIP disconnects, or general feature inquiries submitted via GitHub Issues will receive an engineering response within **2 hours** of submission.
+- **Rapid Bug Patching**: Standard bugs and configuration issues will be resolved, verified, and hotpatched into the main branch within **24 hours**. Complex FreeSWITCH signaling conflicts, high-concurrency race issues, or unique telecom carrier configurations will receive a detailed workaround or custom patch within **48 hours** to keep your business running smoothly.
 
-### ⚠️ 免责声明
-1. **合规与法律责任**：云枢（Yunshu）作为一套高并发、电信级分布式智能客服与呼叫中心话务系统，其技术设计旨在服务企业合规的高保真客户接待及 IVR 智能应答。**本系统仅供学术研究、系统演示和开发参考之用**。任何单位或个人在使用本系统进行物理起呼、外呼业务时，必须严格遵守所在国家和地区的通信法规、反电信网络诈骗法及用户个人隐私保护政策。**对于因违法外呼、恶意骚扰、信息泄露或滥用本系统所导致的一切法律、行政及民事纠纷，云枢项目开发团队不承担任何直接或间接的法律责任。**
-2. **大模型（LLM）生成式声明**：云枢集成了 completions 大模型流式 IVR 编排和旁路 WebSocket 语音推送能力。大模型（如 DeepSeek、OpenAI 等）生成的话术文本和对话流具有概率随机性，**系统无法完全保证其回答的 100% 准确性、妥当性与安全性**。商户及使用方应在流程设计中加入完备的 ACD 转人工（transfer）、安全拦截及 fail-closed 挂断兜底机制，防范生成式 AI 的“幻觉”引发话务舆情风险。
-3. **无担保承诺**：本开源软件基于 **GPL-3.0** 开源协议提供“按原样”的无担保服务，不作任何明示或暗示的保证（包括但不限于对适销性、特定用途的适用性或非侵权性的担保）。使用方需自行承担本系统运行可能带来的通信信道开销及硬件资源负载风险。
+### ⚠️ Legal Disclaimer
+1. **Compliance & Telephony Regulations**: Yunshu is built as a high-performance distributed customer service framework. Users deploying this platform for active outbound calling must strictly comply with all national and local telephony regulations, anti-fraud directives, and user privacy laws. **The developers of Yunshu assume zero liability for direct or indirect legal consequences arising from non-compliant calling campaigns, nuisance calling, database leakage, or overall platform abuse.**
+2. **Generative AI & LLM Warning**: The platform integrates third-party LLM completions. Outputs generated by external language models (e.g., DeepSeek, OpenAI, Tencent Hunyuan) are probabilistic. **Yunshu does not guarantee 100% accuracy, safety, or compliance of AI-generated responses.** Deployers must configure proper ACD transfer nodes, manual supervisor interventions, and strict fail-closed hangup rules to mitigate potential AI "hallucinations."
+3. **No Warranties**: This open-source software is licensed under the **GPL-3.0** license and is provided "AS IS," without warranties or conditions of any kind. Users assume all network and computing resource overhead risks associated with running this platform.
 
 ---
 
-## 📄 7. 开源协议 (License)
+## 📄 8. License
 
-本项目采用 **[GNU General Public License v3.0 (GPL-3.0)](file:///Users/tangyu/Projects/yunshu/LICENSE)** 开源许可证发布。任何基于本系统开发的衍生软件、改进版本或商业闭源分发，均必须严格遵守 GPL-3.0 协议的强 Copyleft 传染性开源约束，公开所有派生版本的源代码。详情请参阅根目录下的 [LICENSE](file:///Users/tangyu/Projects/yunshu/LICENSE) 文件。
+This project is licensed under the **[GNU General Public License v3.0 (GPL-3.0)](LICENSE)**. Full details are available in the [LICENSE](LICENSE) file in the root directory.

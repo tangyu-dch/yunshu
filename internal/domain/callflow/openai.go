@@ -8,7 +8,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -38,10 +37,9 @@ type OpenAIASREngine struct{}
 func (e *OpenAIASREngine) Transcribe(ctx context.Context, audioData []byte, format string, config map[string]any) (string, error) {
 	apiKey, _ := config["llmApiKey"].(string)
 
-	// 1. 物理接入与仿真退化安全保护
+	// 1. 物理安全校验，无凭证直接报错
 	if apiKey == "" {
-		// 无真实 Key，平滑退化为 OpenAI Whisper ASR 物理转写仿真
-		return "[OpenAI Whisper ASR 仿真转译] Hello, I would like to check the routing configuration and status of CloudShu virtual agent.", nil
+		return "", fmt.Errorf("OpenAI Whisper 物理凭证未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：对接 OpenAI Whisper 识别接口
@@ -117,9 +115,9 @@ func (e *OpenAITTSEngine) Synthesize(ctx context.Context, text string, config ma
 		voice = "alloy" // OpenAI TTS 默认声音
 	}
 
-	// 1. 无真实 Key，平滑退化为 OpenAI TTS 模拟合成二进制音频
+	// 1. 物理安全校验，无凭证直接报错
 	if apiKey == "" {
-		return []byte("MOCK_OPENAI_TTS_AUDIO_DATA_MP3"), nil
+		return nil, fmt.Errorf("OpenAI TTS 物理凭证未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：发起 OpenAI TTS 语音合成物理 API 请求
@@ -190,16 +188,9 @@ func (e *OpenAILLMEngine) GenerateReply(ctx context.Context, systemPrompt, userM
 		tempVal = 0.7
 	}
 
-	// 1. 无 Key 退化为 OpenAI ChatGPT 协议仿真应答
+	// 1. 物理安全校验，无凭证直接报错
 	if apiKey == "" {
-		userMessage = strings.TrimSpace(userMessage)
-		if strings.Contains(userMessage, "转人工") || strings.Contains(userMessage, "human") || strings.Contains(userMessage, "operator") {
-			return "【OpenAI ChatGPT 仿真】Sure! I am now triggering the CloudShu ACD routing mechanism to direct your call to a live agent.", nil
-		}
-		if strings.Contains(userMessage, "话费") || strings.Contains(userMessage, "billing") || strings.Contains(userMessage, "money") {
-			return "【OpenAI ChatGPT 仿真】We have successfully checked your merchant account status. All rates and finalizations look clean and robust.", nil
-		}
-		return fmt.Sprintf("【OpenAI ChatGPT 仿真】Received: “%s”. CloudShu has successfully decoupled and integrated OpenAI ChatGPT and Whisper engine with high extensibility!", userMessage), nil
+		return "", fmt.Errorf("OpenAI ChatGPT API 密钥未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：对接 OpenAI 兼容的大模型 API

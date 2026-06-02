@@ -1,0 +1,557 @@
+package operate
+
+import (
+	"crypto/aes"
+	"encoding/hex"
+	"errors"
+	"net/http"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+
+	"yunshu/internal/contracts"
+	authdomain "yunshu/internal/domain/auth"
+	operatedomain "yunshu/internal/domain/operate"
+	"yunshu/internal/infra/business"
+	"yunshu/internal/infra/resource"
+)
+
+// Keys and Constants matching the desktop client configuration
+const (
+	SIPCredentialKey = "vL4oU4jJ8qS3oC4v"
+	PhoneNumberKey   = "2has1d8jef49v0ru"
+)
+
+// DialpadLoginReq matches LoginParams of the desktop client
+type DialpadLoginReq struct {
+	Account  string `json:"account"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// DialpadLoginResp matches LoginResult of the desktop client
+type DialpadLoginResp struct {
+	UserInfo           DialpadUserInfo `json:"userInfo"`
+	Token              string          `json:"token"`
+	InactivityDuration int             `json:"inactivityDurationSec"`
+	WhitelistDomains   string          `json:"whitelistDomains"`
+}
+
+type DialpadUserInfo struct {
+	ID         int               `json:"id"`
+	Username   string            `json:"username"`
+	SeatNumber string            `json:"seatNumber"`
+	RoleDetail DialpadRoleDetail `json:"roleDetail"`
+}
+
+type DialpadRoleDetail struct {
+	Permissions []string `json:"permissions"`
+}
+
+// ExtensionInfo matches ExtensionInfo of the desktop client
+type ExtensionInfo struct {
+	Number     string `json:"number"`   // encrypted hex
+	Password   string `json:"password"` // encrypted hex
+	Domain     string `json:"domain"`
+	Port       string `json:"port"`
+	Protocol   string `json:"protocol"`
+	ICEServers string `json:"iceServers"`
+}
+
+// DialpadCallReq matches CallParams of the desktop client
+type DialpadCallReq struct {
+	CalledNumber string            `json:"calledNumber"` // encrypted hex
+	Extra        map[string]string `json:"extra,omitempty"`
+}
+
+// CallPageParams matches CallPageParams of the desktop client
+type CallPageParams struct {
+	Page  int `json:"page"`
+	Limit int `json:"limit"`
+}
+
+// CallPageResult matches CallPageResult of the desktop client
+type CallPageResult struct {
+	List    []CallRecord `json:"list"`
+	Total   int          `json:"total"`
+	HasMore bool         `json:"hasMore"`
+}
+
+type CallRecord struct {
+	ID        int    `json:"id"`
+	CalledNum string `json:"calledNumber"`
+	Status    string `json:"status"`
+	Duration  int    `json:"duration"`
+	Location  string `json:"location"`
+	CreatedAt string `json:"createdAt"`
+}
+
+type CallTotalResult struct {
+	TodayTotal        int     `json:"todayTotal"`
+	TodayConnected    int     `json:"todayConnected"`
+	TodayDisconnected int     `json:"todayDisconnected"`
+	MonthTotal        int     `json:"monthTotal"`
+	MonthConnected    int     `json:"monthConnected"`
+	Over30sToday      int     `json:"over30sToday"`
+	Over30sMonth      int     `json:"over30sMonth"`
+	Over30sRateToday  float64 `json:"over30sRateToday"`
+	Over30sRateMonth  float64 `json:"over30sRateMonth"`
+}
+
+// RegisterDialpadCompatRoutes registers the old Dialpad "/mer" API compatibility layer routes
+func RegisterDialpadCompatRoutes(
+	r gin.IRoutes,
+	authService *authdomain.AuthService,
+	callRecordService *operatedomain.CallRecordManagementService,
+	db *gorm.DB,
+) {
+	// 1. Dialpad Login
+	r.POST("/mer/auth/dialpad/login", func(c *gin.Context) {
+		var req DialpadLoginReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		if req.Account == "" || req.Username == "" || req.Password == "" {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "商户、用户名或密码不能为空"))
+			return
+		}
+
+		// Look up merchant by account name
+		var mch resource.MerchantModel
+		if err := db.Where("account = ? AND del_flag = ?", req.Account, false).First(&mch).Error; err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "商户账号不存在"))
+			return
+		}
+
+		if !mch.Enable {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "该商户账号已被停用"))
+			return
+		}
+
+		if mch.ExpiredTime != nil && mch.ExpiredTime.Before(time.Now()) {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "该商户服务已到期"))
+			return
+		}
+
+		// Look up user account in cc_sys_account
+		var account struct {
+			ID           int
+			Username     string
+			PasswordHash string
+			MerchantID   string
+			UserID       string
+			RoleID       string
+			AccountType  string
+			DataScope    string
+			Enable       bool
+		}
+		if err := db.Table("cc_sys_account").
+			Where("username = ? AND merchant_id = ? AND del_flag = ?", req.Username, strconv.Itoa(mch.ID), false).
+			First(&account).Error; err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "用户不存在或不属于该商户"))
+			return
+		}
+
+		if !account.Enable {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "用户账号已被停用"))
+			return
+		}
+
+		// Verify password using bcrypt
+		if err := bcrypt.CompareHashAndPassword([]byte(account.PasswordHash), []byte(req.Password)); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "用户名或密码错误"))
+			return
+		}
+
+		// Issue authentication ticket
+		ticket, err := authService.Login(c.Request.Context(), authdomain.LoginRequest{
+			Username:   req.Username,
+			Password:   req.Password,
+			MerchantID: strconv.Itoa(mch.ID),
+			UserID:     account.UserID,
+			RoleID:     account.RoleID,
+			DataScope:  account.DataScope,
+			Internal:   account.AccountType == operatedomain.AccountTypeSuperAdmin,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "签发登录凭据失败"))
+			return
+		}
+
+		// Get user's seat number from cc_res_mch_user
+		var seatNumber string
+		if account.UserID != "" {
+			var mchUser resource.MerchantUserModel
+			if err := db.Where("id = ? AND del_flag = ?", account.UserID, false).First(&mchUser).Error; err == nil {
+				seatNumber = mchUser.SeatNumber
+			}
+		}
+
+		// Add default permissions to make frontend dials work
+		permissions := ticket.Tenant.Permissions
+		if len(permissions) == 0 {
+			permissions = []string{"dial-pad:direct-call", "dial-pad:record-view"}
+		} else {
+			// Append these standard permissions if not present
+			hasDirectCall := false
+			hasRecordView := false
+			for _, p := range permissions {
+				if p == "dial-pad:direct-call" {
+					hasDirectCall = true
+				}
+				if p == "dial-pad:record-view" {
+					hasRecordView = true
+				}
+			}
+			if !hasDirectCall {
+				permissions = append(permissions, "dial-pad:direct-call")
+			}
+			if !hasRecordView {
+				permissions = append(permissions, "dial-pad:record-view")
+			}
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(DialpadLoginResp{
+			UserInfo: DialpadUserInfo{
+				ID:         account.ID,
+				Username:   account.Username,
+				SeatNumber: seatNumber,
+				RoleDetail: DialpadRoleDetail{
+					Permissions: permissions,
+				},
+			},
+			Token:              ticket.Token,
+			InactivityDuration: 300,
+			WhitelistDomains:   mch.WhitelistDomains,
+		}))
+	})
+
+	// 2. Dialpad Logout
+	r.POST("/mer/auth/dialpad/logout", func(c *gin.Context) {
+		token := tokenFromRequest(c)
+		_ = authService.Logout(c.Request.Context(), token)
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{"logout": true}))
+	})
+
+	// 3. Get Extension Info (Protected)
+	r.GET("/mer/v1/user/dialpad/extensionInfo", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+
+		userID, err := strconv.Atoi(tenant.UserID)
+		if err != nil || userID <= 0 {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "坐席 ID 无效"))
+			return
+		}
+
+		var ext resource.ExtensionModel
+		if err := db.Where("user_id = ? AND del_flag = ? AND enable = ?", userID, false, true).
+			Order("updated_time DESC, id DESC").First(&ext).Error; err != nil {
+			c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, "未给此坐席分配或启用分机"))
+			return
+		}
+
+		var mch resource.MerchantModel
+		sipDomain := "127.0.0.1"
+		if err := db.Where("id = ? AND del_flag = ?", ext.MerchantID, false).First(&mch).Error; err == nil && mch.SipDomain != "" {
+			sipDomain = mch.SipDomain
+		}
+
+		// Encrypt credentials
+		encryptedNum, err := encryptECBHex(ext.ExtensionNumber, []byte(SIPCredentialKey))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "分机加密错误"))
+			return
+		}
+
+		encryptedPassword, err := encryptECBHex(ext.Password, []byte(SIPCredentialKey))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "密码加密错误"))
+			return
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(ExtensionInfo{
+			Number:     encryptedNum,
+			Password:   encryptedPassword,
+			Domain:     sipDomain,
+			Port:       "5060",
+			Protocol:   "udp",
+			ICEServers: "",
+		}))
+	})
+
+	// 4. Valid Number check
+	r.GET("/mer/v1/user/dialpad/checkIfUserHasValidNumber", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(true))
+	})
+
+	// 5. Make Call (REST audit/sync)
+	r.POST("/mer/v1/call", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+
+		var req DialpadCallReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		if req.CalledNumber == "" {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "被叫号码不能为空"))
+			return
+		}
+
+		// Decrypt number to make sure it's valid
+		_, err := decryptECBHex(req.CalledNumber, []byte(PhoneNumberKey))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "号码解密失败"))
+			return
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+
+	// 6. Paginated Call History
+	r.POST("/mer/v1/record/dialpad/call-page", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+
+		var params CallPageParams
+		if err := c.ShouldBindJSON(&params); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		userID, _ := strconv.Atoi(tenant.UserID)
+		merchantID, _ := strconv.Atoi(tenant.MerchantID)
+
+		page, err := callRecordService.Page(c.Request.Context(), operatedomain.CallRecordPageRequest{
+			PageNumber: params.Page,
+			PageSize:   params.Limit,
+			MerchantID: merchantID,
+			UserID:     userID,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询通话记录失败"))
+			return
+		}
+
+		list := make([]CallRecord, 0, len(page.Records))
+		for _, r := range page.Records {
+			status := "NO_ANSWER"
+			if r.DurationSec > 0 {
+				status = "ANSWERED"
+			} else if r.HangupCause == "BUSY" || r.HangupCause == "USER_BUSY" {
+				status = "BUSY"
+			}
+
+			// We need a unique integer ID. Use our stringToID helper
+			recordID := stringToID(r.CallID)
+
+			list = append(list, CallRecord{
+				ID:        recordID,
+				CalledNum: r.Callee,
+				Status:    status,
+				Duration:  r.DurationSec,
+				Location:  "未知",
+				CreatedAt: r.CompletedAt.Format("2006-01-02 15:04:05"),
+			})
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(CallPageResult{
+			List:    list,
+			Total:   int(page.Total),
+			HasMore: int64(params.Page*params.Limit) < page.Total,
+		}))
+	})
+
+	// 7. Call Statistics Summary
+	r.GET("/mer/v1/record/dialpad/call-total", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+
+		userID, _ := strconv.Atoi(tenant.UserID)
+
+		// Set today and month starting range
+		now := time.Now().Local()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+
+		var todayTotal, todayConnected, monthTotal, monthConnected int64
+		var over30sToday, over30sMonth int64
+
+		// Query database records (RecordModel table: cc_biz_cdr)
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ?", userID, todayStart).Count(&todayTotal)
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ? AND duration_sec > 0", userID, todayStart).Count(&todayConnected)
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ? AND duration_sec >= 30", userID, todayStart).Count(&over30sToday)
+
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ?", userID, monthStart).Count(&monthTotal)
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ? AND duration_sec > 0", userID, monthStart).Count(&monthConnected)
+		db.Model(&business.RecordModel{}).Where("user_id = ? AND completed_at >= ? AND duration_sec >= 30", userID, monthStart).Count(&over30sMonth)
+
+		rateToday := 0.0
+		if todayConnected > 0 {
+			rateToday = float64(over30sToday) / float64(todayConnected)
+		}
+
+		rateMonth := 0.0
+		if monthConnected > 0 {
+			rateMonth = float64(over30sMonth) / float64(monthConnected)
+		}
+
+		c.JSON(http.StatusOK, contracts.OK(CallTotalResult{
+			TodayTotal:        int(todayTotal),
+			TodayConnected:    int(todayConnected),
+			TodayDisconnected: int(todayTotal - todayConnected),
+			MonthTotal:        int(monthTotal),
+			MonthConnected:    int(monthConnected),
+			Over30sToday:      int(over30sToday),
+			Over30sMonth:      int(over30sMonth),
+			Over30sRateToday:  rateToday,
+			Over30sRateMonth:  rateMonth,
+		}))
+	})
+
+	// 8. Auto-Call task stubs
+	r.GET("/mer/v1/batch-call-dialpad/ws-pause-status", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{
+			"hasTask": false,
+			"taskId":  "",
+		}))
+	})
+
+	r.POST("/mer/v1/batch-call-dialpad/ws-pause-mark", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+
+	r.POST("/mer/v1/batch-call-dialpad/apply-ws-pause", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+
+	r.POST("/mer/v1/batch-call-dialpad/start-task", func(c *gin.Context) {
+		_, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+}
+
+// --- Authenticate / Session Helpers ---
+
+func authenticateDialpad(c *gin.Context, service *authdomain.AuthService) (contracts.TenantContext, bool) {
+	token := tokenFromRequest(c)
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "请先登录"))
+		return contracts.TenantContext{}, false
+	}
+	ticket, ok := service.Token(c.Request.Context(), token)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "token 无效或已过期"))
+		return contracts.TenantContext{}, false
+	}
+	return ticket.Tenant, true
+}
+
+func stringToID(s string) int {
+	h := 0
+	for i := 0; i < len(s); i++ {
+		h = 31*h + int(s[i])
+	}
+	if h < 0 {
+		h = -h
+	}
+	return h
+}
+
+// --- AES ECB Padding Helpers ---
+
+func encryptECBHex(plaintext string, key []byte) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	data := pkcs7Pad([]byte(plaintext), block.BlockSize())
+	ciphertext := make([]byte, len(data))
+	for i := 0; i < len(data); i += block.BlockSize() {
+		block.Encrypt(ciphertext[i:i+block.BlockSize()], data[i:i+block.BlockSize()])
+	}
+	return hex.EncodeToString(ciphertext), nil
+}
+
+func decryptECBHex(hexText string, key []byte) (string, error) {
+	cipherBytes, err := hex.DecodeString(hexText)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	if len(cipherBytes)%block.BlockSize() != 0 {
+		return "", errors.New("ciphertext is not a multiple of block size")
+	}
+	plaintext := make([]byte, len(cipherBytes))
+	for i := 0; i < len(cipherBytes); i += block.BlockSize() {
+		block.Decrypt(plaintext[i:i+block.BlockSize()], cipherBytes[i:i+block.BlockSize()])
+	}
+	unpadded, err := pkcs7Unpad(plaintext)
+	if err != nil {
+		return "", err
+	}
+	return string(unpadded), nil
+}
+
+func pkcs7Pad(data []byte, blockSize int) []byte {
+	padding := blockSize - len(data)%blockSize
+	padText := make([]byte, padding)
+	for i := range padText {
+		padText[i] = byte(padding)
+	}
+	return append(data, padText...)
+}
+
+func pkcs7Unpad(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, errors.New("empty data")
+	}
+	padding := int(data[len(data)-1])
+	if padding > len(data) || padding == 0 {
+		return nil, errors.New("invalid padding")
+	}
+	for i := len(data) - padding; i < len(data); i++ {
+		if data[i] != byte(padding) {
+			return nil, errors.New("invalid padding")
+		}
+	}
+	return data[:len(data)-padding], nil
+}

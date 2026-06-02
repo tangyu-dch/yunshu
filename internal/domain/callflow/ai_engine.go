@@ -225,25 +225,23 @@ func (e *AIVoiceEngine) ProcessASRText(ctx context.Context, session *esl.CallSes
 			configMap["llmTemperature"] = tempVal
 
 			respText, err := llmEng.GenerateReply(ctx, systemPrompt, text, configMap)
-			if err == nil && respText != "" {
-				aiResponse = respText
-				logger.Info("云枢呼叫运行时：成功接收到云端大模型应答文本", "reply", aiResponse)
-			} else {
-				logger.Error("云枢呼叫运行时：调用云端大模型失败，将降级使用本地 Mock AI", "error", err)
+			if err != nil {
+				logger.Error("云枢呼叫运行时：调用云端大模型物理引擎失败，拒绝仿真退避", "error", err)
+				return fmt.Errorf("调用云端大模型物理引擎失败: %w", err)
 			}
+			if respText == "" {
+				logger.Error("云枢呼叫运行时：调用云端大模型物理引擎返回空内容，拒绝仿真退避")
+				return errors.New("调用云端大模型物理引擎返回空内容")
+			}
+			aiResponse = respText
+			logger.Info("云枢呼叫运行时：成功接收到云端大模型应答文本", "reply", aiResponse)
 		}
 	}
 
-	// 如果大模型返回为空或未配置，则走向本地 Mock AI 大模型动态应答生成器（极客仿真）
+	// 如果大模型返回为空或未配置，则直接严格报错，不再走向任何仿真与 mock 兜底
 	if aiResponse == "" {
-		systemPrompt := "您是云枢呼叫中心的智能 AI 话务员。"
-		if startNode != nil && startNode.Metadata != nil {
-			if sp, ok := startNode.Metadata["llmSystemPrompt"].(string); ok && sp != "" {
-				systemPrompt = sp
-			}
-		}
-		aiResponse = e.mockLLMGenerate(text, systemPrompt)
-		logger.Info("云枢呼叫运行时：未匹配到外部 LLM 密钥，使用本地 Mock 大语言模型驱动应答", "reply", aiResponse)
+		logger.Error("云枢呼叫运行时：大语言模型未配置或生成为空，拒绝仿真退避")
+		return errors.New("大语言模型物理引擎未配置或应答内容为空")
 	}
 
 	return e.playbackTTS(ctx, callID, customerUUID, fsAddr, aiResponse)
@@ -568,20 +566,4 @@ func (e *AIVoiceEngine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.Default()
-}
-
-// mockLLMGenerate 在没有配置云端大模型 API key 时，根据 systemPrompt 和输入智能模拟生成动态应答。
-func (e *AIVoiceEngine) mockLLMGenerate(userText, systemPrompt string) string {
-	userText = strings.TrimSpace(userText)
-	if strings.Contains(userText, "你是谁") || strings.Contains(userText, "名字") {
-		return "我是云枢呼叫中心的智能大模型助手。今天有什么我可以帮您的吗？"
-	}
-	if strings.Contains(userText, "功能") || strings.Contains(userText, "做什么") {
-		return "云枢支持大模型可视化 IVR 编排、实时 ASR 语音推流及智能转人工调度哦！您可以对我说转人工，或者说查话费。"
-	}
-	if strings.Contains(userText, "再见") || strings.Contains(userText, "挂断") || strings.Contains(userText, "拜拜") {
-		return "好的，感谢您的致电。祝您生活愉快，再见！"
-	}
-
-	return fmt.Sprintf("【云枢大模型动态回复】关于您所说的“%s”，我们已经收到。云枢支持高并发旁路推流，您可以随时吩咐我查话费或转接人工客服。", userText)
 }

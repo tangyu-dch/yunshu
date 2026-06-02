@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -39,10 +38,9 @@ func (e *TencentASREngine) Transcribe(ctx context.Context, audioData []byte, for
 	secretId, _ := config["tencentSecretId"].(string)
 	secretKey, _ := config["tencentSecretKey"].(string)
 
-	// 1. 物理接入与仿真退化安全保护
+	// 1. 物理接入安全校验，无凭证直接严格报错，杜绝任何形式的仿真与 mock 退化
 	if secretId == "" || secretKey == "" {
-		// 无真实 Key，平滑退化为腾讯云 ASR 物理转写仿真
-		return "[腾讯云 ASR 仿真转译] 你好，我想测试一下腾讯混元大模型与实时 ASR 推流的配合效果，是否已经可以在云枢平台中无缝流转？", nil
+		return "", fmt.Errorf("腾讯云 ASR 物理凭证未配置，物理引擎拒绝仿真退化")
 	}
 
 	// 2. 生产物理环境：对接腾讯云 ASR 识别 API (Sentence Recognition)
@@ -153,9 +151,9 @@ func (e *TencentTTSEngine) Synthesize(ctx context.Context, text string, config m
 		voice = "101001" // 默认智雅女声
 	}
 
-	// 1. 无真实 Key，平滑退化为腾讯云 TTS 模拟合成二进制音频
+	// 1. 物理接入安全校验，无凭证直接严格报错，杜绝任何形式的仿真与 mock 退化
 	if secretId == "" || secretKey == "" {
-		return []byte("MOCK_TENCENT_TTS_AUDIO_DATA_MP3"), nil
+		return nil, fmt.Errorf("腾讯云 TTS 物理凭证未配置，物理引擎拒绝仿真退化")
 	}
 
 	// 2. 生产物理环境：发起腾讯云 TTS 语音合成物理 API 请求 (TextToVoice)
@@ -259,16 +257,9 @@ func (e *TencentLLMEngine) GenerateReply(ctx context.Context, systemPrompt, user
 	endpoint, _ := config["llmEndpoint"].(string)
 	tempVal, _ := config["llmTemperature"].(float64)
 
-	// 1. 无 Key 退化为腾讯混元大模型仿真应答
+	// 1. 物理接入安全校验，无凭证直接严格报错，杜绝任何形式的仿真与 mock 退化
 	if secretId == "" && apiKey == "" {
-		userMessage = strings.TrimSpace(userMessage)
-		if strings.Contains(userMessage, "转人工") || strings.Contains(userMessage, "客服") {
-			return "【腾讯混元大模型仿真】已为您检测到人工客服就绪状态。腾讯混元正在触发云枢多路路由拓扑，即刻为您转接...", nil
-		}
-		if strings.Contains(userMessage, "话费") || strings.Contains(userMessage, "账单") {
-			return "【腾讯混元大模型仿真】您的呼叫记录已自动汇流至腾讯云存储中进行 finalization，账单核销余额状态极佳。", nil
-		}
-		return fmt.Sprintf("【腾讯混元大模型仿真】已接收到腾讯 ASR 识别文本：“%s”。云枢系统与腾讯语音、腾讯混元大模型解耦拼装运转极佳！", userMessage), nil
+		return "", fmt.Errorf("腾讯混元大模型 API 密钥与 Secret 凭证未配置，物理引擎拒绝仿真退化")
 	}
 
 	// 2. 生产物理环境：对接腾讯混元 API 或是腾讯云大模型 API 请求

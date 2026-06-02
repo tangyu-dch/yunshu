@@ -192,24 +192,28 @@ func TestAIVoiceEngineProcessASRTextFallback(t *testing.T) {
 
 	flow := buildTestFlow()
 
-	// 模拟 ASR 无法识别出内容
+	// 模拟 ASR 无法识别出内容，且未配置大语言模型，物理引擎将直接严格报错
 	err := engine.ProcessASRText(context.Background(), &session, flow, "我想买个苹果")
-	if err != nil {
-		t.Fatalf("ProcessASRText failed: %v", err)
+	if err == nil {
+		t.Fatalf("Expected ProcessASRText to return error when LLM is not configured, got nil")
 	}
 
-	// 应该播放全局兜底语音
+	if !strings.Contains(err.Error(), "大语言模型物理引擎未配置或应答内容为空") {
+		t.Errorf("Unexpected error message: %v", err)
+	}
+
+	// 确认没有任何播放动作被下发（拒绝仿真兜底）
 	hasFallbackPlayback := false
 	for _, cmd := range executor.Commands {
-		if cmd.Command == "playback" && strings.Contains(cmd.Payload["file"].(string), "【云枢大模型动态回复】") {
+		if cmd.Command == "playback" {
 			hasFallbackPlayback = true
 		}
 	}
-	if !hasFallbackPlayback {
-		t.Errorf("Expected fallback playback")
+	if hasFallbackPlayback {
+		t.Errorf("Expected no playback to be issued when LLM is not configured")
 	}
 
-	// 因为没有匹配到任何分支，活跃节点依然在意图卡点
+	// 因为报错，活跃节点依然在意图卡点
 	saved, _ := store.Get(context.Background(), "call-asr-fallback")
 	if saved.Metadata["aiCurrentNode"] != "node-intent" {
 		t.Errorf("Expected active node to remain node-intent, got %v", saved.Metadata["aiCurrentNode"])

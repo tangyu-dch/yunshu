@@ -386,7 +386,7 @@ func RegisterRoutes(
 				ID     int
 				Enable bool
 			}
-			err := gormDB.WithContext(ctx).Table("merchant").
+			err := gormDB.WithContext(ctx).Table("cc_mch_info").
 				Select("id, enable").
 				Where("sip_domain = ? AND del_flag = ?", req.Domain, false).
 				First(&m).Error
@@ -411,7 +411,7 @@ func RegisterRoutes(
 			ID     int
 			Enable bool
 		}
-		err := gormDB.WithContext(ctx).Table("extension").
+		err := gormDB.WithContext(ctx).Table("cc_res_extension").
 			Select("id, enable").
 			Where("extension_number = ? AND merchant_id = ? AND del_flag = ?", req.Username, merchantID, false).
 			First(&ext).Error

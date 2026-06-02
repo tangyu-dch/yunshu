@@ -97,5 +97,8 @@ func tokenFromRequest(c *gin.Context) string {
 	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
 		return strings.TrimSpace(header[7:])
 	}
+	if header != "" {
+		return header
+	}
 	return strings.TrimSpace(c.GetHeader("X-Token"))
 }

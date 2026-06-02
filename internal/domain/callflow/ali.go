@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -38,10 +37,9 @@ func (e *AliASREngine) Transcribe(ctx context.Context, audioData []byte, format 
 	appkey, _ := config["aliAppKey"].(string)
 	token, _ := config["aliToken"].(string)
 
-	// 1. 物理接入与仿真退化安全保护
+	// 1. 物理安全校验，无凭证直接报错
 	if appkey == "" || token == "" {
-		// 无真实 Key，平滑退化为阿里的 ASR 物理转写仿真
-		return "[阿里智能 ASR 仿真转译] 您好，我想咨询一下关于云枢系统如何高效扩展并动态组装多个不同的 AI 厂商？", nil
+		return "", fmt.Errorf("阿里云 ASR 物理凭证未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：对接阿里一句话识别 API
@@ -105,10 +103,9 @@ func (e *AliTTSEngine) Synthesize(ctx context.Context, text string, config map[s
 		voice = "Xiaoyun" // 默认阿里的 Xiaoyun 音色
 	}
 
-	// 1. 无凭证情况：平滑退化为阿里的 TTS 模拟合成二进制音频
+	// 1. 物理安全校验，无凭证直接报错
 	if appkey == "" || token == "" {
-		// 返回预设好的仿真音频数据
-		return []byte("MOCK_ALI_TTS_AUDIO_DATA_MP3"), nil
+		return nil, fmt.Errorf("阿里云 TTS 物理凭证未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：发起阿里一句话语音合成 HTTP API 请求
@@ -183,16 +180,9 @@ func (e *AliLLMEngine) GenerateReply(ctx context.Context, systemPrompt, userMess
 		tempVal = 0.7
 	}
 
-	// 1. 无 Key 退化为阿里通义千问仿真应答
+	// 1. 物理安全校验，无凭证直接报错
 	if apiKey == "" {
-		userMessage = strings.TrimSpace(userMessage)
-		if strings.Contains(userMessage, "话费") || strings.Contains(userMessage, "余额") || strings.Contains(userMessage, "账单") {
-			return "【阿里云通义千问 Qwen 仿真】为您查询到您当前云枢商户余额充足，费率已应用最新的阿里解耦模组估算。", nil
-		}
-		if strings.Contains(userMessage, "转人工") || strings.Contains(userMessage, "客服") || strings.Contains(userMessage, "坐席") {
-			return "【阿里云通义千问 Qwen 仿真】好的，通义千问正在为您调度云枢 ACD 排队队列，即刻为您指派专属客服分机...", nil
-		}
-		return fmt.Sprintf("【阿里云通义千问 Qwen 仿真】已接收到阿里 ASR 转译内容：“%s”。云枢已支持阿里通义千问与语音套件的极速动态组装与高度可扩展扩展！", userMessage), nil
+		return "", fmt.Errorf("阿里云通义千问大模型 API 密钥未配置，拒绝处理业务")
 	}
 
 	// 2. 生产物理环境：对接阿里通义千问兼容模式大模型 API

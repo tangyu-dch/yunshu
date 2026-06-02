@@ -63,32 +63,6 @@ func (MerchantModel) TableName() string {
 	return "cc_mch_info"
 }
 
-// AfterSave 在商户基本信息保存后，如果修改了域名，级联更新其所有在线分机在 kamailio_subscriber 对应的域名。
-func (m *MerchantModel) AfterSave(tx *gorm.DB) (err error) {
-	if m.DelFlag {
-		return nil
-	}
-
-	sipDomain := m.SipDomain
-	if sipDomain == "" {
-		sipDomain = "sip.yunshu.local"
-	}
-
-	// 级联更新关联分机在 kamailio_subscriber 中的 domain (使用标准 subquery 保证 SQLite 与 MySQL 兼容)
-	// 仅在 kamailio_subscriber 表存在时执行，防止部分单元测试环境报错
-	if tx.Migrator().HasTable("kamailio_subscriber") {
-		err = tx.Exec(`
-			UPDATE kamailio_subscriber
-			SET domain = ?, updated_time = ?
-			WHERE username IN (
-				SELECT extension_number FROM extension
-				WHERE merchant_id = ? AND del_flag = 0
-			) AND del_flag = 0
-		`, sipDomain, time.Now().UTC(), m.ID).Error
-	}
-	return err
-}
-
 // MerchantBillingOverviewModel 映射  `merchant_billing_overview` 表。
 // 该表存储商户的计费余额信息，包括预付费余额和信用额度。
 type MerchantBillingOverviewModel struct {

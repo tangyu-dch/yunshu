@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -39,16 +38,9 @@ func (e *DeepSeekLLMEngine) GenerateReply(ctx context.Context, systemPrompt, use
 		tempVal = 0.7
 	}
 
-	// 1. 无凭证情况：平滑退化为云枢专署的高保真 DeepSeek 推理仿真
+	// 1. 物理安全校验，无凭证直接报错
 	if apiKey == "" {
-		userMessage = strings.TrimSpace(userMessage)
-		if strings.Contains(userMessage, "话费") || strings.Contains(userMessage, "余额") || strings.Contains(userMessage, "账单") {
-			return "【DeepSeek 智能大模型仿真】为您成功连接云枢计费网关，DeepSeek 正在深度推理账单，已确定您的商户余额充裕，费率已匹配最新的按秒实时扣减！", nil
-		}
-		if strings.Contains(userMessage, "转人工") || strings.Contains(userMessage, "客服") || strings.Contains(userMessage, "坐席") {
-			return "【DeepSeek 智能大模型仿真】已识别到您的转人工需求。DeepSeek 正在为您推理路由拓扑，已检测到分机可用，将在 1.2 秒内把您的呼叫划拨至云枢 ACD 优先级技能组，请稍后...", nil
-		}
-		return fmt.Sprintf("【DeepSeek 智能大模型仿真】接收到您的输入：“%s”。DeepSeek 已在云枢系统完美解耦部署，推理耗时极短，随时支持高并发话务决策！", userMessage), nil
+		return "", fmt.Errorf("DeepSeek API 密钥未配置，拒绝处理业务")
 	}
 
 	// 2. 物理调用情况：发起真实的 DeepSeek API 调用
