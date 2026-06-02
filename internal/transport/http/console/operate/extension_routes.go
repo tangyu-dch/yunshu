@@ -72,6 +72,19 @@ func RegisterExtensionRoutes(r gin.IRoutes, service *operatedomain.ExtensionMana
 	r.POST("/operate/extension/dynamic-bind", dynamicBindExtension(service))
 	r.POST("/merchant/extension/dynamic-bind", dynamicBindExtension(service))
 
+	r.POST("/operate/extension/recalculate-ha", func(c *gin.Context) {
+		if service == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "分机管理未启用"))
+			return
+		}
+		updated, err := service.RecalculateAllHA(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "批量重算 HA 失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{"updated": updated}))
+	})
+
 	r.GET("/operate/extension", func(c *gin.Context) {
 		if service == nil {
 			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "分机管理未启用"))

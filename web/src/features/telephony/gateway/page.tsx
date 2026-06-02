@@ -139,20 +139,23 @@ export function GatewayPage() {
 
   function openEdit(record: any) {
     setEditingId(record.id)
-    const rawRecord = data?.records.find((r) => r.id === record.id)
     setOpen(true)
     setTimeout(() => {
       form.setFieldsValue({
         id: record.id,
         name: record.name ?? '',
-        description: record.code ?? '',
-        concurrency: 100,
-        enable: record.enable,
-        realm: 'sip.realm.com',
-        port: '5060',
-        priority: 1,
-        codecPrefs: 'PCMU,PCMA',
-        ...rawRecord,
+        description: record.description ?? '',
+        concurrency: record.concurrency ?? 100,
+        enable: record.enable ?? true,
+        priority: record.priority ?? 1,
+        codecPrefs: record.codecPrefs ?? 'PCMU,PCMA',
+        channelId: record.channelId,
+        rateId: record.rateId,
+        realm: record.realm ?? '',
+        port: record.port ?? '',
+        username: record.username ?? '',
+        password: '',
+        remark: record.remark ?? '',
       })
     }, 0)
   }
@@ -193,7 +196,7 @@ export function GatewayPage() {
           <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="已启用正常中继"
-              value={data?.records.filter((r) => r.enable).length ?? 0}
+              value={(data?.records ?? []).filter((r) => r.enable).length}
               prefix={<SafetyOutlined className="text-emerald-500 mr-1" />}
               valueStyle={{ color: '#3f8600' }}
               suffix="条"
@@ -204,7 +207,7 @@ export function GatewayPage() {
           <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="总承载并发上限"
-              value={data?.records.reduce((sum, r) => sum + (r.concurrency ?? 0), 0) ?? 0}
+              value={(data?.records ?? []).reduce((sum, r) => sum + (r.concurrency ?? 0), 0)}
               prefix={<SlidersOutlined className="text-purple-500 mr-1" />}
               valueStyle={{ color: '#096dd9' }}
               suffix="线"
@@ -239,9 +242,13 @@ export function GatewayPage() {
             title: '中继服务器地址',
             key: 'sipServer',
             render: (_, record: any) => (
-              <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
-                {record.realm || 'sip.realm.com'}:{record.port || '5060'}
-              </span>
+              record.realm ? (
+                <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                  {record.realm}:{record.port || '5060'}
+                </span>
+              ) : (
+                <span className="text-slate-400 text-xs italic">未配置</span>
+              )
             )
           },
           {
@@ -292,9 +299,11 @@ export function GatewayPage() {
             width: 220,
             render: (_, record) => (
               <Space size="middle" className="text-xs">
-                <Button size="small" type="link" icon={<EditOutlined />} onClick={() => openEdit(record)} className="!p-0">
-                  编辑
-                </Button>
+                <PermissionGate permission="operate:gateway:write">
+                  <Button size="small" type="link" icon={<EditOutlined />} onClick={() => openEdit(record)} className="!p-0">
+                    编辑
+                  </Button>
+                </PermissionGate>
                 <PermissionGate permission="operate:gateway:sync">
                   <Button size="small" type="link" icon={<SyncOutlined />} onClick={() => syncMutation.mutate(record.id)} className="!p-0">
                     配置同步

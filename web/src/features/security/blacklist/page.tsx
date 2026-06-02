@@ -72,6 +72,13 @@ export type VerificationChannel = {
   vendor: string
   remark?: string
   enable: boolean
+  apiUrl?: string
+  appId?: string
+  appSecret?: string
+  reqTemplate?: string
+  respExtractPath?: string
+  respMatchValue?: string
+  timeoutMs?: number
 }
 
 const DEFAULT_CHANNELS: VerificationChannel[] = [
@@ -289,6 +296,13 @@ export function BlacklistPage() {
         vendor: record.vendor,
         remark: record.remark,
         enable: record.enable,
+        apiUrl: record.apiUrl ?? '',
+        appId: record.appId ?? '',
+        appSecret: record.appSecret ?? '',
+        reqTemplate: record.reqTemplate ?? '',
+        respExtractPath: record.respExtractPath ?? '',
+        respMatchValue: record.respMatchValue ?? '',
+        timeoutMs: record.timeoutMs ?? 500,
       })
     }, 0)
   }

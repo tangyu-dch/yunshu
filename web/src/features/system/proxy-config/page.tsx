@@ -49,11 +49,7 @@ export function ProxyConfigPage() {
   // 获取当前配置
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['operate', 'proxy-config'],
-    queryFn: async () => {
-      const res = await fetchProxyConfig()
-      form.setFieldsValue(res)
-      return res
-    },
+    queryFn: () => fetchProxyConfig(),
     refetchInterval: 4000, // 每 4 秒定时自动轮询，保证掉线在 5 秒内实时反馈
   })
 

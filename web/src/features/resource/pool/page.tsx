@@ -25,8 +25,12 @@ export function PoolPage() {
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   const { data, isPending } = useQuery({
-    queryKey: ['operate', 'pool', pageNumber, pageSize],
-    queryFn: () => fetchPools(pageNumber, pageSize)
+    queryKey: ['operate', 'pool', pageNumber, pageSize, queryParams],
+    queryFn: () => fetchPools(pageNumber, pageSize, {
+      name: queryParams.name || undefined,
+      gatewayId: queryParams.gatewayId ? Number(queryParams.gatewayId) : undefined,
+      enable: queryParams.enable,
+    })
   })
 
   // Fetch gateways list to select gatewayId
@@ -34,24 +38,6 @@ export function PoolPage() {
     queryKey: ['operate', 'gateway', 1, 100],
     queryFn: () => fetchGatewayPage(1, 100),
   })
-
-  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
-  const filteredRecords = useMemo(() => {
-    let records = data?.records ?? []
-    if (queryParams.name) {
-      records = records.filter((r: any) => String(r.name).toLowerCase().includes(queryParams.name.toLowerCase().trim()))
-    }
-    if (queryParams.gatewayId) {
-      records = records.filter((r: any) => String(r.gatewayId) === String(queryParams.gatewayId))
-    }
-    if (queryParams.typeId !== undefined) {
-      records = records.filter((r: any) => Number(r.typeId) === Number(queryParams.typeId))
-    }
-    if (queryParams.enable !== undefined) {
-      records = records.filter((r: any) => Boolean(r.enable) === Boolean(queryParams.enable))
-    }
-    return records
-  }, [data?.records, queryParams])
 
   const queryFields = useMemo(() => [
     { key: 'name', label: '号码池名称', type: 'text' as const, placeholder: '请输入名称搜索' },
@@ -63,16 +49,6 @@ export function PoolPage() {
         value: String(g.id),
         label: g.name,
       })) ?? [],
-    },
-    {
-      key: 'typeId',
-      label: '号码池类型',
-      type: 'select' as const,
-      options: [
-        { value: 1, label: '普通' },
-        { value: 2, label: '预测' },
-        { value: 3, label: '外呼' },
-      ],
     },
     {
       key: 'enable',
@@ -158,14 +134,14 @@ export function PoolPage() {
       </div>
       <QueryBar
         fields={queryFields}
-        onSearch={setQueryParams}
+        onSearch={(params) => { setPageNumber(1); setQueryParams(params) }}
         loading={isPending}
       />
 
       <TableWrap
         title="号码池列表"
         rowKey="id"
-        dataSource={filteredRecords}
+        dataSource={data?.records ?? []}
         pagination={{
           current: pageNumber,
           pageSize,
@@ -191,9 +167,11 @@ export function PoolPage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record.id)}>
-                  编辑
-                </Button>
+                <PermissionGate permission="operate:pool:write">
+                  <Button size="small" onClick={() => openEdit(record.id)}>
+                    编辑
+                  </Button>
+                </PermissionGate>
                 <PermissionGate permission="operate:pool:delete">
                   <Popconfirm title="确认删除这个号码池？" onConfirm={() => deleteMutation.mutate([record.id])}>
                     <Button size="small" danger>

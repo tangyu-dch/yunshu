@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
 import { QueryBar } from '@/components/QueryBar'
+import { useAuthStore } from '@/store/auth'
 import {
   deleteSkillGroups,
   fetchSkillGroups,
@@ -25,6 +26,8 @@ type SkillGroupFormValues = {
 }
 
 export function SkillGroupPage() {
+  const tenant = useAuthStore((state) => state.tenant)
+  const currentMerchantId = Number(tenant?.merchantId || 0)
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [open, setOpen] = useState(false)
@@ -83,7 +86,7 @@ export function SkillGroupPage() {
     setOpen(true)
     setTimeout(() => {
       form.resetFields()
-      form.setFieldsValue({ merchantId: 1001, enable: true })
+      form.setFieldsValue({ merchantId: currentMerchantId, enable: true })
     }, 0)
   }
 
@@ -95,7 +98,7 @@ export function SkillGroupPage() {
       form.setFieldsValue({
         id,
         name: record?.name ?? '',
-        merchantId: 1001,
+        merchantId: record?.merchantId ?? 0,
         description: record?.description ?? '',
         enable: Boolean(record?.enable),
       })
@@ -178,7 +181,7 @@ export function SkillGroupPage() {
         confirmLoading={saveMutation.isPending}
         destroyOnClose
       >
-        <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ merchantId: 1001, enable: true }}>
+        <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ enable: true }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
             <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
               <Input placeholder="例如: 智能客服一组" />

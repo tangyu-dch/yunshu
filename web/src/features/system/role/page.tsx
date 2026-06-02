@@ -157,7 +157,7 @@ export function RolePermissionPage() {
     <Space direction="vertical" size="large" className="w-full">
       <QueryBar
         fields={queryFields}
-        onSearch={(params) => setNameQuery(params.name || '')}
+        onSearch={(params) => { setPageNumber(1); setNameQuery(params.name || '') }}
         loading={isRolesLoading}
       />
 

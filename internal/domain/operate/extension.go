@@ -3,10 +3,13 @@ package operate
 import (
 	"context"
 	"crypto/md5"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"log/slog"
+	"math/big"
 	"strings"
+	"time"
 )
 
 var (
@@ -26,16 +29,17 @@ const (
 
 // Extension 表示  兼容 `cc_res_extension` 表中的分机配置。
 type Extension struct {
-	ID              int    `json:"id,omitempty"`
-	ExtensionNumber string `json:"extensionNumber"`
-	Password        string `json:"password,omitempty"`
-	MerchantID      int    `json:"merchantId"`
-	UserID          int    `json:"userId"`
-	Enable          bool   `json:"enable"`
-	BindType        int    `json:"bindType"`
-	SipDomain       string `json:"sipDomain,omitempty"`
-	HA1             string `json:"ha1,omitempty"`
-	HA1b            string `json:"ha1b,omitempty"`
+	ID              int        `json:"id,omitempty"`
+	ExtensionNumber string     `json:"extensionNumber"`
+	Password        string     `json:"password,omitempty"`
+	MerchantID      int        `json:"merchantId"`
+	UserID          int        `json:"userId"`
+	Enable          bool       `json:"enable"`
+	BindType        int        `json:"bindType"`
+	SipDomain       string     `json:"sipDomain,omitempty"`
+	HA1             string     `json:"ha1,omitempty"`
+	HA1b            string     `json:"ha1b,omitempty"`
+	OfflineAt       *time.Time `json:"offlineAt,omitempty"`
 }
 
 type ExtensionPageRequest struct {
@@ -128,6 +132,19 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 	if normalized.SipDomain == "" {
 		normalized.SipDomain = "sip.yunshu.local" // 默认域名退避
 	}
+
+	// 编辑时：如果前端未传密码（留空），从数据库保留旧密码
+	// Kamailio 的 subscriber 表要求 ha1 / ha1b 始终与 password 保持一致
+	if normalized.ID > 0 && normalized.Password == "" {
+		existing, err := s.Repository.GetByID(ctx, normalized.ID)
+		if err == nil && existing.Password != "" {
+			normalized.Password = existing.Password
+		}
+	}
+
+	// 始终重算 HA1 / HA1b（参考 Kamailio auth_db 模块）：
+	//   ha1  = MD5(username : realm : password)   — 标准 RFC 2617 Digest
+	//   ha1b = MD5(username@realm : realm : password) — Kamailio 扩展格式
 	if normalized.Password != "" {
 		normalized.HA1 = calculateHA1(normalized.ExtensionNumber, normalized.SipDomain, normalized.Password)
 		normalized.HA1b = calculateHA1b(normalized.ExtensionNumber, normalized.SipDomain, normalized.Password)
@@ -185,6 +202,78 @@ func (s *ExtensionManagementService) SetEnable(ctx context.Context, id int, enab
 	return extension, nil
 }
 
+// RecalculateAllHA 批量重算所有分机的密码、SipDomain、HA1、HA1b，并将 bindType 统一设为动态释放。
+//
+// 遍历全部分机记录，对每条记录：
+//  1. 生成新的 8 位随机密码（替换旧的弱密码如 "123456"）；
+//  2. 从关联商户解析 SipDomain（若无则使用默认值）；
+//  3. 根据新密码重新计算 HA1 / HA1b（Kamailio auth_db 格式）；
+//  4. 将 bindType 设为 2（动态释放 / 自动回收）；
+//  5. 将更新后的记录写回数据库。
+//
+// 返回成功更新的记录数。
+func (s *ExtensionManagementService) RecalculateAllHA(ctx context.Context) (int, error) {
+	logger := s.logger()
+	logger.Info("开始批量重算全部分机密码/HA1/HA1b 并统一 bindType 为动态释放")
+
+	updated := 0
+	pageNum := 1
+	const batchSize = 200
+
+	for {
+		page, err := s.Repository.Page(ctx, ExtensionPageRequest{PageNumber: pageNum, PageSize: batchSize})
+		if err != nil {
+			logger.Error("批量重算 HA 读取分机失败", "page", pageNum, "error", err.Error())
+			return updated, err
+		}
+		if len(page.Records) == 0 {
+			break
+		}
+
+		for _, ext := range page.Records {
+			// 为每条分机生成新的随机 8 位密码
+			ext.Password = GenerateRandomPassword(8)
+
+			// 解析 SipDomain
+			if s.MerchantRepo != nil {
+				mch, err := s.MerchantRepo.GetByID(ctx, ext.MerchantID)
+				if err == nil && mch.SipDomain != "" {
+					ext.SipDomain = mch.SipDomain
+				}
+			}
+			if ext.SipDomain == "" {
+				ext.SipDomain = "sip.yunshu.local"
+			}
+
+			// 根据新密码重算 Kamailio HA1 / HA1b
+			ext.HA1 = calculateHA1(ext.ExtensionNumber, ext.SipDomain, ext.Password)
+			ext.HA1b = calculateHA1b(ext.ExtensionNumber, ext.SipDomain, ext.Password)
+
+			// 统一设为动态释放（自动回收）
+			ext.BindType = BindTypeDynamic
+
+			if _, err := s.Repository.Save(ctx, ext); err != nil {
+				logger.Warn("批量重算 HA 保存分机失败", "id", ext.ID, "extension", ext.ExtensionNumber, "error", err.Error())
+				continue
+			}
+			updated++
+		}
+
+		if int64(pageNum*batchSize) >= page.Total {
+			break
+		}
+		pageNum++
+	}
+
+	if s.Cache != nil {
+		if err := s.Cache.InvalidateAuthCache(ctx); err != nil {
+			logger.Error("批量重算 HA 后清理 Kamailio auth 缓存失败", "error", err.Error())
+		}
+	}
+	logger.Info("批量重算全部分机密码/HA1/HA1b 完成", "updated", updated)
+	return updated, nil
+}
+
 func (s *ExtensionManagementService) logger() *slog.Logger {
 	if s != nil && s.Logger != nil {
 		return s.Logger
@@ -206,8 +295,11 @@ func normalizeExtensionPage(req ExtensionPageRequest) ExtensionPageRequest {
 func normalizeExtensionForSave(extension Extension) (Extension, error) {
 	extension.ExtensionNumber = strings.TrimSpace(extension.ExtensionNumber)
 	extension.Password = strings.TrimSpace(extension.Password)
-	if extension.ExtensionNumber == "" || extension.MerchantID <= 0 || extension.UserID <= 0 {
+	if extension.ExtensionNumber == "" || extension.MerchantID <= 0 {
 		return Extension{}, ErrInvalidExtension
+	}
+	if extension.UserID < 0 {
+		extension.UserID = 0
 	}
 	return extension, nil
 }
@@ -234,4 +326,21 @@ func calculateHA1(username, realm, password string) string {
 
 func calculateHA1b(username, realm, password string) string {
 	return calculateMD5(username + "@" + realm + ":" + realm + ":" + password)
+}
+
+// GenerateRandomPassword 生成指定长度的随机密码。
+// 字符集排除了易混淆的字符（0/O、1/l/I），与前端 generateRandomPassword 保持一致。
+func GenerateRandomPassword(length int) string {
+	const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+	result := make([]byte, length)
+	for i := range result {
+		idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
+		if err != nil {
+			// crypto/rand 失败时使用后备方案
+			result[i] = charset[i%len(charset)]
+			continue
+		}
+		result[i] = charset[idx.Int64()]
+	}
+	return string(result)
 }

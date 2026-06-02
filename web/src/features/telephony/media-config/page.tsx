@@ -25,27 +25,18 @@ export function MediaConfigPage() {
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   const { data, isLoading } = useQuery({
-    queryKey: ['operate', 'rtpengines', page, pageSize],
-    queryFn: () => fetchRtpenginesPage({ pageNumber: page, pageSize: pageSize }),
+    queryKey: ['operate', 'rtpengines', page, pageSize, queryParams],
+    queryFn: () => fetchRtpenginesPage({
+      pageNumber: page,
+      pageSize: pageSize,
+      rtpengineSock: queryParams.rtpengineSock || undefined,
+    }),
     refetchInterval: 4000, // 每 4 秒定时自动轮询，保证掉线在 5 秒内实时反馈
   })
 
   const queryFields = useMemo(() => [
     { key: 'rtpengineSock', label: '套接字地址', type: 'text' as const, placeholder: '请输入套接字模糊搜索，如 127.0.0.1' },
-    { key: 'description', label: '描述说明', type: 'text' as const, placeholder: '请输入描述模糊搜索' },
   ], [])
-
-  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
-  const filteredRecords = useMemo(() => {
-    let records = data?.records ?? []
-    if (queryParams.rtpengineSock) {
-      records = records.filter((r: any) => String(r.rtpengineSock).toLowerCase().includes(queryParams.rtpengineSock.toLowerCase().trim()))
-    }
-    if (queryParams.description) {
-      records = records.filter((r: any) => String(r.description || '').toLowerCase().includes(queryParams.description.toLowerCase().trim()))
-    }
-    return records
-  }, [data?.records, queryParams])
 
   // 保存节点
   const saveMutation = useMutation({
@@ -58,6 +49,16 @@ export function MediaConfigPage() {
       queryClient.invalidateQueries({ queryKey: ['operate', 'rtpengines'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '保存失败'),
+  })
+
+  // 切换启用/禁用状态
+  const toggleMutation = useMutation({
+    mutationFn: async (values: Rtpengine) => saveRtpengine(values),
+    onSuccess: () => {
+      message.success('媒体代理节点状态已更新')
+      queryClient.invalidateQueries({ queryKey: ['operate', 'rtpengines'] })
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : '状态切换失败'),
   })
 
   // 删除节点
@@ -75,6 +76,7 @@ export function MediaConfigPage() {
     mutationFn: async () => reloadRtpengines(),
     onSuccess: () => {
       message.success('Kamailio 媒体代理配置热重载成功，对当前在线呼叫无中断。')
+      queryClient.invalidateQueries({ queryKey: ['operate', 'rtpengines'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '热刷新失败'),
   })
@@ -138,7 +140,7 @@ export function MediaConfigPage() {
           >
             无损热重载
           </Button>
-          <PermissionGate permission="operate:freeswitch:write">
+          <PermissionGate permission="operate:rtpengine:write">
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新增媒体节点
             </Button>
@@ -157,15 +159,16 @@ export function MediaConfigPage() {
                 媒体代理集群
               </div>
               <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-2 font-mono space-y-0.5">
-                <div>已启用且在线: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{data?.records.filter((r) => !r.disabled && r.status === 'online').length ?? 0}</span></div>
-                <div>已启用但故障: <span className="font-semibold text-rose-600 dark:text-rose-400">{data?.records.filter((r) => !r.disabled && r.status === 'offline').length ?? 0}</span></div>
-                <div>已被禁用节点: <span className="font-semibold text-slate-500 dark:text-zinc-400">{data?.records.filter((r) => r.disabled).length ?? 0}</span></div>
+                <div>已启用且在线: <span className="font-semibold text-emerald-600 dark:text-emerald-400">{(data?.records ?? []).filter((r) => !r.disabled && r.status === 'online').length}</span></div>
+                <div>已启用但故障: <span className="font-semibold text-rose-600 dark:text-rose-400">{(data?.records ?? []).filter((r) => !r.disabled && r.status === 'offline').length}</span></div>
+                <div>已被禁用节点: <span className="font-semibold text-slate-500 dark:text-zinc-400">{(data?.records ?? []).filter((r) => r.disabled).length}</span></div>
               </div>
             </div>
             {(() => {
-              const totalActive = data?.records.filter((r) => !r.disabled).length ?? 0
-              const activeOnline = data?.records.filter((r) => !r.disabled && r.status === 'online').length ?? 0
-              const activeOffline = data?.records.filter((r) => !r.disabled && r.status === 'offline').length ?? 0
+              const records = data?.records ?? []
+              const totalActive = records.filter((r) => !r.disabled).length
+              const activeOnline = records.filter((r) => !r.disabled && r.status === 'online').length
+              const activeOffline = records.filter((r) => !r.disabled && r.status === 'offline').length
 
               if (totalActive === 0) {
                 return <Tag color="warning" style={{ border: 'none', borderRadius: '4px', fontSize: '9px' }} className="font-mono">NO ACTIVE NODES</Tag>
@@ -221,7 +224,7 @@ export function MediaConfigPage() {
 
       <QueryBar
         fields={queryFields}
-        onSearch={setQueryParams}
+        onSearch={(params) => { setPage(1); setQueryParams(params) }}
         loading={isLoading}
       />
 
@@ -230,12 +233,13 @@ export function MediaConfigPage() {
         title="媒体代理节点列表"
         rowKey="id"
         loading={isLoading}
-        dataSource={filteredRecords}
+        dataSource={data?.records ?? []}
         pagination={{
           current: page,
           pageSize: pageSize,
           total: data?.total ?? 0,
-          onChange: (p) => setPage(p),
+          onChange: (p, s) => { setPage(p); if (s) setPageSize(s) },
+          showSizeChanger: true,
         }}
         columns={[
           {
@@ -292,16 +296,20 @@ export function MediaConfigPage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record)}>
-                  编辑
-                </Button>
-                <Button
-                  size="small"
-                  onClick={() => saveMutation.mutate({ ...record, disabled: !record.disabled })}
-                >
-                  {record.disabled ? '启用' : '禁用'}
-                </Button>
-                <PermissionGate permission="operate:freeswitch:delete">
+                <PermissionGate permission="operate:rtpengine:write">
+                  <Button size="small" onClick={() => openEdit(record)}>
+                    编辑
+                  </Button>
+                </PermissionGate>
+                <PermissionGate permission="operate:rtpengine:write">
+                  <Button
+                    size="small"
+                    onClick={() => toggleMutation.mutate({ id: record.id, setId: record.setId, rtpengineSock: record.rtpengineSock, disabled: !record.disabled, weight: record.weight, description: record.description })}
+                  >
+                    {record.disabled ? '启用' : '禁用'}
+                  </Button>
+                </PermissionGate>
+                <PermissionGate permission="operate:rtpengine:delete">
                   <Popconfirm title="确认从媒体集群中移除这个代理节点？" onConfirm={() => deleteMutation.mutate(record)}>
                     <Button size="small" danger>
                       移除

@@ -149,6 +149,7 @@ export async function fetchGatewayPage(pageNumber = 1, pageSize = 50) {
       id: item.id,
       name: item.name,
       code: item.description || `GW-${item.id}`,
+      description: item.description || '',
       region: item.channelId ? `线路 ${item.channelId}` : '未分组',
       enable: Boolean(item.enable),
       syncRequired: false,
@@ -156,6 +157,12 @@ export async function fetchGatewayPage(pageNumber = 1, pageSize = 50) {
       concurrency: item.concurrency,
       priority: item.priority,
       codecPrefs: item.codecPrefs,
+      channelId: item.channelId,
+      rateId: item.rateId,
+      realm: (item as any).realm || '',
+      port: (item as any).port || '',
+      username: (item as any).username || '',
+      remark: (item as any).remark || '',
     })),
   }
 }
@@ -199,9 +206,9 @@ export async function fetchMerchants(pageNumber = 1, pageSize = 20) {
   }
 }
 
-export async function fetchPools(pageNumber = 1, pageSize = 20) {
+export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name?: string; gatewayId?: number; enable?: boolean }) {
   const { data } = await http.get<PageResult<PoolResp>>('/operate/pool', {
-    params: { pageNumber, pageSize },
+    params: { pageNumber, pageSize, name: filters?.name || undefined, gatewayId: filters?.gatewayId || undefined, enable: filters?.enable },
   })
   return {
     ...data,
@@ -368,6 +375,7 @@ export async function fetchDispatchers(pageNumber = 1, pageSize = 20) {
       priority: item.priority ?? 0,
       flags: item.flags ?? 0,
       enable: Boolean(item.enable),
+      attrs: (item as any).attrs || '',
     })),
   }
 }
@@ -412,6 +420,7 @@ export async function saveFsNode(payload: {
     url: path,
     data: {
       ...payload,
+      password: payload.password || undefined,
       fsAddr: `${payload.address}:${payload.eslPort}`,
     },
   })
@@ -446,7 +455,11 @@ export async function fetchBatchTasks(pageNumber = 1, pageSize = 50) {
         status: item.enable ? 'running' : item.state === 2 ? 'completed' : 'paused',
         total,
         completed,
-        connected: item.connectedCount ?? Math.max(0, completed - Math.max(0, Math.floor(completed / 3))),
+        connected: item.connectedCount ?? 0,
+        connectedInterval: (item as any).connectedInterval,
+        unconnectedInterval: (item as any).unconnectedInterval,
+        callTimePeriod: (item as any).callTimePeriod,
+        aiFlag: (item as any).aiFlag,
       }
     }),
   }
@@ -594,7 +607,10 @@ export async function saveAccount(payload: { id?: number; username: string; pass
   const { data } = await http.request({
     method: payload.id ? 'POST' : 'PUT',
     url: path,
-    data: payload,
+    data: {
+      ...payload,
+      merchantId: payload.merchantId ? Number(payload.merchantId) || payload.merchantId : undefined,
+    },
   })
   return data
 }
@@ -679,7 +695,7 @@ export async function fetchBlacklistChannels() {
   return data
 }
 
-export async function saveBlacklistChannel(payload: { code: number; name: string; vendor: string; remark?: string; enable: boolean }) {
+export async function saveBlacklistChannel(payload: { code: number; name: string; vendor: string; remark?: string; enable: boolean; apiUrl?: string; appId?: string; appSecret?: string; reqTemplate?: string; respExtractPath?: string; respMatchValue?: string; timeoutMs?: number }) {
   const { data } = await http.post('/operate/blacklist/channels/save', payload)
   return data
 }
@@ -731,9 +747,9 @@ export async function fetchRechargeRecords(pageNumber = 1, pageSize = 20, mercha
   return data
 }
 
-export async function fetchChannels(pageNumber = 1, pageSize = 20) {
+export async function fetchChannels(pageNumber = 1, pageSize = 20, filters?: { name?: string; enable?: boolean }) {
   const { data } = await http.get<PageResult<any>>('/operate/channel', {
-    params: { pageNumber, pageSize },
+    params: { pageNumber, pageSize, name: filters?.name || undefined, enable: filters?.enable },
   })
   return data
 }
@@ -802,7 +818,12 @@ export async function saveExtension(payload: { id?: number; extensionNumber: str
   const { data } = await http.request({
     method: payload.id ? 'POST' : 'PUT',
     url: path,
-    data: payload,
+    data: {
+      ...payload,
+      merchantId: Number(payload.merchantId) || 0,
+      userId: Number(payload.userId) || 0,
+      password: payload.password || undefined,
+    },
   })
   return data
 }
@@ -815,6 +836,11 @@ export async function deleteExtensions(ids: number[]) {
 export async function toggleExtensionEnable(id: number, enable: boolean) {
   const path = enable ? `/operate/extension/enable/${id}` : `/operate/extension/disable/${id}`
   const { data } = await http.post(path)
+  return data
+}
+
+export async function recalculateExtensionHA() {
+  const { data } = await http.post('/operate/extension/recalculate-ha')
   return data
 }
 

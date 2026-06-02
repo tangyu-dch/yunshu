@@ -360,7 +360,7 @@ export function InstallPage() {
                       </Form.Item>
                     </Col>
                     <Col span={4}>
-                      <Form.Item name="mysqlUseDocker" label="由Docker托管" valuePropName="checked">
+                      <Form.Item name="mysqlUseDocker" label="由Docker托管">
                         <Select options={[{ label: '内置托管', value: true }, { label: '外部独立', value: false }]} />
                       </Form.Item>
                     </Col>

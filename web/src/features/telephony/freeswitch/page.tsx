@@ -122,7 +122,7 @@ export function FreeSwitchPage() {
   const totalActiveCalls = data?.reduce((sum: number, node: any) => sum + (node.activeCalls ?? 0), 0) ?? 0
   const totalMaxChannels = data?.reduce((sum: number, node: any) => sum + (node.maxChannels ?? 1000), 0) ?? 0
   const activeNodesCount = data?.filter((n: any) => n.enable).length ?? 0
-  const onlineNodesCount = data?.filter((n: any) => n.status === 'active' || n.status === 'ONLINE' || n.status === '在线' || n.enable).length ?? 0
+  const onlineNodesCount = data?.filter((n: any) => n.status === 'active').length ?? 0
   const loadPercentage = totalMaxChannels > 0 ? (totalActiveCalls / totalMaxChannels) * 100 : 0
 
   return (
@@ -182,7 +182,7 @@ export function FreeSwitchPage() {
               {data && data.length > 0 ? (
                 <div className="space-y-1.5 mt-2">
                   {data.slice(0, 2).map((node: any) => {
-                    const isOnline = node.status === 'active' || node.status === 'ONLINE' || node.status === '在线' || node.enable;
+                    const isOnline = node.status === 'active';
                     return (
                       <div key={node.id} className="flex items-center justify-between text-xs w-full">
                         <span className="font-bold text-slate-800 dark:text-zinc-100 flex items-center gap-1.5 truncate max-w-[140px]">
@@ -273,12 +273,16 @@ export function FreeSwitchPage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record)}>
-                  编辑
-                </Button>
-                <Button size="small" onClick={() => toggleMutation.mutate({ id: record.id, enable: !record.enable })}>
-                  {record.enable ? '停用' : '启用'}
-                </Button>
+                <PermissionGate permission="operate:freeswitch:write">
+                  <Button size="small" onClick={() => openEdit(record)}>
+                    编辑
+                  </Button>
+                </PermissionGate>
+                <PermissionGate permission="operate:freeswitch:write">
+                  <Button size="small" onClick={() => toggleMutation.mutate({ id: record.id, enable: !record.enable })}>
+                    {record.enable ? '停用' : '启用'}
+                  </Button>
+                </PermissionGate>
                 <PermissionGate permission="operate:freeswitch:delete">
                   <Popconfirm title="确认删除这个软交换节点？" onConfirm={() => deleteMutation.mutate(record.id)}>
                     <Button size="small" danger>

@@ -663,6 +663,7 @@ func (in *Installer) InitializeDatabase(ctx context.Context, params SetupParams)
 		&resource.PoolPhoneSkillGroupModel{},
 		&resource.SkillGroupModel{},
 		&resource.UserSkillGroupModel{},
+		&resource.MerchantUserModel{},
 		&resource.ExtensionModel{},
 		&resource.PhoneGroupModel{},
 		&resource.PhoneGroupPoolPhoneRefModel{},

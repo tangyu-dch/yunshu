@@ -92,8 +92,7 @@ export function BatchTaskPage() {
       options: [
         { value: 'running', label: '运行中' },
         { value: 'paused', label: '暂停中' },
-        { value: 'finished', label: '已完成' },
-        { value: 'error', label: '异常' },
+        { value: 'completed', label: '已完成' },
       ],
     },
   ], [])
@@ -199,10 +198,10 @@ export function BatchTaskPage() {
     setTimeout(() => {
       form.setFieldsValue({
         name: record?.name ?? '',
-        connectedInterval: 600,
-        unconnectedInterval: 1200,
-        callTimePeriod: '09:00-12:00,14:00-18:00',
-        aiFlag: false,
+        connectedInterval: record?.connectedInterval ?? 600,
+        unconnectedInterval: record?.unconnectedInterval ?? 1200,
+        callTimePeriod: record?.callTimePeriod ?? '09:00-12:00,14:00-18:00',
+        aiFlag: record?.aiFlag ?? false,
         enable: record?.status === 'running',
       })
     }, 0)

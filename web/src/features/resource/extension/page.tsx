@@ -2,6 +2,7 @@ import {
   Button,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Select,
@@ -13,7 +14,8 @@ import {
   Card,
   Row,
   Col,
-  Statistic
+  Statistic,
+  Tooltip
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
@@ -24,7 +26,8 @@ import {
   fetchExtensions,
   fetchMerchants,
   saveExtension,
-  toggleExtensionEnable
+  toggleExtensionEnable,
+  recalculateExtensionHA
 } from '@/api/operate'
 import {
   ReloadOutlined,
@@ -32,7 +35,15 @@ import {
   CustomerServiceOutlined,
   CompassOutlined,
   ApiOutlined,
-  LinkOutlined
+  LinkOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  PhoneOutlined,
+  SettingOutlined,
+  SyncOutlined,
+  KeyOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined
 } from '@ant-design/icons'
 
 type ExtensionFormValues = {
@@ -45,14 +56,15 @@ type ExtensionFormValues = {
   bindType?: number
 }
 
-// 模拟分机状态映射，匹配  兼容的 Redis status (-1: 离线, 0: 忙碌, 1: 空闲, 2: 预振铃, 3: 振铃中, 4: 通话中)
-const statusMap: Record<number, { label: string; color: string; dotClass: string }> = {
-  [-1]: { label: '离线', color: 'default', dotClass: 'bg-slate-400 dark:bg-slate-600' },
-  0: { label: '忙碌', color: 'warning', dotClass: 'bg-amber-500 animate-pulse' },
-  1: { label: '空闲/已注册', color: 'success', dotClass: 'bg-emerald-500' },
-  2: { label: '预振铃', color: 'processing', dotClass: 'bg-blue-400 animate-ping' },
-  3: { label: '振铃中', color: 'processing', dotClass: 'bg-blue-500 animate-bounce' },
-  4: { label: '通话中', color: 'error', dotClass: 'bg-rose-500 animate-pulse' },
+// 注册状态基于后端 offlineAt 字段：null 表示在线，有值表示离线
+
+function generateRandomPassword(length = 8): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  let result = ''
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return result
 }
 
 export function ExtensionPage() {
@@ -63,13 +75,13 @@ export function ExtensionPage() {
   const [form] = Form.useForm<ExtensionFormValues>()
   const queryClient = useQueryClient()
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
+  const [visiblePasswords, setVisiblePasswords] = useState<Set<number>>(new Set())
 
   const { data, refetch, isPending } = useQuery({
     queryKey: ['operate', 'extension', pageNumber, pageSize],
     queryFn: () => fetchExtensions(pageNumber, pageSize),
   })
 
-  // Load merchants list for mapping
   const { data: merchantsData } = useQuery({
     queryKey: ['operate', 'merchant', 1, 100],
     queryFn: () => fetchMerchants(1, 100),
@@ -105,12 +117,22 @@ export function ExtensionPage() {
     onError: (error) => message.error(error instanceof Error ? error.message : '保存失败'),
   })
 
+  const recalcMutation = useMutation({
+    mutationFn: async () => recalculateExtensionHA(),
+    onSuccess: (res: any) => {
+      const count = res?.updated ?? 0
+      message.success(`已为 ${count} 条分机重新生成密码并计算 HA1/HA1b`)
+      queryClient.invalidateQueries({ queryKey: ['operate', 'extension'] })
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : '重算失败'),
+  })
+
   function openCreate() {
     setEditingId(null)
     setOpen(true)
     setTimeout(() => {
       form.resetFields()
-      form.setFieldsValue({ enable: true, bindType: 1 })
+      form.setFieldsValue({ enable: true, bindType: 2, userId: '0', password: generateRandomPassword(8) })
     }, 0)
   }
 
@@ -123,9 +145,9 @@ export function ExtensionPage() {
         id: record?.id,
         extensionNumber: record?.extensionNumber ?? '',
         merchantId: record?.merchantId ? String(record.merchantId) : '',
-        userId: record?.userId ?? '',
+        userId: record?.userId != null ? String(record.userId) : '0',
         enable: Boolean(record?.enable),
-        bindType: record?.bindType ?? 1,
+        bindType: record?.bindType ?? 2,
       })
     }, 0)
   }
@@ -135,18 +157,6 @@ export function ExtensionPage() {
     return found ? found.name : `商户 ${mId}`
   }
 
-  // 根据分机号确定性模拟注册状态，保证演示一致且高保真
-  const getSimulatedStatus = (num: string) => {
-    if (!num) return -1
-    const lastChar = num.slice(-1)
-    if (lastChar === '1' || lastChar === '8') return 1 // 空闲
-    if (lastChar === '2' || lastChar === '9') return 4 // 通话中
-    if (lastChar === '3') return 3 // 振铃
-    if (lastChar === '0') return 0 // 忙碌
-    return -1 // 离线
-  }
-
-  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
   const filteredRecords = useMemo(() => {
     let records = data?.records ?? []
     if (queryParams.extensionNumber) {
@@ -155,8 +165,10 @@ export function ExtensionPage() {
     if (queryParams.merchantId) {
       records = records.filter((r: any) => String(r.merchantId) === String(queryParams.merchantId))
     }
-    if (queryParams.status !== undefined) {
-      records = records.filter((r: any) => String(getSimulatedStatus(r.extensionNumber)) === String(queryParams.status))
+    if (queryParams.status === 'online') {
+      records = records.filter((r: any) => !r.offlineAt)
+    } else if (queryParams.status === 'offline') {
+      records = records.filter((r: any) => !!r.offlineAt)
     }
     return records
   }, [data?.records, queryParams])
@@ -177,21 +189,44 @@ export function ExtensionPage() {
       label: '注册状态',
       type: 'select' as const,
       options: [
-        { value: '1', label: '空闲/已注册' },
-        { value: '4', label: '通话中' },
-        { value: '3', label: '振铃中' },
-        { value: '0', label: '忙碌' },
-        { value: '-1', label: '离线' },
+        { value: 'online', label: '在线' },
+        { value: 'offline', label: '离线' },
       ],
     },
   ], [merchantsData])
 
+  const totalExts = data?.total ?? 0
+  const enabledExts = data?.records.filter((r: any) => r.enable).length ?? 0
+  const boundExts = data?.records.filter((r: any) => r.userId && Number(r.userId) > 0).length ?? 0
+  const onlineExts = data?.records.filter((r: any) => !r.offlineAt).length ?? 0
+
   return (
-    <Space direction="vertical" size="large" className="w-full">
-      <div className="flex justify-end items-center mb-2">
+    <Space direction="vertical" size="middle" className="w-full">
+      {/* 顶部操作栏 */}
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-sm">
+            <PhoneOutlined className="text-white text-lg" />
+          </div>
+          <div>
+            <Typography.Title level={4} className="!mb-0 !text-slate-800 dark:!text-slate-200">SIP 分机管理</Typography.Title>
+            <Typography.Text type="secondary" className="text-xs">管理分机资源、坐席绑定与 SIP 注册配置</Typography.Text>
+          </div>
+        </div>
         <Space>
-          <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isPending}>刷新</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          <Tooltip title="刷新列表">
+            <Button icon={<ReloadOutlined spin={isPending} />} onClick={() => refetch()} loading={isPending} />
+          </Tooltip>
+          <Tooltip title="为所有分机重新生成随机密码并重算 SipDomain / HA1 / HA1b">
+            <Button
+              icon={<SyncOutlined spin={recalcMutation.isPending} />}
+              loading={recalcMutation.isPending}
+              onClick={() => recalcMutation.mutate()}
+            >
+              重算 HA
+            </Button>
+          </Tooltip>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate} className="shadow-sm">
             新增分机
           </Button>
         </Space>
@@ -199,36 +234,56 @@ export function ExtensionPage() {
 
       {/* 状态看板卡片组合 */}
       <Row gutter={[16, 16]}>
-        <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <Statistic
-              title="配置分机总数"
-              value={data?.total ?? 0}
-              prefix={<CustomerServiceOutlined className="text-blue-500 mr-1" />}
-              suffix="个"
-            />
+        <Col xs={24} sm={12} md={6}>
+          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">配置分机总数</div>
+                <div className="text-3xl font-bold text-slate-800 dark:text-slate-100">{totalExts}</div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center">
+                <CustomerServiceOutlined className="text-blue-500 text-xl" />
+              </div>
+            </div>
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <Statistic
-              title="在线已注册分机"
-              value={data?.records.filter((r: any) => getSimulatedStatus(r.extensionNumber) > 0).length ?? 0}
-              prefix={<CompassOutlined className="text-emerald-500 mr-1" />}
-              valueStyle={{ color: '#3f8600' }}
-              suffix="个"
-            />
+        <Col xs={24} sm={12} md={6}>
+          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">已启用分机</div>
+                <div className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">{enabledExts}</div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/30 flex items-center justify-center">
+                <CompassOutlined className="text-emerald-500 text-xl" />
+              </div>
+            </div>
           </Card>
         </Col>
-        <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
-            <Statistic
-              title="当前通话状态坐席"
-              value={data?.records.filter((r: any) => getSimulatedStatus(r.extensionNumber) === 4).length ?? 0}
-              prefix={<ApiOutlined className="text-purple-500 mr-1" />}
-              valueStyle={{ color: '#cf1322' }}
-              suffix="个"
-            />
+        <Col xs={24} sm={12} md={6}>
+          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">已绑定坐席</div>
+                <div className="text-3xl font-bold text-rose-600 dark:text-rose-400">{boundExts}</div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-rose-50 dark:bg-rose-900/30 flex items-center justify-center">
+                <ApiOutlined className="text-rose-500 text-xl" />
+              </div>
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={6}>
+          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">当前在线</div>
+                <div className="text-3xl font-bold text-green-600 dark:text-green-400">{onlineExts}</div>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-green-50 dark:bg-green-900/30 flex items-center justify-center">
+                <LinkOutlined className="text-green-500 text-xl" />
+              </div>
+            </div>
           </Card>
         </Col>
       </Row>
@@ -255,65 +310,156 @@ export function ExtensionPage() {
           showSizeChanger: true,
         }}
         columns={[
-          { title: '分机 ID', dataIndex: 'id', width: 90, className: 'font-mono text-xs' },
+          {
+            title: 'ID',
+            dataIndex: 'id',
+            width: 70,
+            className: 'font-mono text-xs text-slate-400',
+          },
           {
             title: 'SIP 分机号',
             dataIndex: 'extensionNumber',
-            render: (v) => <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{v}</span>
+            render: (v: string) => (
+              <div className="flex items-center gap-2">
+                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-sm">{v}</span>
+              </div>
+            )
           },
           {
-            title: '注册及状态监测',
-            key: 'regStatus',
-            width: 160,
-            render: (_, record) => {
-              const status = getSimulatedStatus(record.extensionNumber)
-              const info = statusMap[status]
+            title: '注册密码',
+            dataIndex: 'password',
+            width: 150,
+            render: (val: string, record: any) => {
+              const visible = visiblePasswords.has(record.id)
               return (
-                <div className="flex items-center gap-2">
-                  <span className={`w-2.5 h-2.5 rounded-full ${info.dotClass}`} />
-                  <Tag color={info.color} className="font-medium text-xs">
-                    {info.label}
-                  </Tag>
-                </div>
+                <Space size={4}>
+                  <span className="font-mono text-xs text-slate-600 dark:text-slate-300">
+                    {visible ? val : '••••••••'}
+                  </span>
+                  <Button
+                    size="small"
+                    type="text"
+                    icon={visible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+                    onClick={() => {
+                      const next = new Set(visiblePasswords)
+                      visible ? next.delete(record.id) : next.add(record.id)
+                      setVisiblePasswords(next)
+                    }}
+                    className="text-slate-400 hover:text-slate-600 !p-0"
+                  />
+                </Space>
               )
-            }
+            },
           },
           {
             title: '所属商户',
             dataIndex: 'merchantId',
-            render: (val: any) => <Tag color="blue">{getMerchantName(val)}</Tag>,
+            width: 150,
+            render: (val: any) => (
+              <Tag color="blue" className="!m-0">{getMerchantName(val)}</Tag>
+            ),
           },
           {
-            title: '绑定坐席/用户',
+            title: '绑定坐席',
             dataIndex: 'userId',
-            render: (val: string) => (
-              val ? (
+            width: 130,
+            render: (val: string | number) => (
+              val && Number(val) > 0 ? (
                 <Space size={4}>
                   <LinkOutlined className="text-slate-400" />
-                  <span className="font-mono text-slate-600 dark:text-slate-300">坐席 ID: {val}</span>
+                  <span className="font-mono text-slate-600 dark:text-slate-300 text-xs">ID: {val}</span>
                 </Space>
               ) : (
-                <span className="text-slate-400 text-xs">未绑定</span>
+                <span className="text-slate-400 text-xs italic">未绑定</span>
               )
             )
           },
           {
-            title: '绑定类型',
-            dataIndex: 'bindType',
-            render: (val: number) => {
-              if (val === 2) {
-                return <Tag color="purple">动态释放</Tag>
+            title: '注册状态',
+            dataIndex: 'offlineAt',
+            width: 110,
+            align: 'center' as const,
+            render: (val: string | null) => {
+              if (!val) {
+                return <Tag color="success" className="!m-0 text-xs">在线</Tag>
               }
-              return <Tag color="blue">手动绑定</Tag>
+              const offlineTime = new Date(val)
+              const now = new Date()
+              const diffSec = Math.floor((now.getTime() - offlineTime.getTime()) / 1000)
+              let duration = ''
+              if (diffSec < 60) {
+                duration = `${diffSec}秒`
+              } else if (diffSec < 3600) {
+                duration = `${Math.floor(diffSec / 60)}分钟`
+              } else if (diffSec < 86400) {
+                duration = `${Math.floor(diffSec / 3600)}小时`
+              } else {
+                duration = `${Math.floor(diffSec / 86400)}天`
+              }
+              return (
+                <Tooltip title={`离线于 ${offlineTime.toLocaleString()}`}>
+                  <Tag color="default" className="!m-0 text-xs">离线 {duration}</Tag>
+                </Tooltip>
+              )
             },
           },
           {
-            title: '启用状态',
+            title: 'SIP 域名',
+            dataIndex: 'sipDomain',
+            width: 160,
+            ellipsis: true,
+            render: (val: string) => val ? (
+              <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{val}</span>
+            ) : (
+              <span className="text-slate-400 text-xs italic">未配置</span>
+            ),
+          },
+          {
+            title: 'HA1',
+            dataIndex: 'ha1',
+            width: 200,
+            ellipsis: true,
+            render: (val: string) => val ? (
+              <Tooltip title={val}>
+                <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{val.slice(0, 12)}...</span>
+              </Tooltip>
+            ) : (
+              <span className="text-slate-400 text-xs italic">-</span>
+            ),
+          },
+          {
+            title: 'HA1b',
+            dataIndex: 'ha1b',
+            width: 200,
+            ellipsis: true,
+            render: (val: string) => val ? (
+              <Tooltip title={val}>
+                <span className="font-mono text-xs text-slate-500 dark:text-slate-400">{val.slice(0, 12)}...</span>
+              </Tooltip>
+            ) : (
+              <span className="text-slate-400 text-xs italic">-</span>
+            ),
+          },
+          {
+            title: '回收类型',
+            dataIndex: 'bindType',
+            width: 120,
+            render: (val: number) => {
+              if (val === 2) {
+                return <Tag color="purple" className="!m-0 text-xs">动态释放</Tag>
+              }
+              return <Tag color="blue" className="!m-0 text-xs">手动绑定</Tag>
+            },
+          },
+          {
+            title: '启用',
             dataIndex: 'enable',
-            width: 100,
+            width: 80,
+            align: 'center' as const,
             render: (value: boolean, record: any) => (
               <Switch
                 checked={value}
+                size="small"
                 loading={toggleMutation.isPending}
                 onChange={(checked) => toggleMutation.mutate({ id: record.id, enable: checked })}
               />
@@ -321,16 +467,17 @@ export function ExtensionPage() {
           },
           {
             title: '操作',
-            width: 180,
+            width: 140,
+            align: 'center' as const,
             render: (_, record) => (
-              <Space size="middle">
-                <Button size="small" type="link" onClick={() => openEdit(record.id)} className="!p-0">
-                  编辑
-                </Button>
-                <Popconfirm title="确认删除该分机？" onConfirm={() => deleteMutation.mutate([record.id])}>
-                  <Button size="small" type="link" danger className="!p-0">
-                    删除
-                  </Button>
+              <Space size={4}>
+                <Tooltip title="编辑分机配置">
+                  <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(record.id)} className="text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20" />
+                </Tooltip>
+                <Popconfirm title="确认删除该分机？" description="删除后该分机配置将不可恢复" onConfirm={() => deleteMutation.mutate([record.id])}>
+                  <Tooltip title="删除分机">
+                    <Button size="small" type="text" icon={<DeleteOutlined />} danger className="hover:bg-red-50 dark:hover:bg-red-900/20" />
+                  </Tooltip>
                 </Popconfirm>
               </Space>
             ),
@@ -340,7 +487,12 @@ export function ExtensionPage() {
 
       <Modal
         open={open}
-        title={editingId ? '编辑分机资源' : '新增分机资源'}
+        title={
+          <div className="flex items-center gap-2">
+            <SettingOutlined className="text-blue-500" />
+            <span>{editingId ? '编辑分机资源' : '新增分机资源'}</span>
+          </div>
+        }
         onCancel={() => {
           setOpen(false)
           setEditingId(null)
@@ -349,49 +501,83 @@ export function ExtensionPage() {
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
         destroyOnClose
+        width={560}
+        okText={editingId ? '保存修改' : '创建分机'}
       >
         <Form
           form={form}
           layout="vertical"
+          className="mt-4"
           onFinish={(values) => {
             saveMutation.mutate({
               ...values,
               id: editingId ?? undefined,
-              bindType: values.bindType || 1,
+              merchantId: String(Number(values.merchantId) || 0),
+              userId: String(Number(values.userId) || 0),
+              bindType: values.bindType || 2,
             })
           }}
-          initialValues={{ enable: true }}
+          initialValues={{ enable: true, bindType: 2 }}
         >
-          <Form.Item name="extensionNumber" label="SIP 分机号" rules={[{ required: true, message: '请输入分机号' }]}>
-            <Input placeholder="输入6位 SIP 注册分机号" />
-          </Form.Item>
-          <Form.Item name="password" label="SIP 注册密码" rules={editingId ? [] : [{ required: true, message: '请输入分机密码' }]}>
-            <Input.Password placeholder={editingId ? '若不修改请留空' : '请输入 SIP 注册密码'} />
-          </Form.Item>
-          <Form.Item name="merchantId" label="关联商户" rules={[{ required: true, message: '请选择关联商户' }]}>
-            <Select
-              placeholder="请选择绑定的商户"
-              options={merchantsData?.records.map((m: any) => ({
-                value: String(m.id),
-                label: `[${m.id}] ${m.name}`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="userId" label="绑定坐席用户 ID (可选)">
-            <Input placeholder="分机使用坐席的用户 ID，留空表示未分配" />
-          </Form.Item>
-          <div className="grid grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-lg">
-            <Form.Item name="bindType" label="绑定回收类型" className="!mb-0">
-              <Select
-                options={[
-                  { value: 1, label: '手动绑定（不回收）' },
-                  { value: 2, label: '动态释放（自动回收）' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="enable" label="启用状态" valuePropName="checked" className="!mb-0">
-              <Switch />
-            </Form.Item>
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-100 dark:border-slate-700">
+            <Typography.Text className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 block">SIP 注册信息</Typography.Text>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="extensionNumber" label="SIP 分机号" rules={[{ required: true, message: '请输入分机号' }]} className="!mb-3">
+                  <Input placeholder="6位 SIP 分机号" className="font-mono" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="password" label="SIP 注册密码" rules={editingId ? [] : [{ required: true, message: '请输入密码' }]} className="!mb-3">
+                  <Input.Password placeholder={editingId ? '若不修改请留空' : '请输入 SIP 注册密码'} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 mb-4 border border-slate-100 dark:border-slate-700">
+            <Typography.Text className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 block">业务关联</Typography.Text>
+            <Row gutter={16}>
+              <Col span={12}>
+                <Form.Item name="merchantId" label="关联商户" rules={[{ required: true, message: '请选择商户' }]} className="!mb-3">
+                  <Select
+                    placeholder="请选择绑定的商户"
+                    showSearch
+                    optionFilterProp="label"
+                    options={merchantsData?.records.map((m: any) => ({
+                      value: String(m.id),
+                      label: `[${m.id}] ${m.name}`,
+                    }))}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="userId" label="坐席用户 ID" className="!mb-3">
+                  <Input placeholder="坐席用户 ID，0 或留空表示未分配" />
+                </Form.Item>
+              </Col>
+            </Row>
+          </div>
+
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 border border-slate-100 dark:border-slate-700">
+            <Typography.Text className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3 block">策略配置</Typography.Text>
+            <Row gutter={16}>
+              <Col span={14}>
+                <Form.Item name="bindType" label="绑定回收类型" className="!mb-3">
+                  <Select
+                    options={[
+                      { value: 1, label: '手动绑定（不回收）' },
+                      { value: 2, label: '动态释放（自动回收）' },
+                    ]}
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={10}>
+                <Form.Item name="enable" label="启用状态" valuePropName="checked" className="!mb-3">
+                  <Switch checkedChildren="启用" unCheckedChildren="停用" />
+                </Form.Item>
+              </Col>
+            </Row>
           </div>
         </Form>
       </Modal>

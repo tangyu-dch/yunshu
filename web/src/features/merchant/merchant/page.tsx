@@ -241,7 +241,11 @@ export function MerchantPage() {
         maxAgents: values.maxAgents ? Number(values.maxAgents) : 0,
       })
 
-      const merchantIdStr = String(savedMerchant.id || editingId)
+      const merchantId = savedMerchant.id || editingId
+      if (!merchantId || merchantId <= 0) {
+        throw new Error('商户保存后未获得有效 ID，无法继续关联操作')
+      }
+      const merchantIdStr = String(merchantId)
 
       // 2. 检查商户登录账号是否存在，如果不存在则自动创建，如果存在则进行状态同步或密码重置
       const accountsResult = await fetchAccounts(1, 10, values.account)
@@ -274,11 +278,10 @@ export function MerchantPage() {
       }
 
       // 3. 处理商户的风控策略关联更新
-      const merchantIdNum = savedMerchant.id || editingId
-      if (merchantIdNum) {
+      if (merchantId) {
         const nextRiskIds = values.riskControlIds ?? []
         const updatePromises = riskControls.map(async (rc: any) => {
-          const isCurrentlyBound = allBindingsMap?.[merchantIdNum]?.some((r: any) => r.id === rc.id) ?? false
+          const isCurrentlyBound = allBindingsMap?.[merchantId]?.some((r: any) => r.id === rc.id) ?? false
           const shouldBeBound = nextRiskIds.includes(rc.id)
 
           if (isCurrentlyBound !== shouldBeBound) {
@@ -286,17 +289,17 @@ export function MerchantPage() {
             let nextBindings = [...currentBindings]
 
             if (shouldBeBound) {
-              const exists = nextBindings.some((b: any) => b.merchantId === merchantIdNum)
+              const exists = nextBindings.some((b: any) => b.merchantId === merchantId)
               if (exists) {
                 nextBindings = nextBindings.map((b: any) =>
-                  b.merchantId === merchantIdNum ? { ...b, enable: true } : b
+                  b.merchantId === merchantId ? { ...b, enable: true } : b
                 )
               } else {
-                nextBindings.push({ riskId: rc.id, merchantId: merchantIdNum, enable: true })
+                nextBindings.push({ riskId: rc.id, merchantId, enable: true })
               }
             } else {
               nextBindings = nextBindings.map((b: any) =>
-                b.merchantId === merchantIdNum ? { ...b, enable: false } : b
+                b.merchantId === merchantId ? { ...b, enable: false } : b
               )
             }
             await saveRiskControlMerchants(rc.id, nextBindings)

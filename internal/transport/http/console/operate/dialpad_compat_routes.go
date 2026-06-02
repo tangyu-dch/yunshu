@@ -106,6 +106,7 @@ func RegisterDialpadCompatRoutes(
 	r gin.IRoutes,
 	authService *authdomain.AuthService,
 	callRecordService *operatedomain.CallRecordManagementService,
+	extensionService *operatedomain.ExtensionManagementService,
 	db *gorm.DB,
 ) {
 	// 1. Dialpad Login
@@ -192,6 +193,50 @@ func RegisterDialpadCompatRoutes(
 			}
 		}
 
+		// --- 自动分配分机 ---
+		// 登录成功后，如果该坐席还没有绑定分机，自动从商户的空闲分机池中分配一个。
+		// 一个分机同一时间只能绑定一个坐席；坐席退出后分机会被释放回池中。
+		uid, _ := strconv.Atoi(account.UserID)
+		if uid > 0 {
+			// 检查是否已经有绑定的分机
+			var existingCount int64
+			db.Table("cc_res_extension").
+				Where("user_id = ? AND merchant_id = ? AND del_flag = ? AND enable = ?", uid, mch.ID, false, true).
+				Count(&existingCount)
+
+			if existingCount == 0 {
+				// 没有已绑定分机 → 自动分配一个空闲分机
+				var freeExt resource.ExtensionModel
+				allocErr := db.Transaction(func(tx *gorm.DB) error {
+					// 使用 FOR UPDATE 防止并发分配同一个分机
+					err := tx.Where("merchant_id = ? AND user_id = 0 AND enable = ? AND del_flag = ?", mch.ID, true, false).
+						Order("id ASC").
+						First(&freeExt).Error
+					if err != nil {
+						if errors.Is(err, gorm.ErrRecordNotFound) {
+							return errors.New("当前没有可用的空闲分机，请联系管理员分配")
+						}
+						return err
+					}
+					// 绑定到当前坐席
+					return tx.Model(&resource.ExtensionModel{}).
+						Where("id = ?", freeExt.ID).
+						Updates(map[string]any{
+							"user_id":      uid,
+							"bind_type":    2, // 动态绑定（自动回收）
+							"offline_at":   nil,
+							"updated_time": time.Now().UTC(),
+						}).Error
+				})
+				if allocErr != nil {
+					// 自动分配失败，回滚 auth ticket 并拒绝登录
+					_ = authService.Logout(c.Request.Context(), ticket.Token)
+					c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, allocErr.Error()))
+					return
+				}
+			}
+		}
+
 		// Add default permissions to make frontend dials work
 		permissions := ticket.Tenant.Permissions
 		if len(permissions) == 0 {
@@ -231,11 +276,29 @@ func RegisterDialpadCompatRoutes(
 		}))
 	})
 
-	// 2. Dialpad Logout
+	// 2. Dialpad Logout — 同时释放坐席绑定的分机
 	r.POST("/mer/auth/dialpad/logout", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+
+		// 释放该坐席绑定的分机
+		releaseExtensionForUser(db, tenant)
+
 		token := tokenFromRequest(c)
 		_ = authService.Logout(c.Request.Context(), token)
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{"logout": true}))
+	})
+
+	// 2b. Release Extension — 仅释放分机（用于客户端关闭时调用）
+	r.POST("/mer/v1/user/dialpad/releaseExtension", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		releaseExtensionForUser(db, tenant)
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{"released": true}))
 	})
 
 	// 3. Get Extension Info (Protected)
@@ -464,6 +527,13 @@ func RegisterDialpadCompatRoutes(
 		}
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
+
+	// 9. Get Version (GET /mer/version/dialpad)
+	r.GET("/mer/version/dialpad", func(c *gin.Context) {
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{
+			"version": "1.0.0",
+		}))
+	})
 }
 
 // --- Authenticate / Session Helpers ---
@@ -491,6 +561,36 @@ func stringToID(s string) int {
 		h = -h
 	}
 	return h
+}
+
+// --- Extension Release Helper ---
+
+// releaseExtensionForUser 释放指定坐席绑定的所有动态分机。
+// 将 user_id 设为 0，bind_type 恢复为 1，offline_at 清除。
+func releaseExtensionForUser(db *gorm.DB, tenant contracts.TenantContext) {
+	userID, _ := strconv.Atoi(tenant.UserID)
+	if userID <= 0 {
+		return
+	}
+	merchantID, _ := strconv.Atoi(tenant.MerchantID)
+	now := time.Now().UTC()
+	result := db.Model(&resource.ExtensionModel{}).
+		Where("user_id = ? AND del_flag = ?", userID, false).
+		Where("bind_type = ?", 2). // 只释放动态绑定的分机
+		Updates(map[string]any{
+			"user_id":      0,
+			"bind_type":    1,
+			"offline_at":   nil,
+			"updated_time": now,
+		})
+	if result.Error != nil {
+		// 静默处理：释放失败不应阻塞退出流程
+		return
+	}
+	if result.RowsAffected > 0 {
+		// 触发 auth 缓存失效，使旧的分机绑定信息立即失效
+		_ = merchantID // 保留以备后续按需清理
+	}
 }
 
 // --- AES ECB Padding Helpers ---

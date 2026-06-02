@@ -2,6 +2,7 @@ import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Swi
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
+import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
 import { QueryBar } from '@/components/QueryBar'
 import { deleteChannels, fetchChannels, saveChannel } from '@/api/operate'
@@ -25,21 +26,12 @@ export function ChannelPage() {
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   const { data, isPending } = useQuery({
-    queryKey: ['operate', 'channel', pageNumber, pageSize],
-    queryFn: () => fetchChannels(pageNumber, pageSize),
+    queryKey: ['operate', 'channel', pageNumber, pageSize, queryParams],
+    queryFn: () => fetchChannels(pageNumber, pageSize, {
+      name: queryParams.name || undefined,
+      enable: queryParams.enable,
+    }),
   })
-
-  // 优雅的客户端精细化组合条件过滤 (Progressive Enhancement)
-  const filteredRecords = useMemo(() => {
-    let records = data?.records ?? []
-    if (queryParams.name) {
-      records = records.filter((r: any) => String(r.name).toLowerCase().includes(queryParams.name.toLowerCase().trim()))
-    }
-    if (queryParams.enable !== undefined) {
-      records = records.filter((r: any) => Boolean(r.enable) === Boolean(queryParams.enable))
-    }
-    return records
-  }, [data?.records, queryParams])
 
   const queryFields = useMemo(() => [
     { key: 'name', label: '渠道名称', type: 'text' as const, placeholder: '请输入渠道名称搜索' },
@@ -119,22 +111,24 @@ export function ChannelPage() {
       <div className="flex justify-end items-center mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'channel'] })}>刷新</Button>
-          <Button type="primary" onClick={openCreate}>
-            新增渠道
-          </Button>
+          <PermissionGate permission="operate:channel:write">
+            <Button type="primary" onClick={openCreate}>
+              新增渠道
+            </Button>
+          </PermissionGate>
         </Space>
       </div>
 
       <QueryBar
         fields={queryFields}
-        onSearch={setQueryParams}
+        onSearch={(params) => { setPageNumber(1); setQueryParams(params) }}
         loading={isPending}
       />
 
       <TableWrap
         title="渠道列表"
         rowKey="id"
-        dataSource={filteredRecords}
+        dataSource={data?.records ?? []}
         pagination={{
           current: pageNumber,
           pageSize,
@@ -186,14 +180,18 @@ export function ChannelPage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record.id)}>
-                  编辑
-                </Button>
-                <Popconfirm title="确认删除该渠道？" onConfirm={() => deleteMutation.mutate([record.id])}>
-                  <Button size="small" danger>
-                    删除
+                <PermissionGate permission="operate:channel:write">
+                  <Button size="small" onClick={() => openEdit(record.id)}>
+                    编辑
                   </Button>
-                </Popconfirm>
+                </PermissionGate>
+                <PermissionGate permission="operate:channel:delete">
+                  <Popconfirm title="确认删除该渠道？" onConfirm={() => deleteMutation.mutate([record.id])}>
+                    <Button size="small" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </PermissionGate>
               </Space>
             ),
           },

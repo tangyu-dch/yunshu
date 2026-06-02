@@ -37,6 +37,12 @@ export type GatewayItem = {
   concurrency?: number
   priority?: number
   codecPrefs?: string
+  channelId?: number
+  rateId?: number
+  realm?: string
+  port?: string
+  username?: string
+  remark?: string
 }
 
 export type BatchTaskItem = {
@@ -48,6 +54,10 @@ export type BatchTaskItem = {
   total: number
   completed: number
   connected: number
+  connectedInterval?: number
+  unconnectedInterval?: number
+  callTimePeriod?: string
+  aiFlag?: boolean
 }
 
 export type CallRecordItem = {
@@ -124,6 +134,7 @@ export type DispatcherItem = {
   priority: number
   flags: number
   enable: boolean
+  attrs?: string
 }
 
 

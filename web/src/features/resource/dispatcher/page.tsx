@@ -97,7 +97,7 @@ export function DispatcherPage() {
         destination: record?.destination ?? '',
         flags: record?.flags ?? 0,
         priority: record?.priority ?? 10,
-        attrs: '',
+        attrs: record?.attrs ?? '',
         description: record?.description ?? '',
         enable: Boolean(record?.enable),
       })
@@ -150,9 +150,11 @@ export function DispatcherPage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record.id)}>
-                  编辑
-                </Button>
+                <PermissionGate permission="operate:dispatcher:write">
+                  <Button size="small" onClick={() => openEdit(record.id)}>
+                    编辑
+                  </Button>
+                </PermissionGate>
                 <PermissionGate permission="operate:dispatcher:write">
                   <Popconfirm title="确认删除这个分发项？" onConfirm={() => deleteMutation.mutate([record.id])}>
                     <Button size="small" danger>

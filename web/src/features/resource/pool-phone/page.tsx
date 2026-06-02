@@ -109,7 +109,7 @@ export function PoolPhonePage() {
       <div className="flex justify-end mb-2">
         <Space>
           <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'pool-phone'] })}>刷新</Button>
-          <PermissionGate permission="operate:phone:read">
+          <PermissionGate permission="operate:phone:write">
             <Button type="primary" onClick={openCreate}>
               新增号码
             </Button>
@@ -147,13 +147,17 @@ export function PoolPhonePage() {
             title: '操作',
             render: (_, record) => (
               <Space size="small">
-                <Button size="small" onClick={() => openEdit(record.id)}>
-                  编辑
-                </Button>
-                <Button size="small" onClick={() => toggleMutation.mutate({ id: record.id, enable: !record.enable })}>
-                  {record.enable ? '停用' : '启用'}
-                </Button>
-                <PermissionGate permission="operate:phone:read">
+                <PermissionGate permission="operate:phone:write">
+                  <Button size="small" onClick={() => openEdit(record.id)}>
+                    编辑
+                  </Button>
+                </PermissionGate>
+                <PermissionGate permission="operate:phone:write">
+                  <Button size="small" onClick={() => toggleMutation.mutate({ id: record.id, enable: !record.enable })}>
+                    {record.enable ? '停用' : '启用'}
+                  </Button>
+                </PermissionGate>
+                <PermissionGate permission="operate:phone:delete">
                   <Popconfirm title="确认删除这个号码？" onConfirm={() => deleteMutation.mutate([record.id])}>
                     <Button size="small" danger>
                       删除

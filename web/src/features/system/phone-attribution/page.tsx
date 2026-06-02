@@ -104,7 +104,7 @@ export function PhoneAttributionPage() {
         </Space>
       </div>
 
-      <QueryBar fields={queryFields} onSearch={setQueryParams} loading={isPending} />
+      <QueryBar fields={queryFields} onSearch={(params) => { setPageNumber(1); setQueryParams(params) }} loading={isPending} />
 
       <TableWrap
         title="号段归属地映射列表"

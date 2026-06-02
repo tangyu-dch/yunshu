@@ -349,6 +349,7 @@ func extensionFromModel(model ExtensionModel) operate.Extension {
 		SipDomain:       model.SipDomain,
 		HA1:             model.HA1,
 		HA1b:            model.HA1b,
+		OfflineAt:       model.OfflineAt,
 	}
 }
 

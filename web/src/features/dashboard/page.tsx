@@ -118,6 +118,16 @@ export function DashboardPage() {
   const maxChannels = nodesQuery.data?.reduce((sum, item) => sum + (item.maxChannels || 0), 0) ?? 0
   const activeNodes = nodesQuery.data?.filter(n => n.status === 'active').length ?? 0
 
+  // Operator gateway utilization
+  const gatewayRecords = gatewaysQuery.data?.records ?? []
+  const enabledGateways = gatewayRecords.filter(r => r.enable).length
+  const totalGateways = gatewayRecords.length
+
+  // AI flow publish ratio
+  const aiFlowRecords = aiFlowsQuery.data?.records ?? []
+  const publishedFlows = aiFlowRecords.filter(r => r.status === 'published').length
+  const totalFlows = aiFlowRecords.length
+
   // Merchant-level active tasks progress (Only for Merchant)
   const merchantTasks = batchTasksQuery.data?.records ?? []
   const activeTasksCount = merchantTasks.filter(t => t.status === 'running').length
@@ -128,18 +138,22 @@ export function DashboardPage() {
   const callAttempts: number[] = []
   const callConnected: number[] = []
   for (let i = 5; i >= 0; i--) {
-    const timeStr = dayjs().subtract(i, 'hour').format('HH:00')
+    const bucketEnd = dayjs().subtract(i, 'hour').startOf('hour').add(1, 'hour')
+    const bucketStart = dayjs().subtract(i, 'hour').startOf('hour')
+    const timeStr = bucketStart.format('HH:00')
     hours.push(timeStr)
     
     const attempts = records.filter((r) => {
       if (!r.finishedAt) return false
-      return dayjs(r.finishedAt).format('HH:00') === timeStr
+      const t = dayjs(r.finishedAt)
+      return t.isAfter(bucketStart) && t.isBefore(bucketEnd)
     }).length
     callAttempts.push(attempts)
     
     const connected = records.filter((r) => {
       if (!r.finishedAt) return false
-      if (dayjs(r.finishedAt).format('HH:00') !== timeStr) return false
+      const t = dayjs(r.finishedAt)
+      if (!t.isAfter(bucketStart) || !t.isBefore(bucketEnd)) return false
       const s = String(r.state).toUpperCase()
       const billsec = Number(r.billsec) || 0
       return s.includes('ANSWER') || s.includes('SUCCESS') || s === 'SUCCESS' || s === 'TALKING' || billsec > 0
@@ -431,14 +445,14 @@ export function DashboardPage() {
                     <span className="text-sm font-medium text-slate-600"><ApartmentOutlined className="mr-2" />全网物理线路网关</span>
                     <Tag color="blue">{gatewaysQuery.data?.records.length ?? 0} 个</Tag>
                   </div>
-                  <Progress percent={Math.min(100, (gatewaysQuery.data?.records.length ?? 0) * 10)} strokeColor="#3b82f6" />
+                  <Progress percent={totalGateways > 0 ? Math.round((enabledGateways / totalGateways) * 100) : 0} strokeColor="#3b82f6" />
                 </div>
                 <div className="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors" onClick={() => navigate('/merchant/ai-model-flow')}>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-sm font-medium text-slate-600"><ThunderboltOutlined className="mr-2" />全网已部署 AI 流程</span>
                     <Tag color="gold">{aiFlowsQuery.data?.records.length ?? 0} 个</Tag>
                   </div>
-                  <Progress percent={Math.min(100, (aiFlowsQuery.data?.records.length ?? 0) * 10)} strokeColor="#f59e0b" />
+                  <Progress percent={totalFlows > 0 ? Math.round((publishedFlows / totalFlows) * 100) : 0} strokeColor="#f59e0b" />
                 </div>
                 <div className="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors" onClick={() => navigate('/operate/freeswitch')}>
                   <div className="mb-2 flex items-center justify-between">
@@ -458,21 +472,20 @@ export function DashboardPage() {
                     <span className="text-sm font-medium text-slate-600"><CarryOutOutlined className="mr-2" />本商户外呼任务总规模</span>
                     <Tag color="blue">{totalTasksCount} 个</Tag>
                   </div>
-                  <Progress percent={Math.min(100, totalTasksCount * 10)} strokeColor="#3b82f6" />
+                  <Progress percent={totalTasksCount > 0 ? Math.round((activeTasksCount / totalTasksCount) * 100) : 0} strokeColor="#3b82f6" />
                 </div>
                 <div className="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors" onClick={() => navigate('/merchant/ai-model-flow')}>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-sm font-medium text-slate-600"><ThunderboltOutlined className="mr-2" />本商户绑定 AI 模型流</span>
                     <Tag color="gold">{aiFlowsQuery.data?.records.length ?? 0} 个</Tag>
                   </div>
-                  <Progress percent={Math.min(100, (aiFlowsQuery.data?.records.length ?? 0) * 10)} strokeColor="#f59e0b" />
+                  <Progress percent={totalFlows > 0 ? Math.round((publishedFlows / totalFlows) * 100) : 0} strokeColor="#f59e0b" />
                 </div>
                 <div className="cursor-pointer hover:bg-slate-50 p-2 rounded transition-colors" onClick={() => navigate('/merchant/skill-group')}>
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-600"><AuditOutlined className="mr-2" />已绑定话务坐席技能组</span>
-                    <Tag color="green">活动中</Tag>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-slate-600"><AuditOutlined className="mr-2" />话务坐席技能组</span>
+                    <Tag color="blue">点击查看</Tag>
                   </div>
-                  <Progress percent={100} strokeColor="#10b981" />
                 </div>
               </Space>
             </Card>

@@ -222,6 +222,7 @@ func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
 		&resource.PoolPhoneSkillGroupModel{},
 		&resource.SkillGroupModel{},
 		&resource.UserSkillGroupModel{},
+		&resource.MerchantUserModel{},
 		&resource.ExtensionModel{},
 		&resource.PhoneGroupModel{},
 		&resource.PhoneGroupPoolPhoneRefModel{},

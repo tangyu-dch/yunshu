@@ -4,8 +4,8 @@ import { TableWrap } from '@/components/TableWrap'
 import { fetchCallRecords, fetchFsNodes } from '@/api/operate'
 
 export function RealtimeMonitorPage() {
-  const { data: nodes } = useQuery({ queryKey: ['monitor', 'nodes'], queryFn: fetchFsNodes })
-  const { data: calls } = useQuery({ queryKey: ['monitor', 'calls'], queryFn: () => fetchCallRecords(1, 50) })
+  const { data: nodes } = useQuery({ queryKey: ['monitor', 'nodes'], queryFn: fetchFsNodes, refetchInterval: 5000 })
+  const { data: calls } = useQuery({ queryKey: ['monitor', 'calls'], queryFn: () => fetchCallRecords(1, 50), refetchInterval: 5000 })
 
   return (
     <Space direction="vertical" size="large" className="w-full">
