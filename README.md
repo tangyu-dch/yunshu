@@ -374,8 +374,7 @@ Here is the integration and configuration modification guide for the core VoIP c
     # 3. Enable multi-domain filtering in SELECT queries
     modparam("auth_db", "use_domain", 1)
 
-    # 4. Map the renamed Yunshu extension table and its attributes
-    modparam("auth_db", "db_table", "cc_res_extension")
+    # 4. Map the renamed Yunshu extension table attributes (Note: table name "cc_res_extension" must be passed as an argument in auth_check("$fd", "cc_res_extension", "1"))
     modparam("auth_db", "user_column", "extension_number")
     modparam("auth_db", "domain_column", "sip_domain")
     ```

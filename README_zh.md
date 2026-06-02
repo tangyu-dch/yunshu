@@ -380,8 +380,7 @@ cti:
     # 3. 启用多域支持（在 SQL 查询中自动拼接域名过滤条件）
     modparam("auth_db", "use_domain", 1)
 
-    # 4. 对齐云枢自研的分机表名及各列属性名
-    modparam("auth_db", "db_table", "cc_res_extension")
+    # 4. 对齐云枢自研的分机表列属性名（注：表名 cc_res_extension 需在 auth_check("$fd", "cc_res_extension", "1") 中直接作为参数传递）
     modparam("auth_db", "user_column", "extension_number")
     modparam("auth_db", "domain_column", "sip_domain")
     ```
