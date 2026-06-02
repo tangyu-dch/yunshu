@@ -27,6 +27,9 @@ type ExtensionModel struct {
 	OfflineAt       *time.Time `gorm:"column:offline_at"`
 	CreatedTime     time.Time  `gorm:"column:created_time"`
 	UpdatedTime     time.Time  `gorm:"column:updated_time"`
+	SipDomain       string     `gorm:"column:sip_domain;type:varchar(64)"`
+	HA1             string     `gorm:"column:ha1;type:varchar(64)"`
+	HA1b            string     `gorm:"column:ha1b;type:varchar(64)"`
 }
 
 // TableName 返回  生产库中的分机表名。

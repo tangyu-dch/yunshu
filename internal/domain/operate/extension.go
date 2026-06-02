@@ -2,6 +2,8 @@ package operate
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"strings"
@@ -22,7 +24,7 @@ const (
 	BindTypeDynamic = 2 // 动态绑定（离线自动解绑）
 )
 
-// Extension 表示  兼容 `extension` 表中的分机配置。
+// Extension 表示  兼容 `cc_res_extension` 表中的分机配置。
 type Extension struct {
 	ID              int    `json:"id,omitempty"`
 	ExtensionNumber string `json:"extensionNumber"`
@@ -31,6 +33,9 @@ type Extension struct {
 	UserID          int    `json:"userId"`
 	Enable          bool   `json:"enable"`
 	BindType        int    `json:"bindType"`
+	SipDomain       string `json:"sipDomain,omitempty"`
+	HA1             string `json:"ha1,omitempty"`
+	HA1b            string `json:"ha1b,omitempty"`
 }
 
 type ExtensionPageRequest struct {
@@ -64,9 +69,10 @@ type AuthCacheInvalidator interface {
 }
 
 type ExtensionManagementService struct {
-	Repository ExtensionManagementRepository
-	Cache      AuthCacheInvalidator
-	Logger     *slog.Logger
+	Repository   ExtensionManagementRepository
+	MerchantRepo MerchantRepository
+	Cache        AuthCacheInvalidator
+	Logger       *slog.Logger
 }
 
 func (s *ExtensionManagementService) DynamicBind(ctx context.Context, extensionNumber string, userID int, merchantID int) error {
@@ -94,6 +100,7 @@ func (s *ExtensionManagementService) Page(ctx context.Context, req ExtensionPage
 	return page, nil
 }
 
+
 func (s *ExtensionManagementService) Save(ctx context.Context, extension Extension) (Extension, error) {
 	logger := s.logger()
 	normalized, err := normalizeExtensionForSave(extension)
@@ -110,7 +117,23 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 		logger.Warn("运营端保存分机冲突", "id", normalized.ID, "extension", normalized.ExtensionNumber)
 		return Extension{}, ErrExtensionConflict
 	}
-	logger.Info("运营端开始保存分机", "id", normalized.ID, "extension", normalized.ExtensionNumber, "merchantId", normalized.MerchantID, "userId", normalized.UserID, "enable", normalized.Enable)
+
+	// 动态解析租户域 (SipDomain) 并重新计算 HA1 和 HA1b 哈希密码
+	if s.MerchantRepo != nil {
+		mch, err := s.MerchantRepo.GetByID(ctx, normalized.MerchantID)
+		if err == nil && mch.SipDomain != "" {
+			normalized.SipDomain = mch.SipDomain
+		}
+	}
+	if normalized.SipDomain == "" {
+		normalized.SipDomain = "sip.yunshu.local" // 默认域名退避
+	}
+	if normalized.Password != "" {
+		normalized.HA1 = calculateHA1(normalized.ExtensionNumber, normalized.SipDomain, normalized.Password)
+		normalized.HA1b = calculateHA1b(normalized.ExtensionNumber, normalized.SipDomain, normalized.Password)
+	}
+
+	logger.Info("运营端开始保存分机", "id", normalized.ID, "extension", normalized.ExtensionNumber, "merchantId", normalized.MerchantID, "userId", normalized.UserID, "sipDomain", normalized.SipDomain, "enable", normalized.Enable)
 	saved, err := s.Repository.Save(ctx, normalized)
 	if err != nil {
 		logger.Error("运营端保存分机失败", "id", normalized.ID, "extension", normalized.ExtensionNumber, "error", err.Error())
@@ -197,4 +220,18 @@ func filterPositiveExtensionIDs(extensions []Extension) []int {
 		}
 	}
 	return ids
+}
+
+func calculateMD5(val string) string {
+	h := md5.New()
+	h.Write([]byte(val))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func calculateHA1(username, realm, password string) string {
+	return calculateMD5(username + ":" + realm + ":" + password)
+}
+
+func calculateHA1b(username, realm, password string) string {
+	return calculateMD5(username + "@" + realm + ":" + realm + ":" + password)
 }

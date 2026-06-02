@@ -327,6 +327,9 @@ func extensionToModel(extension operate.Extension) ExtensionModel {
 		Enable:          extension.Enable,
 		BindType:        bindType,
 		DelFlag:         false,
+		SipDomain:       extension.SipDomain,
+		HA1:             extension.HA1,
+		HA1b:            extension.HA1b,
 	}
 }
 
@@ -343,6 +346,9 @@ func extensionFromModel(model ExtensionModel) operate.Extension {
 		UserID:          model.UserID,
 		Enable:          model.Enable,
 		BindType:        bindType,
+		SipDomain:       model.SipDomain,
+		HA1:             model.HA1,
+		HA1b:            model.HA1b,
 	}
 }
 

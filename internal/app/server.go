@@ -379,7 +379,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		AIConfig:         aiConfigService,
 		Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
 		Rtpengine:        rtpengineService,
-		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, Cache: authCacheInvalidator, Logger: logger},
+		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, Logger: logger},
 		Pool:             &operatedomain.PoolManagementService{Repository: poolRepository, Logger: logger},
 		PoolPhone:        &operatedomain.PoolPhoneManagementService{Repository: phoneRepository, Logger: logger},
 		PhoneGroup:       &operatedomain.PhoneGroupManagementService{Repository: phoneGroupRepository, Logger: logger},

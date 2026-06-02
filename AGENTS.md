@@ -44,6 +44,11 @@ This repository is the Go rewrite workspace for Yunshu CallCenter. Build the who
 - Keep ESL responsible for FreeSWITCH command execution, event adaptation, call/channel lifecycle, bridge relations, recordings, terminal events, and CDR publication.
 - Management surfaces are first-class. Merchant and operate operations that affect runtime behavior must refresh or publish the correct cache/update event.
 - Number selection source tables are not read-only artifacts. `channel`, `gateway`, `pool`, `pool_phone`, `skill_group`, `pool_phone_skill_group`, and `user_skill_group` all need real management surfaces, not just runtime readers, so operators can configure the full selection chain without raw SQL.
+- 多租户分机鉴权必须支持多域物理隔离。分机表 `cc_res_extension` 与商户 `merchant` 表均必须包含 `sip_domain` 属性。在 SIP 注册鉴权时，Kamailio 默认启用 **HA1b** 密文鉴权方案，避免在多租户下不同商户因为 `1001` 等同名分机引发冲突。
+- **HA1** 与 **HA1b** 计算规则必须在 Go 业务层代码中闭环：当分机密码、分机号或所属商户发生变化时，Go 服务端必须自动重新计算哈希并写入数据库：
+  * **HA1** = `MD5(username:realm:password)`
+  * **HA1b** = `MD5(username@domain:realm:password)`，以支持域绑定验证。
+  * 严禁明文密码被外部直接读取，统一采用 `ha1b` 校验方案来与 Kamailio `auth_db` 对接。
 
 ## Multi-Instance and High-Concurrency Rules
 

@@ -15,8 +15,7 @@ CREATE TABLE IF NOT EXISTS `version` (
 
 -- 播种 Kamailio 的各模块表版本号 (Kamailio v6.1.2 标准)
 INSERT INTO `version` (`table_name`, `table_version`) 
-VALUES ('kamailio_subscriber', 7),
-       ('kamailio_dispatcher', 4),
+VALUES ('kamailio_dispatcher', 4),
        ('location', 9),
        ('kamailio_rtpengine', 1)
 ON DUPLICATE KEY UPDATE `table_version` = VALUES(`table_version`);
@@ -54,22 +53,7 @@ CREATE TABLE IF NOT EXISTS `location` (
 -- 2. Kamailio 业务表 (subscriber & dispatcher)
 -- =========================================================================
 
--- SIP 注册与鉴权表 (直接对接 Go 后端管理的 GORM 表 kamailio_subscriber)
-CREATE TABLE IF NOT EXISTS `kamailio_subscriber` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `username` VARCHAR(64) NOT NULL DEFAULT '',
-  `password` VARCHAR(64) NOT NULL DEFAULT '',
-  `domain` VARCHAR(64) NOT NULL DEFAULT '',
-  `display_name` VARCHAR(64) NOT NULL DEFAULT '',
-  `contact` VARCHAR(192) NOT NULL DEFAULT '',
-  `call_limit` INT NOT NULL DEFAULT 0,
-  `description` VARCHAR(128) NOT NULL DEFAULT '',
-  `enable` TINYINT(1) NOT NULL DEFAULT 1,
-  `del_flag` TINYINT(1) NOT NULL DEFAULT 0,
-  `created_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY `account_idx` (`username`,`domain`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Note: kamailio_subscriber table removed; authentication utilizes the unified cc_res_extension table directly.
 
 -- Dispatcher 负载均衡与心跳探测网关表 (直接对接 Go 后端管理的 GORM 表 kamailio_dispatcher)
 CREATE TABLE IF NOT EXISTS `kamailio_dispatcher` (
@@ -134,11 +118,14 @@ CREATE TABLE IF NOT EXISTS `freeswitch_event_lease` (
   INDEX `idx_freeswitch_event_lease_expiry` (`lease_expiry`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 坐席分机基础配置表
-CREATE TABLE IF NOT EXISTS `extension` (
+-- 坐席分机基础配置表 (直接对接 Kamailio 鉴权做多租户 HA1b 方案)
+CREATE TABLE IF NOT EXISTS `cc_res_extension` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `extension_number` VARCHAR(64) NOT NULL DEFAULT '',
   `password` VARCHAR(64) NOT NULL DEFAULT '',
+  `sip_domain` VARCHAR(64) NOT NULL DEFAULT '',
+  `ha1` VARCHAR(64) NOT NULL DEFAULT '',
+  `ha1b` VARCHAR(64) NOT NULL DEFAULT '',
   `merchant_id` INT NOT NULL DEFAULT 1,
   `user_id` INT NOT NULL DEFAULT 1,
   `enable` TINYINT(1) NOT NULL DEFAULT 1,
@@ -164,17 +151,11 @@ ON DUPLICATE KEY UPDATE `destination` = VALUES(`destination`);
 INSERT INTO `freeswitch` (`address`, `local_address`, `esl_port`, `sip_port`, `password`, `setid`, `enable`)
 VALUES ('freeswitch', 'freeswitch', 8021, 5060, 'ClueCon', 1, 1);
 
--- 播种分机及账号：供测试终端注册 (1001 & 1002)
--- 同时写到 Kamailio 的 subscriber 鉴权表与 CTI 的 extension 配置表
-INSERT INTO `kamailio_subscriber` (`username`, `domain`, `password`)
-VALUES ('1001', 'sip.yunshu.local', '123456'),
-       ('1002', 'sip.yunshu.local', '123456')
-ON DUPLICATE KEY UPDATE `password` = VALUES(`password`);
-
-INSERT INTO `extension` (`extension_number`, `password`, `merchant_id`, `user_id`, `enable`, `bind_type`)
-VALUES ('1001', '123456', 1, 7, 1, 2),
-       ('1002', '123456', 1, 8, 1, 2)
-ON DUPLICATE KEY UPDATE `password` = VALUES(`password`);
+-- 播种分机及账号：供测试终端注册 (1001 & 1002，使用 HA1/HA1b 哈希鉴权)
+INSERT INTO `cc_res_extension` (`extension_number`, `password`, `sip_domain`, `ha1`, `ha1b`, `merchant_id`, `user_id`, `enable`, `bind_type`)
+VALUES ('1001', '123456', 'sip.yunshu.local', '911d5196a061bdebf371a2106c58ab51', '36e61b804dd88fbd03f813409600b1f2', 1, 7, 1, 2),
+       ('1002', '123456', 'sip.yunshu.local', '222d08151cdc54c2fdd179f82bd3f8da', '8350d2aae13cec6092dd2850462ab11a', 1, 8, 1, 2)
+ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `ha1` = VALUES(`ha1`), `ha1b` = VALUES(`ha1b`);
 
 -- 播种 Kamailio RTPEngine 媒体代理节点
 INSERT INTO `kamailio_rtpengine` (`set_id`, `rtpengine_sock`, `disabled`, `weight`, `description`) 

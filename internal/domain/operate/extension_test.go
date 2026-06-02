@@ -14,7 +14,9 @@ func TestExtensionManagementService(t *testing.T) {
 
 	repo := newFakeExtensionRepository()
 	cache := &fakeAuthCacheInvalidator{}
-	service := &operate.ExtensionManagementService{Repository: repo, Cache: cache}
+	merchantRepo := newFakeMerchantRepository()
+	_, _ = merchantRepo.Save(context.Background(), operate.Merchant{ID: 1001, SipDomain: "sip.yunshu.local"})
+	service := &operate.ExtensionManagementService{Repository: repo, MerchantRepo: merchantRepo, Cache: cache}
 
 	// 1. 正常保存分机
 	ext, err := service.Save(context.Background(), operate.Extension{
@@ -194,3 +196,4 @@ func (f *fakeAuthCacheInvalidator) InvalidateAuthCache(_ context.Context) error 
 	f.calls++
 	return nil
 }
+

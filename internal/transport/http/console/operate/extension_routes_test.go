@@ -2,6 +2,7 @@ package operate
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,7 +20,8 @@ func TestExtensionRoutesAddPageAndToggle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
-	service := &operatedomain.ExtensionManagementService{Repository: resource.NewMemoryExtensionManagementRepository()}
+	merchantRepo := &fakeMerchantRepository{}
+	service := &operatedomain.ExtensionManagementService{Repository: resource.NewMemoryExtensionManagementRepository(), MerchantRepo: merchantRepo}
 	RegisterExtensionRoutes(router, service)
 
 	body := []byte(`{"extensionNumber":"2002","password":"123456","merchantId":88,"userId":7,"enable":true}`)
@@ -81,4 +83,15 @@ func TestExtensionRoutesAddPageAndToggle(t *testing.T) {
 	if deleteResult.Code != contracts.CodeOK {
 		t.Fatalf("unexpected delete result: %+v", deleteResult)
 	}
+}
+
+type fakeMerchantRepository struct {
+	operatedomain.MerchantRepository
+}
+
+func (r *fakeMerchantRepository) GetByID(_ context.Context, id int) (operatedomain.Merchant, error) {
+	return operatedomain.Merchant{
+		ID:        id,
+		SipDomain: "sip.yunshu.local",
+	}, nil
 }
