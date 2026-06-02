@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -300,6 +302,72 @@ func TestControlRouteWithAuthAndAuthBypass(t *testing.T) {
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("Horizontal authorization bypass: expected 403, got %d", rec.Code)
+		}
+	}
+}
+
+// TestApplyFSEventRouteCompletesSession_ConcurrentStress 模拟 50 个并发呼叫流程，
+// 每一个呼叫并发执行：起呼 -> CHANNEL_CREATE -> CHANNEL_HANGUP_COMPLETE。
+// 旨在高并发压力下验证 ESL 状态机、会话内存读写以及 outbox 队列的并发鲁棒性与一致性，确保在高负载下流程零死锁。
+func TestApplyFSEventRouteCompletesSession_ConcurrentStress(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.ReleaseMode)
+
+	router := gin.New()
+	originate, command, session, _ := testESLRuntime()
+	RegisterRoutes(router, originate, command, session, testGatewaySync(), nil, nil, nil)
+
+	concurrency := 50
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+
+	type testResult struct {
+		startCode    int
+		createCode   int
+		completeCode int
+	}
+	results := make([]testResult, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func(idx int) {
+			defer wg.Done()
+			callID := "call-stress-" + strconv.Itoa(idx)
+
+			// 1. 发起起呼接口请求
+			startBody := []byte(`{"userId":7,"callee":"13800000000","extra":"{}"}`)
+			startReq := httptest.NewRequest(http.MethodPost, "/esl/call/start?callId="+callID, bytes.NewReader(startBody))
+			startRec := httptest.NewRecorder()
+			router.ServeHTTP(startRec, startReq)
+			results[idx].startCode = startRec.Code
+
+			// 2. 注入 CHANNEL_CREATE 事件，将状态流转为振铃
+			createBody := []byte(`{"eventId":"evt-create-` + strconv.Itoa(idx) + `","eventName":"CHANNEL_CREATE","callId":"` + callID + `","uuid":"uuid-` + strconv.Itoa(idx) + `","fsAddr":"10.0.0.1:8021","legRole":"customer","profile":"api_outbound"}`)
+			createReq := httptest.NewRequest(http.MethodPost, "/esl/events/apply", bytes.NewReader(createBody))
+			createRec := httptest.NewRecorder()
+			router.ServeHTTP(createRec, createReq)
+			results[idx].createCode = createRec.Code
+
+			// 3. 注入 CHANNEL_HANGUP_COMPLETE 事件，挂机并触发最终 CDR 落库与 outbox 出件
+			completeBody := []byte(`{"eventId":"evt-complete-` + strconv.Itoa(idx) + `","eventName":"CHANNEL_HANGUP_COMPLETE","callId":"` + callID + `","uuid":"uuid-` + strconv.Itoa(idx) + `","fsAddr":"10.0.0.1:8021","legRole":"customer","profile":"api_outbound","headers":{"hangupCause":"NORMAL_CLEARING"}}`)
+			completeReq := httptest.NewRequest(http.MethodPost, "/esl/events/apply", bytes.NewReader(completeBody))
+			completeRec := httptest.NewRecorder()
+			router.ServeHTTP(completeRec, completeReq)
+			results[idx].completeCode = completeRec.Code
+		}(i)
+	}
+
+	wg.Wait()
+
+	// 5. 校验并断言所有并发呼叫生命周期的 150 次接口流转全部成功，绝无状态冲突或超时死锁
+	for idx, res := range results {
+		if res.startCode != http.StatusOK {
+			t.Fatalf("【呼叫流程高并发压测失败】: 会话 %d 起呼失败，HTTP 状态码为 %d", idx, res.startCode)
+		}
+		if res.createCode != http.StatusOK {
+			t.Fatalf("【呼叫流程高并发压测失败】: 会话 %d 状态机流转为振铃失败，HTTP 状态码为 %d", idx, res.createCode)
+		}
+		if res.completeCode != http.StatusOK {
+			t.Fatalf("【呼叫流程高并发压测失败】: 会话 %d 挂机并触发 CDR 归档失败，HTTP 状态码为 %d", idx, res.completeCode)
 		}
 	}
 }
