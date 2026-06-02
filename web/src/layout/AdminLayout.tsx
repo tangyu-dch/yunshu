@@ -329,9 +329,18 @@ export function AdminLayout() {
       danger: true,
       icon: <LogoutOutlined />,
       onClick: () => {
-        logout()
-        navigate('/login')
-        message.success('已安全退出登录')
+        Modal.confirm({
+          title: '确认退出',
+          content: '您确定要退出云枢系统吗？',
+          okText: '确认',
+          cancelText: '取消',
+          okButtonProps: { danger: true },
+          onOk: () => {
+            logout()
+            navigate('/login')
+            message.success('已安全退出登录')
+          },
+        })
       },
     },
   ]
