@@ -160,5 +160,5 @@ ON DUPLICATE KEY UPDATE `password` = VALUES(`password`), `ha1` = VALUES(`ha1`), 
 
 -- 播种 Kamailio RTPEngine 媒体代理节点
 INSERT INTO `cc_res_rtpengine` (`set_id`, `rtpengine_sock`, `disabled`, `weight`, `description`) 
-VALUES (1, 'udp:rtpengine:2223', 0, 1, 'Default RTPEngine Media Proxy')
+VALUES (0, 'udp:rtpengine:2223', 0, 1, 'Default RTPEngine Media Proxy')
 ON DUPLICATE KEY UPDATE `rtpengine_sock` = VALUES(`rtpengine_sock`);
