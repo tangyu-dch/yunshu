@@ -711,27 +711,45 @@ func RegisterDialpadCompatRoutes(
 			}
 		}
 
-		// 查找编译后的包，本地开发环境我们直接在 sibling folder 查找
-		binaryPath := "../yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone"
+		// 查找编译后的包，本地开发环境我们直接在 sibling folder 或绝对路径下查找各种可能的包格式
+		var candidates []string
 		if platform == "windows" {
-			binaryPath = "../yunshu-phone/build/bin/yunshu-phone.exe"
+			candidates = []string{
+				"../yunshu-phone/build/bin/云枢-amd64-installer.exe",
+				"../yunshu-phone/build/bin/云枢.exe",
+				"../yunshu-phone/build/bin/yunshu-phone.exe",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢-amd64-installer.exe",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢.exe",
+			}
+		} else if platform == "darwin" {
+			candidates = []string{
+				"../yunshu-phone/build/bin/云枢.dmg",
+				"../yunshu-phone/build/bin/云枢.pkg",
+				"../yunshu-phone/build/bin/云枢.app/Contents/MacOS/云枢",
+				"../yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢.dmg",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢.pkg",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢.app/Contents/MacOS/云枢",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone",
+			}
+		} else if platform == "linux" {
+			candidates = []string{
+				"../yunshu-phone/build/bin/云枢-x86_64.AppImage",
+				"../yunshu-phone/build/bin/云枢",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢-x86_64.AppImage",
+				"/Users/tangyu/Projects/yunshu-phone/build/bin/云枢",
+			}
 		}
 
-		if _, err := os.Stat(binaryPath); err == nil {
-			c.Header("Content-Description", "File Transfer")
-			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s", platform, arch))
-			c.Header("Content-Type", "application/octet-stream")
-			c.File(binaryPath)
-			return
-		}
-
-		absPath := "/Users/tangyu/Projects/yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone"
-		if _, err := os.Stat(absPath); err == nil {
-			c.Header("Content-Description", "File Transfer")
-			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s", platform, arch))
-			c.Header("Content-Type", "application/octet-stream")
-			c.File(absPath)
-			return
+		for _, path := range candidates {
+			if _, err := os.Stat(path); err == nil {
+				filename := filepath.Base(path)
+				c.Header("Content-Description", "File Transfer")
+				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+				c.Header("Content-Type", "application/octet-stream")
+				c.File(path)
+				return
+			}
 		}
 
 		c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, fmt.Sprintf("无法找到该平台的构建包: %s/%s", platform, arch)))
