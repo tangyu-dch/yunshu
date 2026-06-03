@@ -130,6 +130,25 @@ services:
       freeswitch:
         condition: service_started
 
+  # =========================================================================
+  # 6. RustFS 对象存储服务：存储拨号盘升级物理包与静态分发文件
+  # =========================================================================
+  rustfs:
+    image: rustfs/rustfs:latest
+    container_name: cc-rustfs
+    restart: always
+    environment:
+      - RUSTFS_ACCESS_KEY=rustfsadmin
+      - RUSTFS_SECRET_KEY=rustfsadmin
+    ports:
+      - "9000:9000"                    # S3 API 端口
+      - "9001:9001"                    # Web Dashboard 控制台管理端口
+    command: /data
+    volumes:
+      - rustfs_data:/data
+    networks:
+      - callcenter_net
+
 networks:
   callcenter_net:
     name: callcenter_net
@@ -140,3 +159,5 @@ volumes:
     name: cc_mysql_data
   redis_data:
     name: cc_redis_data
+  rustfs_data:
+    name: cc_rustfs_data

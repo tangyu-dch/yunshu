@@ -1,5 +1,14 @@
 console:
-    callBaseURL: ""
+    callBaseURL: "http://localhost:8082"
+    dialpad:
+        version: "1.0.0"
+        forceUpdate: false
+        changelog: "云枢拨号盘初始版本发布"
+        rustfs:
+            endpoint: "http://127.0.0.1:9000"
+            accessKey: "rustfsadmin"
+            secretKey: "rustfsadmin"
+            bucket: "yunshu-updates"
 freeswitch:
     commandTimeout: 5s
     eventLeaseTTL: 30s
