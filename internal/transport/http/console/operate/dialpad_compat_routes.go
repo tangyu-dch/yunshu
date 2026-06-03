@@ -4,7 +4,10 @@ import (
 	"crypto/aes"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -533,6 +536,40 @@ func RegisterDialpadCompatRoutes(
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{
 			"version": "1.0.0",
 		}))
+	})
+
+	// 9b. Download Dialpad Update (GET /mer/version/download/:version/:platform/:arch)
+	r.GET("/mer/version/download/:version/:platform/:arch", func(c *gin.Context) {
+		version := c.Param("version")
+		platform := c.Param("platform")
+		arch := c.Param("arch")
+
+		slog.Info("收到拨号盘下载请求", "version", version, "platform", platform, "arch", arch)
+
+		// 查找编译后的包，本地开发环境我们直接在 sibling folder 查找
+		binaryPath := "../yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone"
+		if platform == "windows" {
+			binaryPath = "../yunshu-phone/build/bin/yunshu-phone.exe"
+		}
+
+		if _, err := os.Stat(binaryPath); err == nil {
+			c.Header("Content-Description", "File Transfer")
+			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s", platform, arch))
+			c.Header("Content-Type", "application/octet-stream")
+			c.File(binaryPath)
+			return
+		}
+
+		absPath := "/Users/tangyu/Projects/yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone"
+		if _, err := os.Stat(absPath); err == nil {
+			c.Header("Content-Description", "File Transfer")
+			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s", platform, arch))
+			c.Header("Content-Type", "application/octet-stream")
+			c.File(absPath)
+			return
+		}
+
+		c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, fmt.Sprintf("无法找到该平台的构建包: %s/%s", platform, arch)))
 	})
 }
 
