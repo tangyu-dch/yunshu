@@ -4,11 +4,13 @@ on:
   push:
     branches:
       - main
+      - dev
     tags:
       - 'v*'
   pull_request:
     branches:
       - main
+      - dev
   workflow_dispatch:
 
 jobs:
@@ -53,9 +55,68 @@ jobs:
       - name: Archive Frontend Dist
         run: tar -czf bin/web-dist.tar.gz -C web dist
 
-      - name: Upload Artifacts
+      - name: Upload Web Dist
         uses: actions/upload-artifact@v4
         with:
-          name: yunshu-backend-builds
-          path: bin/
-          if-no-files-found: error
+          name: web-dist
+          path: bin/web-dist.tar.gz
+
+      - name: Upload cc-edge-linux-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-edge-linux-amd64
+          path: bin/cc-edge-linux-amd64
+
+      - name: Upload cc-edge-darwin-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-edge-darwin-arm64
+          path: bin/cc-edge-darwin-arm64
+
+      - name: Upload cc-console-linux-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-console-linux-amd64
+          path: bin/cc-console-linux-amd64
+
+      - name: Upload cc-console-darwin-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-console-darwin-arm64
+          path: bin/cc-console-darwin-arm64
+
+      - name: Upload cc-call-linux-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-call-linux-amd64
+          path: bin/cc-call-linux-amd64
+
+      - name: Upload cc-call-darwin-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-call-darwin-arm64
+          path: bin/cc-call-darwin-arm64
+
+      - name: Upload cc-worker-linux-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-worker-linux-amd64
+          path: bin/cc-worker-linux-amd64
+
+      - name: Upload cc-worker-darwin-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-worker-darwin-arm64
+          path: bin/cc-worker-darwin-arm64
+
+      - name: Upload cc-all-linux-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-all-linux-amd64
+          path: bin/cc-all-linux-amd64
+
+      - name: Upload cc-all-darwin-arm64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-all-darwin-arm64
+          path: bin/cc-all-darwin-arm64
