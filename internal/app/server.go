@@ -474,7 +474,7 @@ func (s *Server) routes() {
 		httpesl.RegisterRoutes(s.gin, s.callRuntime.Originate, s.callRuntime.Command, s.callRuntime.Session, s.callRuntime.GatewaySync, s.callRuntime.FSNodes, s.callRuntime.FSPool, s.callRuntime.DB)
 	case contracts.ServiceConsole:
 		httpoperate.RegisterAuthRoutes(s.gin, s.console.Auth)
-		httpoperate.RegisterDialpadCompatRoutes(s.gin, s.console.Auth, s.console.CallRecord, s.console.Extension, openRuntimeDB(s.cfg, slog.Default()))
+		httpoperate.RegisterDialpadCompatRoutes(s.gin, s.console.Auth, s.console.CallRecord, s.console.Extension, openRuntimeDB(s.cfg, slog.Default()), s.cfg.Console.Dialpad)
 		httpoperate.RegisterPermissionRoutes(s.gin, s.console.Permissions, s.console.Merchant)
 		httpoperate.RegisterAccountRoutes(s.gin, s.console.Account)
 		httpoperate.RegisterFreeSwitchRoutes(s.gin, s.console.FreeSwitch)

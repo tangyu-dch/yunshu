@@ -38,6 +38,8 @@ import { PhoneAttributionPage } from '@/features/system/phone-attribution/page'
 import { ProxyConfigPage } from '@/features/system/proxy-config/page'
 import { MediaConfigPage } from '@/features/telephony/media-config/page'
 import { InstallPage } from '@/features/install/page'
+import { DialpadVersionPage } from '@/features/system/dialpad/page'
+
 
 
 function Guard({ children }: { children: ReactElement }) {
@@ -139,7 +141,9 @@ export const router = createBrowserRouter([
       { path: 'operate/phone-attribution', element: <RequirePermission permission="operate:phone:read"><PhoneAttributionPage /></RequirePermission> },
       { path: 'operate/proxy-config', element: <RequirePermission permission="operate:freeswitch:read"><ProxyConfigPage /></RequirePermission> },
       { path: 'operate/media-config', element: <RequirePermission permission="operate:freeswitch:read"><MediaConfigPage /></RequirePermission> },
+      { path: 'operate/dialpad', element: <RequirePermission permission="operate:account:read"><DialpadVersionPage /></RequirePermission> },
       { path: 'operate/call-record', element: <RequirePermission permission="operate:merchant:read"><CallRecordPage /></RequirePermission> },
+
       { path: 'operate/api-doc', element: <RequirePermission permission="operate:account:read"><OperatorApiDocPage /></RequirePermission> },
       { path: 'merchant/batch-call-task', element: <RequirePermission permission="merchant:batch-task:read"><BatchTaskPage /></RequirePermission> },
       { path: 'merchant/batch-call-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><BatchDialpadPage /></RequirePermission> },

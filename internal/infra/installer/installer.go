@@ -691,6 +691,7 @@ func (in *Installer) InitializeDatabase(ctx context.Context, params SetupParams)
 		&business.PushJobModel{},
 		&business.SettlementJobModel{},
 		&business.MessageOutboxModel{},
+		&resource.DialpadVersionModel{},
 	)
 	if err != nil {
 		in.logger.Error("GORM 数据库自动迁移失败", "error", err.Error())

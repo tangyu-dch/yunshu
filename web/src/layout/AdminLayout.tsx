@@ -79,7 +79,9 @@ const navItems: NavItem[] = [
       { key: '/operate/gateway', icon: <ApartmentOutlined />, label: '网关管理', permission: 'operate:gateway:read' },
       { key: '/operate/proxy-config', icon: <SettingOutlined />, label: '代理配置', permission: 'operate:freeswitch:read' },
       { key: '/operate/media-config', icon: <ClusterOutlined />, label: '媒体配置', permission: 'operate:freeswitch:read' },
+      { key: '/operate/dialpad', icon: <ApiOutlined />, label: '拨号盘版本', permission: 'operate:account:read' },
     ],
+
   },
   {
     key: 'biz-mgmt',
@@ -182,7 +184,9 @@ const breadcrumbMap: Record<string, string[]> = {
   '/operate/gateway': ['系统核心', '网关配置'],
   '/operate/system-config': ['系统核心', '代理配置'],
   '/operate/media-config': ['系统核心', '媒体配置'],
+  '/operate/dialpad': ['系统核心', '拨号盘版本'],
   '/operate/merchant': ['业务管理', '商户配置'],
+
   '/operate/account': ['业务管理', '账号管理'],
   '/operate/role': ['业务管理', '角色权限'],
   '/operate/extension': ['业务管理', '分机管理'],

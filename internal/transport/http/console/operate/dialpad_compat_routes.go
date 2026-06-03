@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,7 +21,9 @@ import (
 	authdomain "yunshu/internal/domain/auth"
 	operatedomain "yunshu/internal/domain/operate"
 	"yunshu/internal/infra/business"
+	"yunshu/internal/infra/config"
 	"yunshu/internal/infra/resource"
+	"yunshu/internal/infra/storage"
 )
 
 // Keys and Constants matching the desktop client configuration
@@ -104,6 +108,96 @@ type CallTotalResult struct {
 	Over30sRateMonth  float64 `json:"over30sRateMonth"`
 }
 
+// isNewerVersionGo 比较两个版本号，如果 v1 > v2 则返回 true。
+func isNewerVersionGo(v1, v2 string) bool {
+	v1 = strings.TrimPrefix(v1, "v")
+	v2 = strings.TrimPrefix(v2, "v")
+
+	// 剥离预发布后缀（如 "-beta", "-rc1"）
+	v1Base := strings.SplitN(v1, "-", 2)[0]
+	v2Base := strings.SplitN(v2, "-", 2)[0]
+
+	v1Parts := strings.Split(v1Base, ".")
+	v2Parts := strings.Split(v2Base, ".")
+
+	maxLen := len(v1Parts)
+	if len(v2Parts) > maxLen {
+		maxLen = len(v2Parts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var val1, val2 int
+		if i < len(v1Parts) {
+			val1, _ = strconv.Atoi(v1Parts[i])
+		}
+		if i < len(v2Parts) {
+			val2, _ = strconv.Atoi(v2Parts[i])
+		}
+		if val1 > val2 {
+			return true
+		}
+		if val1 < val2 {
+			return false
+		}
+	}
+
+	v1HasPre := strings.Contains(v1, "-")
+	v2HasPre := strings.Contains(v2, "-")
+	if v2HasPre && !v1HasPre {
+		return true
+	}
+	return false
+}
+
+// versionCheckMiddleware 提供云枢桌面客户端的强制更新校验中间件。
+// 拦截所有需要强更验证的客户端 API，当检测到数据库中存在比客户端当前版本更高的强制更新版本时，返回 426 StatusUpgradeRequired。
+func versionCheckMiddleware(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// 对非拨号盘商户客户端 API 直接放行
+		if !strings.HasPrefix(path, "/mer/") {
+			c.Next()
+			return
+		}
+
+		// 排除版本检查、升级包下载以及版本上传/管理相关的 API 避免死循环
+		if strings.Contains(path, "/version/dialpad") ||
+			strings.Contains(path, "/version/download") ||
+			strings.Contains(path, "/version/upload") ||
+			strings.Contains(path, "/version/list") ||
+			strings.Contains(path, "/version/delete") {
+			c.Next()
+			return
+		}
+
+		clientVersion := c.GetHeader("yunshu_version")
+		if clientVersion == "" {
+			c.Next()
+			return
+		}
+
+		// 查询数据库中所有未删除且设置为强制更新的版本记录
+		var versions []resource.DialpadVersionModel
+		err := db.Where("force_update = ? AND del_flag = ?", true, false).Find(&versions).Error
+		if err == nil {
+			for _, v := range versions {
+				// 如果该强更版本大于客户端当前版本，则执行拦截
+				if isNewerVersionGo(v.Version, clientVersion) {
+					slog.Warn("云枢客户端版本过低且存在更高的强制更新版本", 
+						"clientVersion", clientVersion, 
+						"requiredVersion", v.Version)
+					c.JSON(http.StatusUpgradeRequired, contracts.Fail(426, "云枢客户端当前版本过低，请更新至最新版本以继续使用"))
+					c.Abort()
+					return
+				}
+			}
+		}
+
+		c.Next()
+	}
+}
+
 // RegisterDialpadCompatRoutes registers the old Dialpad "/mer" API compatibility layer routes
 func RegisterDialpadCompatRoutes(
 	r gin.IRoutes,
@@ -111,7 +205,18 @@ func RegisterDialpadCompatRoutes(
 	callRecordService *operatedomain.CallRecordManagementService,
 	extensionService *operatedomain.ExtensionManagementService,
 	db *gorm.DB,
+	updateCfg config.DialpadUpdateConfig,
 ) {
+	// 创建路由子组并装载版本及强制更新校验中间件，以确保客户端升级闭环
+	var group gin.IRoutes = r
+	if rg, ok := r.(*gin.Engine); ok {
+		group = rg.Group("/")
+	} else if rg, ok := r.(*gin.RouterGroup); ok {
+		group = rg.Group("/")
+	}
+	group.Use(versionCheckMiddleware(db))
+	r = group
+
 	// 1. Dialpad Login
 	r.POST("/mer/auth/dialpad/login", func(c *gin.Context) {
 		var req DialpadLoginReq
@@ -533,8 +638,43 @@ func RegisterDialpadCompatRoutes(
 
 	// 9. Get Version (GET /mer/version/dialpad)
 	r.GET("/mer/version/dialpad", func(c *gin.Context) {
+		var latest resource.DialpadVersionModel
+		err := db.Where("del_flag = ?", false).Order("id DESC").First(&latest).Error
+		if err == nil && latest.Version != "" {
+			// 检测客户端传入的版本，如果客户端当前版本比数据库中任何一个强制更新版本旧，则强制将 forceUpdate 设为 true
+			clientVersion := c.GetHeader("yunshu_version")
+			forceUpdate := latest.ForceUpdate
+			if clientVersion != "" {
+				var forceVersions []resource.DialpadVersionModel
+				db.Where("force_update = ? AND del_flag = ?", true, false).Find(&forceVersions)
+				for _, v := range forceVersions {
+					if isNewerVersionGo(v.Version, clientVersion) {
+						forceUpdate = true
+						break
+					}
+				}
+			}
+
+			c.JSON(http.StatusOK, contracts.OK(map[string]any{
+				"version":     latest.Version,
+				"forceUpdate": forceUpdate,
+				"changelog":   latest.Changelog,
+			}))
+			return
+		}
+
+		latestVersion := updateCfg.Version
+		if latestVersion == "" {
+			latestVersion = "1.0.0"
+		}
+		changelog := updateCfg.Changelog
+		if changelog == "" {
+			changelog = "New version available: " + latestVersion
+		}
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{
-			"version": "1.0.0",
+			"version":     latestVersion,
+			"forceUpdate": updateCfg.ForceUpdate,
+			"changelog":   changelog,
 		}))
 	})
 
@@ -545,6 +685,30 @@ func RegisterDialpadCompatRoutes(
 		arch := c.Param("arch")
 
 		slog.Info("收到拨号盘下载请求", "version", version, "platform", platform, "arch", arch)
+
+		// 优先从数据库查找该特定平台的版本发布包
+		var release resource.DialpadVersionModel
+		err := db.Where("version = ? AND platform = ? AND arch = ? AND del_flag = ?", version, platform, arch, false).
+			Order("id DESC").First(&release).Error
+		if err == nil && release.DownloadURL != "" {
+			// 如果是 RustFS 外部 S3 直传地址，直接重定向分流下载
+			if strings.HasPrefix(release.DownloadURL, "http://") || strings.HasPrefix(release.DownloadURL, "https://") {
+				c.Redirect(http.StatusFound, release.DownloadURL)
+				return
+			}
+			// 如果是本地物理路径，直接流式下载
+			localPath := release.DownloadURL
+			if strings.HasPrefix(localPath, "/") {
+				localPath = localPath[1:]
+			}
+			if _, err := os.Stat(localPath); err == nil {
+				c.Header("Content-Description", "File Transfer")
+				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s-%s%s", version, platform, arch, filepath.Ext(localPath)))
+				c.Header("Content-Type", "application/octet-stream")
+				c.File(localPath)
+				return
+			}
+		}
 
 		// 查找编译后的包，本地开发环境我们直接在 sibling folder 查找
 		binaryPath := "../yunshu-phone/build/bin/yunshu-phone.app/Contents/MacOS/yunshu-phone"
@@ -570,6 +734,111 @@ func RegisterDialpadCompatRoutes(
 		}
 
 		c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, fmt.Sprintf("无法找到该平台的构建包: %s/%s", platform, arch)))
+	})
+
+	// 9c. Dialpad Version Management — Upload (POST /mer/version/upload)
+	r.POST("/mer/version/upload", func(c *gin.Context) {
+		version := c.PostForm("version")
+		platform := c.PostForm("platform")
+		arch := c.PostForm("arch")
+		forceUpdateStr := c.PostForm("forceUpdate")
+		changelog := c.PostForm("changelog")
+
+		if version == "" || platform == "" || arch == "" {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "参数 version, platform, arch 不能为空"))
+			return
+		}
+
+		forceUpdate := forceUpdateStr == "true"
+
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "未能读取上传的二进制文件"))
+			return
+		}
+
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "打开文件失败"))
+			return
+		}
+		defer src.Close()
+
+		ext := filepath.Ext(file.Filename)
+		if ext == "" {
+			if platform == "windows" {
+				ext = ".exe"
+			} else if platform == "darwin" {
+				ext = ".app"
+			}
+		}
+		filename := fmt.Sprintf("yunshu-phone-%s-%s-%s%s", version, platform, arch, ext)
+
+		// 实例化 RustFS 存储管理器
+		storeCfg := storage.RustFSConfig{
+			Endpoint:  updateCfg.RustFS.Endpoint,
+			AccessKey: updateCfg.RustFS.AccessKey,
+			SecretKey: updateCfg.RustFS.SecretKey,
+			Bucket:    updateCfg.RustFS.Bucket,
+		}
+		storeDriver := storage.NewRustFSStorage(storeCfg)
+
+		downloadURL, err := storeDriver.Store(c.Request.Context(), filename, src)
+		if err != nil {
+			slog.Error("保存版本升级包失败", "error", err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "保存升级包失败: "+err.Error()))
+			return
+		}
+
+		// 落库记录
+		versionRecord := resource.DialpadVersionModel{
+			Version:     version,
+			Platform:    platform,
+			Arch:        arch,
+			ForceUpdate: forceUpdate,
+			Changelog:   changelog,
+			FileKey:     filename,
+			FileSize:    file.Size,
+			DownloadURL: downloadURL,
+		}
+
+		if err := db.Create(&versionRecord).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "写入版本历史库失败"))
+			return
+		}
+
+		slog.Info("拨号盘版本上传成功", "version", version, "platform", platform, "url", downloadURL)
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{
+			"id":          versionRecord.ID,
+			"downloadUrl": downloadURL,
+		}))
+	})
+
+	// 9d. Dialpad Version Management — List (GET /mer/version/list)
+	r.GET("/mer/version/list", func(c *gin.Context) {
+		var list []resource.DialpadVersionModel
+		if err := db.Where("del_flag = ?", false).Order("id DESC").Find(&list).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询版本列表失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(list))
+	})
+
+	// 9e. Dialpad Version Management — Delete (POST /mer/version/delete)
+	r.POST("/mer/version/delete", func(c *gin.Context) {
+		var req struct {
+			ID int `json:"id"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || req.ID <= 0 {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "ID 无效"))
+			return
+		}
+
+		if err := db.Model(&resource.DialpadVersionModel{}).Where("id = ?", req.ID).Update("del_flag", true).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "删除失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(true))
 	})
 }
 

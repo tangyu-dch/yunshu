@@ -251,6 +251,7 @@ func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
 		&business.PushJobModel{},
 		&business.SettlementJobModel{},
 		&business.MessageOutboxModel{},
+		&resource.DialpadVersionModel{},
 	); errMig != nil {
 		logger.Error("MySQL 数据库自动迁移失败", "error", errMig.Error())
 	} else {

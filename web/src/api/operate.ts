@@ -1282,4 +1282,41 @@ export async function fetchAiProviders() {
   return data
 }
 
+// ----------------------------------------------------
+// 拨号盘版本及文件管理 (云枢 S3/RustFS 对接) API 接口
+// ----------------------------------------------------
+
+export interface DialpadVersion {
+  id?: number
+  version: string
+  platform: string
+  arch: string
+  forceUpdate: boolean
+  changelog: string
+  fileKey: string
+  fileSize: number
+  downloadUrl: string
+  createdTime?: string
+}
+
+export async function fetchDialpadVersions() {
+  const { data } = await http.get<DialpadVersion[]>('/mer/version/list')
+  return data
+}
+
+export async function uploadDialpadVersion(formData: FormData) {
+  const { data } = await http.post('/mer/version/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+  return data
+}
+
+export async function deleteDialpadVersion(id: number) {
+  const { data } = await http.post('/mer/version/delete', { id })
+  return data
+}
+
+
 

@@ -1175,3 +1175,24 @@ func (r *SkillGroupRepository) logger() *slog.Logger {
 	}
 	return slog.Default()
 }
+
+// DialpadVersionModel 桌面拨号盘客户端版本包发布记录。
+type DialpadVersionModel struct {
+	ID          int       `gorm:"primaryKey;autoIncrement;column:id"`
+	Version     string    `gorm:"column:version;type:varchar(64);not null"`
+	Platform    string    `gorm:"column:platform;type:varchar(64);not null"`
+	Arch        string    `gorm:"column:arch;type:varchar(64);not null"`
+	ForceUpdate bool      `gorm:"column:force_update;type:tinyint(1);not null;default:0"`
+	Changelog   string    `gorm:"column:changelog;type:text"`
+	FileKey     string    `gorm:"column:file_key;type:varchar(255)"`
+	FileSize    int64     `gorm:"column:file_size"`
+	DownloadURL string    `gorm:"column:download_url;type:varchar(512)"`
+	DelFlag     bool      `gorm:"column:del_flag;type:tinyint(1);not null;default:0"`
+	CreatedTime time.Time `gorm:"column:created_time;autoCreateTime"`
+}
+
+// TableName 指定对应的数据物理表名。
+func (DialpadVersionModel) TableName() string {
+	return "cc_res_dialpad_version"
+}
+

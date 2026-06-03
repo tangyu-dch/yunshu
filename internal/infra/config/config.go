@@ -75,7 +75,24 @@ type RabbitMQConfig struct {
 
 // ConsoleConfig 定义管理端调用其他内部服务的配置。
 type ConsoleConfig struct {
-	CallBaseURL string `yaml:"callBaseURL"`
+	CallBaseURL string              `yaml:"callBaseURL"`
+	Dialpad     DialpadUpdateConfig `yaml:"dialpad"`
+}
+
+// DialpadUpdateConfig 定义桌面拨号盘客户端更新配置。
+type DialpadUpdateConfig struct {
+	Version     string              `yaml:"version"`
+	ForceUpdate bool                `yaml:"forceUpdate"`
+	Changelog   string              `yaml:"changelog"`
+	RustFS      DialpadRustFSConfig `yaml:"rustfs"`
+}
+
+// DialpadRustFSConfig 定义 S3 兼容的 RustFS 存储连接信息。
+type DialpadRustFSConfig struct {
+	Endpoint  string `yaml:"endpoint"`
+	AccessKey string `yaml:"accessKey"`
+	SecretKey string `yaml:"secretKey"`
+	Bucket    string `yaml:"bucket"`
 }
 
 // WorkerConfig 定义后台 worker 流程节点配置。
@@ -183,6 +200,27 @@ func applyEnv(cfg *Config) {
 	}
 	if value := os.Getenv("CC_CALL_BASE_URL"); value != "" {
 		cfg.Console.CallBaseURL = value
+	}
+	if value := os.Getenv("DIALPAD_VERSION"); value != "" {
+		cfg.Console.Dialpad.Version = value
+	}
+	if value := os.Getenv("DIALPAD_FORCE_UPDATE"); value == "true" {
+		cfg.Console.Dialpad.ForceUpdate = true
+	}
+	if value := os.Getenv("DIALPAD_CHANGELOG"); value != "" {
+		cfg.Console.Dialpad.Changelog = value
+	}
+	if value := os.Getenv("DIALPAD_RUSTFS_ENDPOINT"); value != "" {
+		cfg.Console.Dialpad.RustFS.Endpoint = value
+	}
+	if value := os.Getenv("DIALPAD_RUSTFS_ACCESS_KEY"); value != "" {
+		cfg.Console.Dialpad.RustFS.AccessKey = value
+	}
+	if value := os.Getenv("DIALPAD_RUSTFS_SECRET_KEY"); value != "" {
+		cfg.Console.Dialpad.RustFS.SecretKey = value
+	}
+	if value := os.Getenv("DIALPAD_RUSTFS_BUCKET"); value != "" {
+		cfg.Console.Dialpad.RustFS.Bucket = value
 	}
 	if value := os.Getenv("REDIS_STREAM_ENABLED"); value == "true" {
 		cfg.Redis.Stream.Enabled = true
