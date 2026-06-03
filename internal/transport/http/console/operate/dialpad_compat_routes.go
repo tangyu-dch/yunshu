@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -749,6 +750,23 @@ func RegisterDialpadCompatRoutes(
 			return
 		}
 
+		// 验证版本号是否符合三段式语义化版本 (SemVer) 格式
+		reg := regexp.MustCompile(`^\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?$`)
+		if !reg.MatchString(version) {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "版本号格式错误，必须为标准的语义化版本号(例如 1.0.0)"))
+			return
+		}
+
+		// 检查在同一运行平台与架构下，是否已经发布过同版本号的安装包
+		var count int64
+		db.Model(&resource.DialpadVersionModel{}).
+			Where("version = ? AND platform = ? AND arch = ? AND del_flag = ?", version, platform, arch, false).
+			Count(&count)
+		if count > 0 {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, fmt.Sprintf("该运行平台及架构下的 v%s 版本已存在，请先在列表中下架原版本包后再重新发布", version)))
+			return
+		}
+
 		forceUpdate := forceUpdateStr == "true"
 
 		file, err := c.FormFile("file")
@@ -832,6 +850,24 @@ func RegisterDialpadCompatRoutes(
 		if err := c.ShouldBindJSON(&req); err != nil || req.ID <= 0 {
 			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "ID 无效"))
 			return
+		}
+
+		var record resource.DialpadVersionModel
+		if err := db.Where("id = ? AND del_flag = ?", req.ID, false).First(&record).Error; err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "找不到对应的版本发布包"))
+			return
+		}
+
+		// 实例化存储管理器进行物理包删除（垃圾回收）
+		storeCfg := storage.RustFSConfig{
+			Endpoint:  updateCfg.RustFS.Endpoint,
+			AccessKey: updateCfg.RustFS.AccessKey,
+			SecretKey: updateCfg.RustFS.SecretKey,
+			Bucket:    updateCfg.RustFS.Bucket,
+		}
+		storeDriver := storage.NewRustFSStorage(storeCfg)
+		if err := storeDriver.Delete(c.Request.Context(), record.FileKey); err != nil {
+			slog.Error("下架版本物理文件删除失败，进行软标记处理", "error", err.Error(), "fileKey", record.FileKey)
 		}
 
 		if err := db.Model(&resource.DialpadVersionModel{}).Where("id = ?", req.ID).Update("del_flag", true).Error; err != nil {

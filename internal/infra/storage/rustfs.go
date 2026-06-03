@@ -79,3 +79,43 @@ func (s *RustFSStorage) Store(ctx context.Context, filename string, reader io.Re
 	// 返回本地的相对访问路径，后端静态文件路由可对其进行映射分发
 	return "/" + targetPath, nil
 }
+
+// Delete 从对象存储或本地文件系统中删除指定的版本二进制包。
+func (s *RustFSStorage) Delete(ctx context.Context, filename string) error {
+	// 1. 如果配置了 RustFS 对象存储服务，执行云端 DELETE 操作
+	if s.cfg.Endpoint != "" {
+		url := fmt.Sprintf("%s/%s/%s", s.cfg.Endpoint, s.cfg.Bucket, filename)
+		req, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+		if err != nil {
+			return err
+		}
+
+		// 支持标准 BasicAuth 方式与 RustFS 网关准入交互
+		if s.cfg.AccessKey != "" && s.cfg.SecretKey != "" {
+			req.SetBasicAuth(s.cfg.AccessKey, s.cfg.SecretKey)
+		}
+
+		client := &http.Client{Timeout: 15 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return fmt.Errorf("直连 RustFS 删除对象失败: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusNotFound {
+			body, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("RustFS 删除返回错误状态码 %d: %s", resp.StatusCode, string(body))
+		}
+		return nil
+	}
+
+	// 2. 本地退避方案：直接删除本地的 data/updates 目录下对应的物理文件
+	localPath := filepath.Join("data", "updates", filename)
+	if _, err := os.Stat(localPath); err == nil {
+		if err := os.Remove(localPath); err != nil {
+			return fmt.Errorf("删除本地物理更新包失败: %w", err)
+		}
+	}
+	return nil
+}
+
