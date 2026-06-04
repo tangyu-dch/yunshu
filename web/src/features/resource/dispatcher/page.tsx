@@ -145,6 +145,7 @@ export function DispatcherPage() {
           { title: 'Set ID', dataIndex: 'setId' },
           { title: '优先级', dataIndex: 'priority' },
           { title: 'Flags', dataIndex: 'flags' },
+          { title: '附加参数', dataIndex: 'attrs', render: (val?: string) => val || '-' },
           { title: '状态', dataIndex: 'enable', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
           {
             title: '操作',
