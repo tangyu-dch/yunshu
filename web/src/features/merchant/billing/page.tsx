@@ -254,7 +254,7 @@ export function MerchantBillingPage() {
         onCancel={() => setBindOpen(false)}
         onOk={() => bindForm.submit()}
         confirmLoading={bindMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={bindForm}

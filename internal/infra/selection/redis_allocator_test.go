@@ -281,4 +281,3 @@ func TestRedisAllocator_GatewayAndPhoneConcurrencyStress(t *testing.T) {
 		t.Fatalf("【双重并发释放失败】: 期望再次分配到首个号码 13800000001，实际分配到: %s", newAlloc.Caller)
 	}
 }
-

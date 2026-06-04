@@ -179,7 +179,7 @@ export function PoolPhonePage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ concurrency: 1, callLimit: 0, enable: true }}>
           <Form.Item name="poolId" label="归属号码池" rules={[{ required: true, message: '请选择号码池' }]}>

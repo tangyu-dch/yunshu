@@ -241,7 +241,7 @@ export function RolePermissionPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}
@@ -286,7 +286,7 @@ export function RolePermissionPage() {
         }}
         onOk={() => savePermsMutation.mutate()}
         confirmLoading={savePermsMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="max-h-[500px] overflow-y-auto pr-2 pb-6">
           <Checkbox.Group

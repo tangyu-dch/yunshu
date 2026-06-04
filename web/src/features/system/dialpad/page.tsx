@@ -357,7 +357,7 @@ export function DialpadVersionPage() {
           }
         }}
         width={580}
-        destroyOnClose
+        destroyOnHidden
         maskClosable={false}
         footer={[
           <Button

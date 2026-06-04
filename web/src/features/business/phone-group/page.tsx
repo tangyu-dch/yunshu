@@ -167,7 +167,7 @@ export function PhoneGroupPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ merchantId, enable: true }}>
           <Form.Item name="name" label="组名称" rules={[{ required: true, message: '请输入号码组名称' }]}>
@@ -255,7 +255,7 @@ function PhoneBindingModal({ phoneGroupId, merchantId, open, onCancel }: PhoneBi
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={phonesLoading || boundLoading}
@@ -326,7 +326,7 @@ function SkillGroupBindingModal({ phoneGroupId, merchantId, open, onCancel }: Sk
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={skillGroupsLoading || boundLoading}

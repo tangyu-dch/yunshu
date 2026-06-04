@@ -196,4 +196,3 @@ func (f *fakeAuthCacheInvalidator) InvalidateAuthCache(_ context.Context) error 
 	f.calls++
 	return nil
 }
-

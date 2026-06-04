@@ -21,6 +21,7 @@ var ErrRuntimeConcurrencyExhausted = errors.New("runtime number concurrency exha
 //  1. idem: 选号占用幂等 Key (例如 cti:select:claim:callID)
 //  2. counter: 号码级别的并发计数器 Key
 //  3. gwCounter: 网关级别的全局并发计数器 Key
+//
 // ARGV:
 //  1. limit: 号码允许的最大并发上限
 //  2. gwLimit: 网关允许的最大并发上限 (如果 <= 0 则代表网关无限制)
@@ -28,11 +29,11 @@ var ErrRuntimeConcurrencyExhausted = errors.New("runtime number concurrency exha
 //  4. val: 幂等 Key 对应存储的特征数据 (如 "Phone|GatewayID")
 //
 // 业务逻辑：
-//  - 首先进行幂等性自检，若该 CallID 已经成功占用，则直接返回成功。
-//  - 其次检查号码本身的并发计数器是否超限；
-//  - 若 `gwLimit > 0`，则检查网关全局的并发计数器是否超限；
-//  - 若两者均未超额，则执行原子累加 (INCR)，并为其设置 TTL 过期时间作为高频话务防死占的租约保护；
-//  - 一旦触发超限拦截，原子的返回拦截标识，不产生脏扣减。
+//   - 首先进行幂等性自检，若该 CallID 已经成功占用，则直接返回成功。
+//   - 其次检查号码本身的并发计数器是否超限；
+//   - 若 `gwLimit > 0`，则检查网关全局的并发计数器是否超限；
+//   - 若两者均未超额，则执行原子累加 (INCR)，并为其设置 TTL 过期时间作为高频话务防死占的租约保护；
+//   - 一旦触发超限拦截，原子的返回拦截标识，不产生脏扣减。
 const claimScript = `
 local idem = KEYS[1]
 local counter = KEYS[2]
@@ -88,9 +89,9 @@ return {1, val}
 //  3. gwCounter: 网关级别的全局并发计数器 Key
 //
 // 业务逻辑：
-//  - 检查幂等 Key 是否存在，若不存在，说明已被释放或从未占用过，直接幂等退出。
-//  - 删除幂等 Key；
-//  - 对号码计数器和网关计数器分别执行递减 (DECR) 操作，确保数据安全归零回落，且决不产生负数溢出。
+//   - 检查幂等 Key 是否存在，若不存在，说明已被释放或从未占用过，直接幂等退出。
+//   - 删除幂等 Key；
+//   - 对号码计数器和网关计数器分别执行递减 (DECR) 操作，确保数据安全归零回落，且决不产生负数溢出。
 const releaseScript = `
 local idem = KEYS[1]
 local counter = KEYS[2]

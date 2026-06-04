@@ -329,6 +329,9 @@ func defaultConsolePermissions() []ConsolePermissionModel {
 		{Code: string(contracts.PermissionMerchantPhoneGroupRead), Name: "号码组查看", Module: "merchant", Description: "号码组列表和详情", Enable: true},
 		{Code: string(contracts.PermissionMerchantPhoneGroupWrite), Name: "号码组编辑", Module: "merchant", Description: "号码组新增、更新和关联操作", Enable: true},
 		{Code: string(contracts.PermissionMerchantPhoneGroupDelete), Name: "号码组删除", Module: "merchant", Description: "号码组删除", Enable: true},
+		{Code: string(contracts.PermissionMerchantDepartmentRead), Name: "部门查看", Module: "merchant", Description: "部门列表和详情", Enable: true},
+		{Code: string(contracts.PermissionMerchantDepartmentWrite), Name: "部门编辑", Module: "merchant", Description: "部门新增和更新", Enable: true},
+		{Code: string(contracts.PermissionMerchantDepartmentDelete), Name: "部门删除", Module: "merchant", Description: "部门删除", Enable: true},
 
 		{Code: string(contracts.PermissionOperateRoleRead), Name: "角色权限查看", Module: "operate", Description: "管理端角色列表和权限配置查看", Enable: true},
 		{Code: string(contracts.PermissionOperateRoleWrite), Name: "角色权限编辑", Module: "operate", Description: "管理端角色和权限配置修改", Enable: true},
@@ -413,6 +416,9 @@ func defaultMerchantAdminPermissions() []string {
 		string(contracts.PermissionMerchantPhoneGroupRead),
 		string(contracts.PermissionMerchantPhoneGroupWrite),
 		string(contracts.PermissionMerchantPhoneGroupDelete),
+		string(contracts.PermissionMerchantDepartmentRead),
+		string(contracts.PermissionMerchantDepartmentWrite),
+		string(contracts.PermissionMerchantDepartmentDelete),
 
 		string(contracts.PermissionMerchantBillingWrite),
 	}
@@ -426,6 +432,7 @@ func defaultMerchantUserPermissions() []string {
 		string(contracts.PermissionMerchantAIFlowRead),
 		string(contracts.PermissionMerchantSkillGroupRead),
 		string(contracts.PermissionMerchantPhoneGroupRead),
+		string(contracts.PermissionMerchantDepartmentRead),
 	}
 }
 

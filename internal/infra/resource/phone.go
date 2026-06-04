@@ -127,8 +127,8 @@ SELECT
 	gw.broadcast_time,
 	gw.broadcast_time_flag,
 	CONCAT(gw.realm, ':', gw.port) AS gateway_region
-FROM gateway gw
-INNER JOIN pool p ON gw.id = p.gateway_id AND p.enable = 1 AND p.del_flag = 0
+FROM cc_tel_gateway gw
+INNER JOIN cc_tel_pool p ON gw.id = p.gateway_id AND p.enable = 1 AND p.del_flag = 0
 INNER JOIN cc_res_pool_phone pp ON p.id = pp.pool_id AND pp.enable = 1 AND pp.del_flag = 0
 INNER JOIN cc_res_pool_phone_skill_group ppsg ON ppsg.pool_phone_id = pp.id
 INNER JOIN cc_res_skill_group sg ON sg.id = ppsg.skill_group_id AND sg.enable = 1 AND sg.del_flag = 0

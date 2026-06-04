@@ -77,6 +77,7 @@ func (ChannelModel) TableName() string {
 // PoolModel 映射  `pool` 表中网关绑定所需字段。
 type PoolModel struct {
 	ID                int       `gorm:"column:id;primaryKey"`
+	MerchantID        int       `gorm:"column:merchant_id"`
 	Name              string    `gorm:"column:name"`
 	Remark            string    `gorm:"column:remark"`
 	Type              int       `gorm:"column:type"`

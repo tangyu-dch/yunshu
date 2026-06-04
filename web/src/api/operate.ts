@@ -37,6 +37,7 @@ type MerchantResp = {
 
 type PoolResp = {
   id: number
+  merchantId?: number
   name?: string
   remark?: string
   type?: number
@@ -206,14 +207,15 @@ export async function fetchMerchants(pageNumber = 1, pageSize = 20) {
   }
 }
 
-export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name?: string; gatewayId?: number; enable?: boolean }) {
+export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name?: string; gatewayId?: number; enable?: boolean; merchantId?: number }) {
   const { data } = await http.get<PageResult<PoolResp>>('/operate/pool', {
-    params: { pageNumber, pageSize, name: filters?.name || undefined, gatewayId: filters?.gatewayId || undefined, enable: filters?.enable },
+    params: { pageNumber, pageSize, name: filters?.name || undefined, gatewayId: filters?.gatewayId || undefined, enable: filters?.enable, merchantId: filters?.merchantId || undefined },
   })
   return {
     ...data,
     records: data.records.map<PoolItem>((item) => ({
       id: item.id,
+      merchantId: item.merchantId,
       name: item.name || `号码池 ${item.id}`,
       remark: item.remark || '-',
       gateway: item.gatewayId ? `网关 ${item.gatewayId}` : '未绑定',
@@ -228,6 +230,26 @@ export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name
 
 export async function fetchPoolPhones(pageNumber = 1, pageSize = 20) {
   const { data } = await http.get<PageResult<PoolPhoneResp>>('/operate/pool-phone', {
+    params: { pageNumber, pageSize },
+  })
+  return {
+    ...data,
+    records: data.records.map<PoolPhoneItem>((item) => ({
+      id: item.id,
+      phone: item.phone || '-',
+      pool: item.poolId ? `号码池 ${item.poolId}` : '未分配',
+      poolId: item.poolId ?? 0,
+      province: item.province || '-',
+      city: item.city || '-',
+      concurrency: item.concurrency ?? 0,
+      callLimit: item.callLimit ?? 0,
+      enable: Boolean(item.enable),
+    })),
+  }
+}
+
+export async function fetchMerchantPoolPhones(pageNumber = 1, pageSize = 1000) {
+  const { data } = await http.get<PageResult<PoolPhoneResp>>('/merchant/pool-phone', {
     params: { pageNumber, pageSize },
   })
   return {
@@ -331,7 +353,7 @@ export async function deleteDispatchers(ids: number[]) {
   return data
 }
 
-export async function savePool(payload: { id?: number; name: string; remark?: string; type: number; gatewayId?: number; enable: boolean; selectionStrategy?: string }) {
+export async function savePool(payload: { id?: number; merchantId?: number; name: string; remark?: string; type: number; gatewayId?: number; enable: boolean; selectionStrategy?: string }) {
   const path = payload.id ? '/operate/pool/update' : '/operate/pool/add'
   const { data } = await http.request({
     method: payload.id ? 'POST' : 'PUT',
@@ -460,6 +482,11 @@ export async function fetchBatchTasks(pageNumber = 1, pageSize = 50) {
         unconnectedInterval: (item as any).unconnectedInterval,
         callTimePeriod: (item as any).callTimePeriod,
         aiFlag: (item as any).aiFlag,
+        skillGroupId: (item as any).skillGroupId,
+        departmentId: (item as any).departmentId,
+        callMode: (item as any).callMode,
+        callRatio: (item as any).callRatio,
+        queueEnable: (item as any).queueEnable,
       }
     }),
   }
@@ -1066,6 +1093,17 @@ export async function importBatchTaskTels(id: number, merchantId: number, userId
   return data
 }
 
+export async function importBatchTaskFile(id: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await http.post(`/merchant/batch-call-task/import/file/${id}`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+  return data
+}
+
 export async function fetchBatchTaskDetails(id: number) {
   const { data } = await http.get<any[]>(`/merchant/batch-call-task/details/${id}`)
   return data
@@ -1317,6 +1355,60 @@ export async function deleteDialpadVersion(id: number) {
   const { data } = await http.post('/mer/version/delete', { id })
   return data
 }
+
+// ----------------------------------------------------
+// 部门管理 API 接口
+// ----------------------------------------------------
+
+export interface Department {
+  id?: number
+  merchantId: number
+  name: string
+  description?: string
+  enable: boolean
+}
+
+export interface DepartmentPageRequest {
+  pageNumber: number
+  pageSize: number
+  name?: string
+  merchantId?: number
+  enable?: boolean
+}
+
+export interface DepartmentPageResult {
+  pageNumber: number
+  pageSize: number
+  total: number
+  records: Department[]
+}
+
+export async function fetchDepartments(pageNumber: number, pageSize: number, query?: { name?: string, merchantId?: number, enable?: boolean }) {
+  const { data } = await http.post<DepartmentPageResult>('/merchant/department/page', {
+    pageNumber,
+    pageSize,
+    ...query
+  })
+  return data
+}
+
+export async function fetchDepartmentsList(merchantId?: number) {
+  const { data } = await http.get<Department[]>('/merchant/department/list', {
+    params: { merchantId }
+  })
+  return data
+}
+
+export async function saveDepartment(payload: Department) {
+  const { data } = await http.post<Department>('/merchant/department/save', payload)
+  return data
+}
+
+export async function deleteDepartments(ids: number[]) {
+  const { data } = await http.post('/merchant/department/delete', ids.map(id => ({ id })))
+  return data
+}
+
 
 
 

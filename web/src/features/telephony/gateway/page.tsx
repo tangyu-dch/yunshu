@@ -332,7 +332,7 @@ export function GatewayPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
         width={720}
       >
         <Form

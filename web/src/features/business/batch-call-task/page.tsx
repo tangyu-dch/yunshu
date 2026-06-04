@@ -16,7 +16,9 @@ import {
   Row,
   Col,
   Progress,
-  Card
+  Card,
+  Select,
+  Radio
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
@@ -30,7 +32,9 @@ import {
   deleteBatchTasks,
   toggleBatchTaskEnable,
   importBatchTaskTels,
-  fetchBatchTaskDetails
+  fetchBatchTaskDetails,
+  fetchDepartmentsList,
+  fetchSkillGroups
 } from '@/api/operate'
 import {
   ReloadOutlined,
@@ -54,6 +58,11 @@ type BatchTaskFormValues = {
   callTimePeriod?: string
   aiFlag: boolean
   enable: boolean
+  skillGroupId?: number
+  departmentId?: number
+  callMode: number
+  callRatio?: number
+  queueEnable?: boolean
 }
 
 export function BatchTaskPage() {
@@ -81,6 +90,18 @@ export function BatchTaskPage() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['merchant', 'batch-task', pageNumber, pageSize, merchantId],
     queryFn: () => fetchBatchTasks(pageNumber, pageSize),
+  })
+
+  // Fetch department list for dropdown
+  const { data: deptsData } = useQuery({
+    queryKey: ['merchant', 'department', 'list', merchantId],
+    queryFn: () => fetchDepartmentsList(merchantId),
+  })
+
+  // Fetch skill groups list for dropdown
+  const { data: skillGroupsData } = useQuery({
+    queryKey: ['merchant', 'skill-group', 'list', merchantId],
+    queryFn: () => fetchSkillGroups(1, 1000),
   })
 
   const queryFields = useMemo(() => [
@@ -127,6 +148,11 @@ export function BatchTaskPage() {
         callTimePeriod: values.callTimePeriod || '09:00-12:00,14:00-18:00',
         aiFlag: Boolean(values.aiFlag),
         enable: Boolean(values.enable),
+        skillGroupId: values.skillGroupId || undefined,
+        departmentId: values.departmentId || undefined,
+        callMode: values.callMode ?? 1,
+        callRatio: values.callMode === 1 ? (values.callRatio ?? 1.5) : undefined,
+        queueEnable: values.callMode === 1 ? Boolean(values.queueEnable) : undefined,
       }),
     onSuccess: async () => {
       message.success(editingId ? '外呼任务已更新' : '外呼任务已创建')
@@ -187,6 +213,9 @@ export function BatchTaskPage() {
         callTimePeriod: '09:00-12:00,14:00-18:00',
         aiFlag: false,
         enable: true,
+        callMode: 1,
+        callRatio: 1.5,
+        queueEnable: true,
       })
     }, 0)
   }
@@ -203,6 +232,11 @@ export function BatchTaskPage() {
         callTimePeriod: record?.callTimePeriod ?? '09:00-12:00,14:00-18:00',
         aiFlag: record?.aiFlag ?? false,
         enable: record?.status === 'running',
+        skillGroupId: record?.skillGroupId,
+        departmentId: record?.departmentId,
+        callMode: record?.callMode ?? 1,
+        callRatio: record?.callRatio ?? 1.5,
+        queueEnable: record?.queueEnable !== false,
       })
     }, 0)
   }
@@ -418,7 +452,7 @@ export function BatchTaskPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
@@ -429,6 +463,92 @@ export function BatchTaskPage() {
               className="col-span-1 md:col-span-2"
             >
               <Input placeholder="例如: 优质客户回访任务" />
+            </Form.Item>
+
+            <Form.Item
+              name="departmentId"
+              label="所属部门"
+            >
+              <Select
+                placeholder="请选择所属部门"
+                allowClear
+                options={deptsData?.map(d => ({ label: d.name, value: d.id }))}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="skillGroupId"
+              label="分配技能组"
+            >
+              <Select
+                placeholder="请选择分配技能组"
+                allowClear
+                options={skillGroupsData?.records?.map(s => ({ label: s.name, value: s.id }))}
+              />
+            </Form.Item>
+
+            <Form.Item
+              name="callMode"
+              label="呼叫模式"
+              rules={[{ required: true, message: '请选择呼叫模式' }]}
+              className="col-span-1 md:col-span-2"
+            >
+              <Radio.Group>
+                <Radio value={1}>预测模式 (接听后分配坐席)</Radio>
+                <Radio value={2}>协同模式 (振铃即分配坐席并补振铃)</Radio>
+              </Radio.Group>
+            </Form.Item>
+
+            <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => prevValues.callMode !== currentValues.callMode}>
+              {({ getFieldValue }) => {
+                const callMode = getFieldValue('callMode')
+                if (callMode === 1) {
+                  return (
+                    <>
+                      <Form.Item
+                        name="callRatio"
+                        label="呼叫比例 (1:N)"
+                        rules={[{ required: true, message: '请选择呼叫比例' }]}
+                      >
+                        <Select
+                          options={[
+                            { value: 1.0, label: '1:1.0 (保守)' },
+                            { value: 1.2, label: '1:1.2' },
+                            { value: 1.5, label: '1:1.5' },
+                            { value: 2.0, label: '1:2.0' },
+                            { value: 2.5, label: '1:2.5' },
+                            { value: 3.0, label: '1:3.0 (进取)' },
+                          ]}
+                          dropdownRender={(menu) => (
+                            <>
+                              {menu}
+                              <div style={{ padding: '8px', borderTop: '1px solid #e8e8e8' }}>
+                                <InputNumber
+                                  min={0.5}
+                                  max={10}
+                                  step={0.1}
+                                  style={{ width: '100%' }}
+                                  placeholder="自定义比例"
+                                  value={form.getFieldValue('callRatio')}
+                                  onChange={(val) => form.setFieldsValue({ callRatio: val || 1.5 })}
+                                />
+                              </div>
+                            </>
+                          )}
+                        />
+                      </Form.Item>
+                      <Form.Item
+                        name="queueEnable"
+                        label="无空闲坐席时排队"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="排队播放等待音" unCheckedChildren="立即挂断" />
+                      </Form.Item>
+                    </>
+                  )
+                }
+                return null
+              }}
             </Form.Item>
 
             <Form.Item
@@ -477,7 +597,7 @@ export function BatchTaskPage() {
         }}
         onOk={() => importForm.submit()}
         confirmLoading={importTelsMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={importForm} layout="vertical" onFinish={(values) => importTelsMutation.mutate(values)}>
           <Form.Item
@@ -498,7 +618,7 @@ export function BatchTaskPage() {
         width={850}
         onClose={() => setDetailTaskId(null)}
         open={!!detailTaskId}
-        destroyOnClose
+        destroyOnHidden
       >
         {detailsLoading ? (
           <div className="py-20 text-center text-slate-500">正在读取拨打明细...</div>

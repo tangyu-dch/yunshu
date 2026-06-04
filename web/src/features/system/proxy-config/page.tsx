@@ -270,7 +270,7 @@ export function ProxyConfigPage() {
         title="配置 Kamailio 信令代理核心参数"
         onCancel={() => setOpenEditModal(false)}
         width={650}
-        destroyOnClose
+        destroyOnHidden
         footer={[
           <Button key="cancel" onClick={() => setOpenEditModal(false)}>
             取消

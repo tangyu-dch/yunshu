@@ -37,7 +37,13 @@ func NewHTTPClient(url, secret string, timeout time.Duration, logger *slog.Logge
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &HTTPClient{URL: url, Secret: secret, Timeout: timeout, Logger: logger}
+	return &HTTPClient{
+		URL:        url,
+		Secret:     secret,
+		Timeout:    timeout,
+		HTTPClient: &http.Client{Timeout: timeout},
+		Logger:     logger,
+	}
 }
 
 // Deliver 投递单条 outbox 回调记录。

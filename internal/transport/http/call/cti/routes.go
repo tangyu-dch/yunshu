@@ -158,6 +158,44 @@ func RegisterRoutes(
 	})
 
 	r.GET("/cti/select/number/rule/release", func(c *gin.Context) {
+		callID := c.Query("callId")
+		if callID == "" {
+			callID = c.Query("callID")
+		}
+		merchantID := c.Query("merchantId")
+		if merchantID == "" {
+			merchantID = c.Query("merchantID")
+		}
+		caller := c.Query("caller")
+		gatewayID := c.Query("gatewayId")
+		if gatewayID == "" {
+			gatewayID = c.Query("gatewayID")
+		}
+		claimKey := c.Query("claimKey")
+
+		if callID == "" || caller == "" || gatewayID == "" {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "缺失必填释放参数 (callId, caller, gatewayId)"))
+			return
+		}
+
+		if runtimeSelector == nil || runtimeSelector.Allocator == nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "运行时选号分配器未配置"))
+			return
+		}
+
+		alloc := cti.RuntimeAllocation{
+			CallID:     callID,
+			MerchantID: merchantID,
+			Caller:     caller,
+			GatewayID:  gatewayID,
+			ClaimKey:   claimKey,
+		}
+
+		if err := runtimeSelector.Allocator.Release(c.Request.Context(), alloc); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "并发槽位原子释放失败: "+err.Error()))
+			return
+		}
+
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 

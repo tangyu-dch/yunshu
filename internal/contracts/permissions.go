@@ -78,6 +78,9 @@ const (
 	PermissionMerchantPhoneGroupRead   PermissionCode = "merchant:phone-group:read"
 	PermissionMerchantPhoneGroupWrite  PermissionCode = "merchant:phone-group:write"
 	PermissionMerchantPhoneGroupDelete PermissionCode = "merchant:phone-group:delete"
+	PermissionMerchantDepartmentRead   PermissionCode = "merchant:department:read"
+	PermissionMerchantDepartmentWrite  PermissionCode = "merchant:department:write"
+	PermissionMerchantDepartmentDelete PermissionCode = "merchant:department:delete"
 
 	PermissionOperateRoleRead      PermissionCode = "operate:role:read"
 	PermissionOperateRoleWrite     PermissionCode = "operate:role:write"
@@ -219,6 +222,8 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/batch-call-task/add", Method: "PUT", Permission: PermissionMerchantBatchTaskWrite},
 	{Prefix: "/merchant/batch-call-task/update", Method: "POST", Permission: PermissionMerchantBatchTaskWrite},
 	{Prefix: "/merchant/batch-call-task", Method: "GET", Permission: PermissionMerchantBatchTaskRead},
+	{Prefix: "/merchant/batch-call-task/import/file/", Method: "POST", Permission: PermissionMerchantBatchTaskWrite},
+	{Prefix: "/merchant/batch-call-task/import/template", Method: "GET", Permission: PermissionMerchantBatchTaskRead},
 	{Prefix: "/merchant/batch-call-dialpad/detail/", Method: "GET", Permission: PermissionMerchantDialpadRead},
 	{Prefix: "/merchant/batch-call-dialpad/start/", Method: "POST", Permission: PermissionMerchantDialpadControl},
 	{Prefix: "/merchant/batch-call-dialpad/pause/", Method: "POST", Permission: PermissionMerchantDialpadControl},
@@ -265,6 +270,11 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/skill-group/add", Method: "PUT", Permission: PermissionMerchantSkillGroupWrite},
 	{Prefix: "/merchant/skill-group/update", Method: "POST", Permission: PermissionMerchantSkillGroupWrite},
 	{Prefix: "/merchant/skill-group", Method: "GET", Permission: PermissionMerchantSkillGroupRead},
+
+	{Prefix: "/merchant/department/page", Method: "POST", Permission: PermissionMerchantDepartmentRead},
+	{Prefix: "/merchant/department/list", Method: "GET", Permission: PermissionMerchantDepartmentRead},
+	{Prefix: "/merchant/department/save", Method: "POST", Permission: PermissionMerchantDepartmentWrite},
+	{Prefix: "/merchant/department/delete", Method: "POST", Permission: PermissionMerchantDepartmentDelete},
 }
 
 // RequiredPermissionForRequest 根据请求路径和方法返回需要的功能权限。

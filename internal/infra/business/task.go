@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"yunshu/internal/domain/cti"
+	"yunshu/internal/domain/esl"
 	operatedomain "yunshu/internal/domain/operate"
 
 	"gorm.io/gorm"
@@ -42,6 +43,11 @@ type MerchantBatchCallTaskModel struct {
 	PausedReason        string     `gorm:"column:paused_reason"`
 	Enable              bool       `gorm:"column:enable"`
 	DelFlag             bool       `gorm:"column:del_flag"`
+	SkillGroupID        int        `gorm:"column:skill_group_id"`
+	DepartmentID        int        `gorm:"column:department_id"`
+	CallMode            int        `gorm:"column:call_mode"`
+	CallRatio           float64    `gorm:"column:call_ratio"`
+	QueueEnable         bool       `gorm:"column:queue_enable"`
 	CreatedTime         time.Time  `gorm:"column:created_time"`
 	UpdatedTime         time.Time  `gorm:"column:updated_time"`
 }
@@ -77,13 +83,14 @@ func (MerchantBatchCallTaskListModel) TableName() string {
 
 // BatchRepository 读取批量外呼任务和号码清单。
 type BatchRepository struct {
-	DB     *gorm.DB
-	Logger *slog.Logger
+	DB       *gorm.DB
+	Statuses esl.ExtensionStatusReader
+	Logger   *slog.Logger
 }
 
 // NewBatchRepository 创建批量任务仓储。
-func NewBatchRepository(db *gorm.DB, logger *slog.Logger) *BatchRepository {
-	return &BatchRepository{DB: db, Logger: logger}
+func NewBatchRepository(db *gorm.DB, statuses esl.ExtensionStatusReader, logger *slog.Logger) *BatchRepository {
+	return &BatchRepository{DB: db, Statuses: statuses, Logger: logger}
 }
 
 // GetRunnableTask 读取可运行的批量任务。
@@ -149,6 +156,48 @@ func (r *BatchRepository) ClaimNextPendingTel(ctx context.Context, taskID int, n
 	return claimed, nil
 }
 
+// GetIdleAgentFromSkillGroup 从技能组关联的坐席中寻找一个在线且空闲（ExtensionStatusIdle）的坐席，用于呼叫分配。
+func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error) {
+	r.logger().Info("开始在技能组中查找空闲坐席", "skillGroupId", skillGroupID)
+	var agents []struct {
+		UserID          int    `gorm:"column:user_id"`
+		ExtensionNumber string `gorm:"column:extension_number"`
+	}
+	err := r.DB.WithContext(ctx).
+		Table("cc_res_user_skill_group usg").
+		Select("ext.user_id, ext.extension_number").
+		Joins("INNER JOIN cc_res_extension ext ON usg.user_id = ext.user_id").
+		Where("usg.skill_group_id = ? AND ext.enable = ? AND ext.del_flag = ?", skillGroupID, true, false).
+		Order("ext.id ASC").
+		Find(&agents).Error
+	if err != nil {
+		r.logger().Error("在技能组中联查坐席分机失败", "skillGroupId", skillGroupID, "error", err.Error())
+		return 0, "", err
+	}
+	if len(agents) == 0 {
+		r.logger().Warn("该技能组下没有绑定任何可用的分机坐席", "skillGroupId", skillGroupID)
+		return 0, "", nil
+	}
+
+	for _, agent := range agents {
+		if r.Statuses == nil {
+			r.logger().Warn("未注入 Statuses (ExtensionStatusReader)，跳过 Redis 状态检查", "extension", agent.ExtensionNumber)
+			continue
+		}
+		status, ok, err := r.Statuses.GetExtensionStatus(ctx, agent.ExtensionNumber)
+		if err != nil {
+			r.logger().Warn("读取分机 Redis 状态失败", "extension", agent.ExtensionNumber, "error", err.Error())
+			continue
+		}
+		if ok && status == esl.ExtensionStatusIdle {
+			r.logger().Info("找到空闲坐席", "skillGroupId", skillGroupID, "userId", agent.UserID, "extension", agent.ExtensionNumber)
+			return agent.UserID, agent.ExtensionNumber, nil
+		}
+	}
+	r.logger().Warn("技能组内所有在线坐席均处于忙碌或离线状态", "skillGroupId", skillGroupID)
+	return 0, "", nil
+}
+
 // GetRunnableBatchTask 返回批量调度领域需要的任务快照。
 func (r *BatchRepository) GetRunnableBatchTask(ctx context.Context, taskID int) (cti.BatchTaskSnapshot, error) {
 	task, err := r.GetRunnableTask(ctx, taskID)
@@ -156,12 +205,17 @@ func (r *BatchRepository) GetRunnableBatchTask(ctx context.Context, taskID int) 
 		return cti.BatchTaskSnapshot{}, err
 	}
 	return cti.BatchTaskSnapshot{
-		ID:         task.ID,
-		MerchantID: task.MerchantID,
-		UserID:     task.UserID,
-		State:      task.State,
-		AIFlag:     task.AIFlag,
-		Extra:      task.Extra,
+		ID:           task.ID,
+		MerchantID:   task.MerchantID,
+		UserID:       task.UserID,
+		State:        task.State,
+		AIFlag:       task.AIFlag,
+		Extra:        task.Extra,
+		SkillGroupID: task.SkillGroupID,
+		DepartmentID: task.DepartmentID,
+		CallMode:     task.CallMode,
+		CallRatio:    task.CallRatio,
+		QueueEnable:  task.QueueEnable,
 	}, nil
 }
 
@@ -395,6 +449,68 @@ func (r *BatchRepository) GetDetails(ctx context.Context, taskID int) ([]operate
 		})
 	}
 	return details, nil
+}
+
+// GetOnlineAgents 返回技能组内在线的坐席用户 ID 列表（状态非 -1 离线）。
+func (r *BatchRepository) GetOnlineAgents(ctx context.Context, skillGroupID int) ([]int, error) {
+	var agents []struct {
+		UserID          int    `gorm:"column:user_id"`
+		ExtensionNumber string `gorm:"column:extension_number"`
+	}
+	err := r.DB.WithContext(ctx).
+		Table("cc_res_user_skill_group usg").
+		Select("ext.user_id, ext.extension_number").
+		Joins("INNER JOIN cc_res_extension ext ON usg.user_id = ext.user_id").
+		Where("usg.skill_group_id = ? AND ext.enable = ? AND ext.del_flag = ?", skillGroupID, true, false).
+		Order("ext.id ASC").
+		Find(&agents).Error
+	if err != nil {
+		r.logger().Error("联查技能组坐席分机失败", "skillGroupId", skillGroupID, "error", err.Error())
+		return nil, err
+	}
+	var onlineUserIDs []int
+	for _, agent := range agents {
+		if r.Statuses == nil {
+			onlineUserIDs = append(onlineUserIDs, agent.UserID)
+			continue
+		}
+		status, ok, err := r.Statuses.GetExtensionStatus(ctx, agent.ExtensionNumber)
+		if err != nil {
+			r.logger().Warn("读取分机 Redis 状态失败", "extension", agent.ExtensionNumber, "error", err.Error())
+			continue
+		}
+		if ok && status != esl.ExtensionStatusOffline {
+			onlineUserIDs = append(onlineUserIDs, agent.UserID)
+		}
+	}
+	return onlineUserIDs, nil
+}
+
+// GetActiveCallCount 返回指定批量任务当前起呼/呼叫中的号码数量。
+func (r *BatchRepository) GetActiveCallCount(ctx context.Context, taskID int) (int, error) {
+	var count int64
+	err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskListModel{}).
+		Where("task_id = ? AND call_status = ? AND del_flag = ?", taskID, BatchTelCalling, false).
+		Count(&count).Error
+	if err != nil {
+		r.logger().Error("查询批量任务活动呼叫数失败", "taskId", taskID, "error", err.Error())
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// GetAgentSkillGroups 返回指定坐席所绑定的所有启用技能组 ID 列表。
+func (r *BatchRepository) GetAgentSkillGroups(ctx context.Context, userID int) ([]int, error) {
+	var skillGroupIDs []int
+	err := r.DB.WithContext(ctx).
+		Table("cc_res_user_skill_group").
+		Where("user_id = ?", userID).
+		Pluck("skill_group_id", &skillGroupIDs).Error
+	if err != nil {
+		r.logger().Error("查询坐席关联技能组失败", "userId", userID, "error", err.Error())
+		return nil, err
+	}
+	return skillGroupIDs, nil
 }
 
 func (r *BatchRepository) logger() *slog.Logger {

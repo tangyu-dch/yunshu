@@ -104,7 +104,6 @@ func (s *ExtensionManagementService) Page(ctx context.Context, req ExtensionPage
 	return page, nil
 }
 
-
 func (s *ExtensionManagementService) Save(ctx context.Context, extension Extension) (Extension, error) {
 	logger := s.logger()
 	normalized, err := normalizeExtensionForSave(extension)

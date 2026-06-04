@@ -19,10 +19,11 @@ var (
 // Pool 表示  兼容 `pool` 表中的号码池配置。
 type Pool struct {
 	ID                int    `json:"id,omitempty"`
+	MerchantID        int    `json:"merchantId,omitempty"`
 	Name              string `json:"name"`
 	Remark            string `json:"remark,omitempty"`
 	Type              int    `json:"type"`
-	GatewayID         int    `json:"gatewayId,omitempty"`
+	GatewayID         int    `gorm:"column:gateway_id" json:"gatewayId,omitempty"`
 	Enable            bool   `json:"enable"`
 	SelectionStrategy string `json:"selectionStrategy,omitempty"`
 }
@@ -32,6 +33,7 @@ type PoolPageRequest struct {
 	PageSize   int    `json:"pageSize"`
 	Name       string `json:"name,omitempty"`
 	GatewayID  int    `json:"gatewayId,omitempty"`
+	MerchantID int    `json:"merchantId,omitempty"`
 	Enable     *bool  `json:"enable,omitempty"`
 }
 

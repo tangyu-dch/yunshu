@@ -10,7 +10,7 @@ import {
   fetchSkillGroups,
   saveSkillGroup,
   fetchMerchantAccounts,
-  fetchPoolPhones,
+  fetchMerchantPoolPhones,
   fetchSkillGroupUsers,
   saveSkillGroupUsers,
   fetchSkillGroupPhones,
@@ -179,7 +179,7 @@ export function SkillGroupPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ enable: true }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
@@ -263,7 +263,7 @@ function UserBindingModal({ skillGroupId, open, onCancel }: UserBindingModalProp
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={accountsLoading || boundLoading}
@@ -296,8 +296,8 @@ function PhoneBindingModal({ skillGroupId, open, onCancel }: PhoneBindingModalPr
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   const { data: phonesData, isLoading: phonesLoading } = useQuery({
-    queryKey: ['operate', 'pool-phone', 'list'],
-    queryFn: () => fetchPoolPhones(1, 1000),
+    queryKey: ['merchant', 'pool-phone', 'list'],
+    queryFn: () => fetchMerchantPoolPhones(1, 1000),
     enabled: open && !!skillGroupId,
   })
 
@@ -332,7 +332,7 @@ function PhoneBindingModal({ skillGroupId, open, onCancel }: PhoneBindingModalPr
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={phonesLoading || boundLoading}

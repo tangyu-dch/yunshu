@@ -185,8 +185,8 @@ func versionCheckMiddleware(db *gorm.DB) gin.HandlerFunc {
 			for _, v := range versions {
 				// 如果该强更版本大于客户端当前版本，则执行拦截
 				if isNewerVersionGo(v.Version, clientVersion) {
-					slog.Warn("云枢客户端版本过低且存在更高的强制更新版本", 
-						"clientVersion", clientVersion, 
+					slog.Warn("云枢客户端版本过低且存在更高的强制更新版本",
+						"clientVersion", clientVersion,
 						"requiredVersion", v.Version)
 					c.JSON(http.StatusUpgradeRequired, contracts.Fail(426, "云枢客户端当前版本过低，请更新至最新版本以继续使用"))
 					c.Abort()

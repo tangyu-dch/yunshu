@@ -33,6 +33,7 @@ type PoolPhonePageRequest struct {
 	PageNumber int    `json:"pageNumber"`
 	PageSize   int    `json:"pageSize"`
 	PoolID     int    `json:"poolId,omitempty"`
+	PoolIDs    []int  `json:"poolIds,omitempty"`
 	Phone      string `json:"phone,omitempty"`
 	Enable     *bool  `json:"enable,omitempty"`
 }

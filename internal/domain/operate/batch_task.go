@@ -34,16 +34,23 @@ type BatchTask struct {
 	Extra               string     `json:"extra,omitempty"`
 	PausedReason        string     `json:"pausedReason,omitempty"`
 	Enable              bool       `json:"enable"`
+	SkillGroupID        int        `json:"skillGroupId,omitempty"`
+	DepartmentID        int        `json:"departmentId,omitempty"`
+	CallMode            int        `json:"callMode,omitempty"`
+	CallRatio           float64    `json:"callRatio"`
+	QueueEnable         bool       `json:"queueEnable"`
 }
 
 // BatchTaskPageRequest 表示批量任务分页查询条件。
 type BatchTaskPageRequest struct {
-	PageNumber int    `json:"pageNumber"`
-	PageSize   int    `json:"pageSize"`
-	Name       string `json:"name,omitempty"`
-	MerchantID int    `json:"merchantId,omitempty"`
-	UserID     int    `json:"userId,omitempty"`
-	Enable     *bool  `json:"enable,omitempty"`
+	PageNumber   int    `json:"pageNumber"`
+	PageSize     int    `json:"pageSize"`
+	Name         string `json:"name,omitempty"`
+	MerchantID   int    `json:"merchantId,omitempty"`
+	UserID       int    `json:"userId,omitempty"`
+	Enable       *bool  `json:"enable,omitempty"`
+	SkillGroupID int    `json:"skillGroupId,omitempty"`
+	DepartmentID int    `json:"departmentId,omitempty"`
 }
 
 // BatchTaskPageResult 表示批量任务分页结果。

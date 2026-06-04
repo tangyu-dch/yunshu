@@ -5,8 +5,7 @@ import { AdminLayout } from '@/layout/AdminLayout'
 import { useAuthStore, generateIntegritySignature } from '@/store/auth'
 import { AiModelFlowPage } from '@/features/business/ai-model-flow/page'
 import { AiModelFlowDesigner } from '@/features/business/ai-model-flow/designer'
-import { BatchDialpadPage } from '@/features/business/batch-call-dialpad/page'
-import { WebRtcDialpadPage } from '@/features/business/webrtc-dialpad/page'
+import { DepartmentPage } from '@/features/system/department/page'
 import { BatchTaskPage } from '@/features/business/batch-call-task/page'
 import { CallRecordPage } from '@/features/business/call-record/page'
 import { DashboardPage } from '@/features/dashboard/page'
@@ -146,8 +145,7 @@ export const router = createBrowserRouter([
 
       { path: 'operate/api-doc', element: <RequirePermission permission="operate:account:read"><OperatorApiDocPage /></RequirePermission> },
       { path: 'merchant/batch-call-task', element: <RequirePermission permission="merchant:batch-task:read"><BatchTaskPage /></RequirePermission> },
-      { path: 'merchant/batch-call-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><BatchDialpadPage /></RequirePermission> },
-      { path: 'merchant/webrtc-dialpad', element: <RequirePermission permission="merchant:batch-dialpad:read"><WebRtcDialpadPage /></RequirePermission> },
+      { path: 'merchant/department', element: <RequirePermission permission="merchant:department:read"><DepartmentPage /></RequirePermission> },
       { path: 'merchant/call-record', element: <RequirePermission permission="merchant:call-record:read"><CallRecordPage /></RequirePermission> },
       { path: 'merchant/ai-model-flow', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },
       { path: 'merchant/ai-model-config', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },

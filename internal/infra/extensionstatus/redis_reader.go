@@ -45,3 +45,8 @@ func (r *RedisReader) GetExtensionStatus(ctx context.Context, extension string) 
 	}
 	return esl.ExtensionStatus(value), true, nil
 }
+
+// SetExtensionStatus 写入分机状态。
+func (r *RedisReader) SetExtensionStatus(ctx context.Context, extension string, status esl.ExtensionStatus) error {
+	return r.Client.HSet(ctx, redisExtensionStatusKey, extension, int(status)).Err()
+}

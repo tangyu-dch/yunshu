@@ -3,6 +3,7 @@ package operate
 import (
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -11,7 +12,7 @@ import (
 )
 
 // RegisterPoolPhoneRoutes 注册运营端号码管理接口。
-func RegisterPoolPhoneRoutes(r gin.IRoutes, service *operatedomain.PoolPhoneManagementService) {
+func RegisterPoolPhoneRoutes(r gin.IRoutes, service *operatedomain.PoolPhoneManagementService, poolService *operatedomain.PoolManagementService) {
 	r.POST("/operate/pool-phone/page", func(c *gin.Context) {
 		if service == nil {
 			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "号码管理未启用"))
@@ -130,6 +131,158 @@ func RegisterPoolPhoneRoutes(r gin.IRoutes, service *operatedomain.PoolPhoneMana
 			PageNumber: parsePositiveInt(c.Query("pageNumber"), 1),
 			PageSize:   parsePositiveInt(c.Query("pageSize"), 20),
 			PoolID:     parsePositiveInt(c.Query("poolId"), 0),
+			Phone:      c.Query("phone"),
+			Enable:     enablePtr(enable),
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询号码失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(page))
+	})
+
+	r.POST("/merchant/pool-phone/page", func(c *gin.Context) {
+		if service == nil || poolService == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "号码管理或号码池服务未启用"))
+			return
+		}
+		var req operatedomain.PoolPhonePageRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		var merchantID int
+		tenant, ok := contracts.TenantFromContext(c.Request.Context())
+		if ok {
+			if !tenant.Internal {
+				merchantID, _ = strconv.Atoi(tenant.MerchantID)
+			} else {
+				if req.PoolID > 0 {
+					pool, pErr := poolService.Repository.GetByID(c.Request.Context(), req.PoolID)
+					if pErr == nil {
+						merchantID = pool.MerchantID
+					}
+				}
+				if merchantID <= 0 {
+					if ctxMerchantID := c.GetHeader("X-Merchant-Id"); ctxMerchantID != "" {
+						merchantID, _ = strconv.Atoi(ctxMerchantID)
+					}
+				}
+			}
+		}
+
+		if merchantID > 0 {
+			poolsResult, err := poolService.Page(c.Request.Context(), operatedomain.PoolPageRequest{
+				PageSize:   1000,
+				MerchantID: merchantID,
+			})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询商户号码池失败"))
+				return
+			}
+			poolIDs := make([]int, 0, len(poolsResult.Records))
+			for _, p := range poolsResult.Records {
+				poolIDs = append(poolIDs, p.ID)
+			}
+
+			if req.PoolID > 0 {
+				owned := false
+				for _, pid := range poolIDs {
+					if pid == req.PoolID {
+						owned = true
+						break
+					}
+				}
+				if !owned {
+					c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "无权访问此号码池"))
+					return
+				}
+			} else {
+				if len(poolIDs) == 0 {
+					c.JSON(http.StatusOK, contracts.OK(operatedomain.PoolPhonePageResult{PageNumber: req.PageNumber, PageSize: req.PageSize, Total: 0, Records: []operatedomain.PoolPhone{}}))
+					return
+				}
+				req.PoolIDs = poolIDs
+			}
+		}
+
+		page, err := service.Page(c.Request.Context(), req)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询号码失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(page))
+	})
+
+	r.GET("/merchant/pool-phone", func(c *gin.Context) {
+		if service == nil || poolService == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "号码管理或号码池服务未启用"))
+			return
+		}
+		enable, enablePtr := parseEnableQuery(c.Query("enable"))
+		reqPoolID := parsePositiveInt(c.Query("poolId"), 0)
+
+		var merchantID int
+		tenant, ok := contracts.TenantFromContext(c.Request.Context())
+		if ok {
+			if !tenant.Internal {
+				merchantID, _ = strconv.Atoi(tenant.MerchantID)
+			} else {
+				if reqPoolID > 0 {
+					pool, pErr := poolService.Repository.GetByID(c.Request.Context(), reqPoolID)
+					if pErr == nil {
+						merchantID = pool.MerchantID
+					}
+				}
+				if merchantID <= 0 {
+					if ctxMerchantID := c.GetHeader("X-Merchant-Id"); ctxMerchantID != "" {
+						merchantID, _ = strconv.Atoi(ctxMerchantID)
+					}
+				}
+			}
+		}
+
+		var poolIDs []int
+		if merchantID > 0 {
+			poolsResult, err := poolService.Page(c.Request.Context(), operatedomain.PoolPageRequest{
+				PageSize:   1000,
+				MerchantID: merchantID,
+			})
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询商户号码池失败"))
+				return
+			}
+			poolIDs = make([]int, 0, len(poolsResult.Records))
+			for _, p := range poolsResult.Records {
+				poolIDs = append(poolIDs, p.ID)
+			}
+
+			if reqPoolID > 0 {
+				owned := false
+				for _, pid := range poolIDs {
+					if pid == reqPoolID {
+						owned = true
+						break
+					}
+				}
+				if !owned {
+					c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "无权访问此号码池"))
+					return
+				}
+			} else {
+				if len(poolIDs) == 0 {
+					c.JSON(http.StatusOK, contracts.OK(operatedomain.PoolPhonePageResult{PageNumber: 1, PageSize: 20, Total: 0, Records: []operatedomain.PoolPhone{}}))
+					return
+				}
+			}
+		}
+
+		page, err := service.Page(c.Request.Context(), operatedomain.PoolPhonePageRequest{
+			PageNumber: parsePositiveInt(c.Query("pageNumber"), 1),
+			PageSize:   parsePositiveInt(c.Query("pageSize"), 20),
+			PoolID:     reqPoolID,
+			PoolIDs:    poolIDs,
 			Phone:      c.Query("phone"),
 			Enable:     enablePtr(enable),
 		})

@@ -1,9 +1,11 @@
 package operate
 
 import (
+	"encoding/csv"
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -245,6 +247,105 @@ func RegisterBatchTaskRoutes(r gin.IRoutes, service *operatedomain.BatchTaskMana
 			return
 		}
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{"imported": len(req.Tels)}))
+	})
+
+	r.GET("/merchant/batch-call-task/import/template", func(c *gin.Context) {
+		c.Header("Content-Description", "File Transfer")
+		c.Header("Content-Disposition", "attachment; filename=import_template.csv")
+		c.Header("Content-Type", "text/csv; charset=utf-8")
+
+		// 写入 UTF-8 BOM 字节集，防止 Excel 打开中文乱码
+		_, _ = c.Writer.Write([]byte{0xEF, 0xBB, 0xBF})
+		c.String(http.StatusOK, "手机号码,客户姓名,备注\n13800000001,张三,示例备注\n13800000002,李四,示例备注\n")
+	})
+
+	r.POST("/merchant/batch-call-task/import/file/:id", func(c *gin.Context) {
+		if service == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "批量任务管理未启用"))
+			return
+		}
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+
+		file, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "未检测到上传的文件"))
+			return
+		}
+
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "无法打开上传的文件"))
+			return
+		}
+		defer src.Close()
+
+		// 解析 CSV
+		reader := csv.NewReader(src)
+		reader.FieldsPerRecord = -1
+
+		records, err := reader.ReadAll()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "解析 CSV 文件失败，请确保格式正确"))
+			return
+		}
+
+		var tels []string
+		for i, record := range records {
+			if i == 0 {
+				// 跳过首行表头
+				continue
+			}
+			if len(record) > 0 {
+				tel := strings.TrimSpace(record[0])
+				// 提取纯数字的电话号码 (基本验证，如长度限制，剔除非数字)
+				var cleanTel strings.Builder
+				for _, r := range tel {
+					if r >= '0' && r <= '9' {
+						cleanTel.WriteRune(r)
+					}
+				}
+				finalTel := cleanTel.String()
+				if finalTel != "" {
+					tels = append(tels, finalTel)
+				}
+			}
+		}
+
+		var merchantID int
+		var userID int
+		tenant, okAuth := contracts.TenantFromContext(c.Request.Context())
+		if okAuth {
+			if !tenant.Internal {
+				merchantID, _ = strconv.Atoi(tenant.MerchantID)
+				userID, _ = strconv.Atoi(tenant.UserID)
+			} else {
+				if ctxMerchantID := c.GetHeader("X-Merchant-Id"); ctxMerchantID != "" {
+					if parsed, err := strconv.Atoi(ctxMerchantID); err == nil {
+						merchantID = parsed
+					}
+				}
+				if ctxUserID := c.GetHeader("X-User-Id"); ctxUserID != "" {
+					if parsed, err := strconv.Atoi(ctxUserID); err == nil {
+						userID = parsed
+					}
+				}
+			}
+			// 验证任务所属商户符合请求者身份
+			task, err := service.Repository.GetByID(c.Request.Context(), id)
+			if err == nil && task.MerchantID != merchantID {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "无权为此任务导入数据"))
+				return
+			}
+		}
+
+		if err := service.ImportTels(c.Request.Context(), id, merchantID, userID, tels); err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "导入号码失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{"imported": len(tels)}))
 	})
 
 	r.GET("/merchant/batch-call-task/details/:id", func(c *gin.Context) {

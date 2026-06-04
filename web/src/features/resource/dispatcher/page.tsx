@@ -178,7 +178,7 @@ export function DispatcherPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ setId: 1, priority: 10, enable: true, flags: 0 }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">

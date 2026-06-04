@@ -217,7 +217,7 @@ export function BillingPage() {
         }}
         onOk={() => editForm.submit()}
         confirmLoading={saveOverviewMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={editForm}
@@ -259,7 +259,7 @@ export function BillingPage() {
         }}
         onOk={() => rechargeForm.submit()}
         confirmLoading={rechargeMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={rechargeForm}

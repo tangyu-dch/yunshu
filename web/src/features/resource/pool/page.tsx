@@ -4,10 +4,11 @@ import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
 import { QueryBar } from '@/components/QueryBar'
-import { deletePools, fetchGatewayPage, fetchPools, savePool } from '@/api/operate'
+import { deletePools, fetchGatewayPage, fetchPools, savePool, fetchMerchants } from '@/api/operate'
 
 type PoolFormValues = {
   id?: number
+  merchantId?: number
   name: string
   remark?: string
   type: number
@@ -39,6 +40,12 @@ export function PoolPage() {
     queryFn: () => fetchGatewayPage(1, 100),
   })
 
+  // Fetch merchants list to assign pool
+  const { data: merchantsData } = useQuery({
+    queryKey: ['operate', 'merchant', 1, 100],
+    queryFn: () => fetchMerchants(1, 100),
+  })
+
   const queryFields = useMemo(() => [
     { key: 'name', label: '号码池名称', type: 'text' as const, placeholder: '请输入名称搜索' },
     {
@@ -51,6 +58,15 @@ export function PoolPage() {
       })) ?? [],
     },
     {
+      key: 'merchantId',
+      label: '所属商户',
+      type: 'select' as const,
+      options: merchantsData?.records.map((m: any) => ({
+        value: String(m.id),
+        label: m.name,
+      })) ?? [],
+    },
+    {
       key: 'enable',
       label: '启用状态',
       type: 'select' as const,
@@ -59,7 +75,7 @@ export function PoolPage() {
         { value: false, label: '停用' },
       ],
     },
-  ], [gatewaysData])
+  ], [gatewaysData, merchantsData])
 
   const deleteMutation = useMutation({
     mutationFn: async (ids: number[]) => deletePools(ids),
@@ -73,6 +89,7 @@ export function PoolPage() {
     mutationFn: async (values: PoolFormValues) =>
       savePool({
         id: editingId ?? undefined,
+        merchantId: values.merchantId ? Number(values.merchantId) : undefined,
         name: values.name,
         remark: values.remark,
         type: values.type,
@@ -107,6 +124,7 @@ export function PoolPage() {
         id,
         name: record?.name ?? '',
         remark: record?.remark ?? '',
+        merchantId: record?.merchantId ? record.merchantId : undefined,
         type: record?.typeId ?? 1,
         gatewayId: record?.gatewayId ? record.gatewayId : undefined,
         enable: Boolean(record?.enable),
@@ -155,6 +173,15 @@ export function PoolPage() {
         columns={[
           { title: '号码池 ID', dataIndex: 'id' },
           { title: '名称', dataIndex: 'name' },
+          {
+            title: '所属商户',
+            dataIndex: 'merchantId',
+            render: (merchantId: number) => {
+              if (!merchantId) return <Tag>未分配</Tag>
+              const m = merchantsData?.records.find((x: any) => x.id === merchantId)
+              return <Tag color="blue">{m ? m.name : `商户 ID: ${merchantId}`}</Tag>
+            },
+          },
           { title: '备注', dataIndex: 'remark' },
           {
             title: '关联网关',
@@ -194,12 +221,24 @@ export function PoolPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ type: 1, enable: true }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input />
           </Form.Item>
+          
+          <Form.Item name="merchantId" label="分配商户">
+            <Select
+              placeholder="选择号码池归属的商户"
+              allowClear
+              options={merchantsData?.records.map((m: any) => ({
+                value: m.id,
+                label: m.name,
+              }))}
+            />
+          </Form.Item>
+
           <Form.Item name="remark" label="备注">
             <Input />
           </Form.Item>

@@ -71,6 +71,7 @@ type ConsoleRuntime struct {
 	Whitelist        *operatedomain.WhitelistManagementService
 	Billing          *operatedomain.BillingManagementService
 	BatchTask        *operatedomain.BatchTaskManagementService
+	Department       *operatedomain.DepartmentManagementService
 	CallRecord       *operatedomain.CallRecordManagementService
 	AIFlow           *operatedomain.AIModelFlowManagementService
 	AIConfig         *operatedomain.AIModelConfigManagementService
@@ -164,13 +165,15 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		routePermissionResolver = permissionRepository
 		logger.Info("管理端权限配置将从数据库读取", "tables", "console_permission,console_role_permission,console_route_permission")
 	}
+
+	var statuses esl.ExtensionStatusReader
+	if redisClient != nil {
+		statuses = extensionstatus.NewRedisReader(redisClient)
+	}
+
 	// 初始化商户仓储，使用重构后的 merchant 包以对齐规范
 	merchantRepository := operatedomain.MerchantRepository(merchant.NewMemoryMerchantRepository())
 	if gormDB != nil {
-		var statuses esl.ExtensionStatusReader
-		if redisClient != nil {
-			statuses = extensionstatus.NewRedisReader(redisClient)
-		}
 		merchantRepository = merchant.NewMerchantRepository(gormDB, statuses, logger)
 		logger.Info("运营端商户配置将从数据库读取", "table", "merchant")
 		seedDatabaseMerchant(gormDB, logger)
@@ -182,7 +185,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	}
 	batchTaskRepository := operatedomain.BatchTaskRepository(business.NewMemoryBatchTaskRepository())
 	if gormDB != nil {
-		batchTaskRepository = business.NewBatchRepository(gormDB, logger)
+		batchTaskRepository = business.NewBatchRepository(gormDB, statuses, logger)
 		logger.Info("运营端批量外呼任务配置将从数据库读取", "table", "merchant_batch_call_task")
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端批量外呼任务管理使用本地内存兜底", "impact", "生产环境必须配置 merchant_batch_call_task 表仓储")
@@ -256,6 +259,13 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		logger.Info("商户端技能组配置将从数据库读取", "table", "skill_group")
 	} else {
 		logger.Warn("未配置 MySQL DSN，商户端技能组管理使用本地内存兜底", "impact", "生产环境必须配置 skill_group 表仓储")
+	}
+	departmentRepository := operatedomain.DepartmentRepository(resource.NewMemoryDepartmentRepository())
+	if gormDB != nil {
+		departmentRepository = resource.NewDepartmentRepository(gormDB, logger)
+		logger.Info("运营端部门配置将从数据库读取", "table", "cc_res_department")
+	} else {
+		logger.Warn("未配置 MySQL DSN，运营端部门管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_department 表仓储")
 	}
 	gatewayRepository := operatedomain.GatewayRepository(telephony.NewMemoryGatewayRepository())
 	if gormDB != nil {
@@ -374,6 +384,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		Whitelist:        &operatedomain.WhitelistManagementService{Repository: whitelistRepository, Logger: logger},
 		Billing:          &operatedomain.BillingManagementService{Repository: billingRepository, Logger: logger},
 		BatchTask:        &operatedomain.BatchTaskManagementService{Repository: batchTaskRepository, Logger: logger},
+		Department:       &operatedomain.DepartmentManagementService{Repository: departmentRepository, Logger: logger},
 		CallRecord:       callRecordService,
 		AIFlow:           aiFlowService,
 		AIConfig:         aiConfigService,
@@ -484,11 +495,12 @@ func (s *Server) routes() {
 		httpoperate.RegisterBillingRoutes(s.gin, s.console.Billing)
 		httpoperate.RegisterExtensionRoutes(s.gin, s.console.Extension)
 		httpoperate.RegisterPoolRoutes(s.gin, s.console.Pool)
-		httpoperate.RegisterPoolPhoneRoutes(s.gin, s.console.PoolPhone)
+		httpoperate.RegisterPoolPhoneRoutes(s.gin, s.console.PoolPhone, s.console.Pool)
 		httpoperate.RegisterMerchantRoutes(s.gin, s.console.Merchant)
 		httpoperate.RegisterRateRoutes(s.gin, s.console.Rate)
 		httpoperate.RegisterBatchTaskRoutes(s.gin, s.console.BatchTask)
 		httpoperate.RegisterBatchDialpadRoutes(s.gin, s.console.BatchTask)
+		httpoperate.RegisterDepartmentRoutes(s.gin, s.console.Department)
 		httpoperate.RegisterCallRecordRoutes(s.gin, s.console.CallRecord)
 		httpoperate.RegisterAIModelFlowRoutes(s.gin, s.console.AIFlow)
 		httpoperate.RegisterAIModelConfigRoutes(s.gin, s.console.AIConfig)

@@ -226,7 +226,7 @@ export function MerchantAccountPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}
@@ -272,7 +272,7 @@ export function MerchantAccountPage() {
         }}
         onOk={() => resetForm.submit()}
         confirmLoading={resetPasswordMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={resetForm}

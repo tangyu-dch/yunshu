@@ -210,6 +210,9 @@ func (r *PoolRepository) Page(ctx context.Context, req operate.PoolPageRequest) 
 	if req.GatewayID > 0 {
 		query = query.Where("gateway_id = ?", req.GatewayID)
 	}
+	if req.MerchantID > 0 {
+		query = query.Where("merchant_id = ?", req.MerchantID)
+	}
 	if req.Enable != nil {
 		query = query.Where("enable = ?", *req.Enable)
 	}
@@ -449,6 +452,8 @@ func (r *PoolPhoneRepository) Page(ctx context.Context, req operate.PoolPhonePag
 	query := r.DB.WithContext(ctx).Model(&PoolPhoneModel{}).Where("del_flag = ?", false)
 	if req.PoolID > 0 {
 		query = query.Where("pool_id = ?", req.PoolID)
+	} else if len(req.PoolIDs) > 0 {
+		query = query.Where("pool_id IN ?", req.PoolIDs)
 	}
 	if req.Phone != "" {
 		query = query.Where("phone LIKE ?", "%"+req.Phone+"%")
@@ -600,8 +605,21 @@ func (r *MemoryPoolPhoneRepository) Page(_ context.Context, req operate.PoolPhon
 	defer r.mu.Unlock()
 	records := make([]operate.PoolPhone, 0, len(r.phones))
 	for _, phone := range r.phones {
-		if req.PoolID > 0 && phone.PoolID != req.PoolID {
-			continue
+		if req.PoolID > 0 {
+			if phone.PoolID != req.PoolID {
+				continue
+			}
+		} else if len(req.PoolIDs) > 0 {
+			found := false
+			for _, id := range req.PoolIDs {
+				if phone.PoolID == id {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
 		}
 		if req.Phone != "" && !strings.Contains(phone.Phone, req.Phone) {
 			continue
@@ -1069,6 +1087,7 @@ func channelFromModel(model ChannelModel) operate.Channel {
 func poolToModel(pool operate.Pool) PoolModel {
 	return PoolModel{
 		ID:                pool.ID,
+		MerchantID:        pool.MerchantID,
 		Name:              pool.Name,
 		Remark:            pool.Remark,
 		Type:              pool.Type,
@@ -1082,6 +1101,7 @@ func poolToModel(pool operate.Pool) PoolModel {
 func poolFromModel(model PoolModel) operate.Pool {
 	return operate.Pool{
 		ID:                model.ID,
+		MerchantID:        model.MerchantID,
 		Name:              model.Name,
 		Remark:            model.Remark,
 		Type:              model.Type,
@@ -1195,4 +1215,3 @@ type DialpadVersionModel struct {
 func (DialpadVersionModel) TableName() string {
 	return "cc_res_dialpad_version"
 }
-

@@ -8,10 +8,12 @@ import "yunshu/pkg/workflow"
 
 // CTI 工作流标识符常量。
 const (
-	WorkflowAPIOutbound   = "cti_api_outbound"   // API 外呼工作流，处理单个外呼请求
-	WorkflowBatchOutbound = "cti_batch_outbound" // 批量外呼工作流，处理批量任务
-	WorkflowDialpadDirect = "cti_dialpad_direct" // 拨号盘直呼工作流，处理物理坐席直呼
-	WorkflowInbound       = "cti_inbound"        // 客户呼入工作流，处理物理客户呼入
+	WorkflowAPIOutbound     = "cti_api_outbound"     // API 外呼工作流，处理单个外呼请求
+	WorkflowBatchOutbound   = "cti_batch_outbound"   // 批量外呼工作流，处理批量任务
+	WorkflowDialpadDirect   = "cti_dialpad_direct"   // 拨号盘直呼工作流，处理物理坐席直呼
+	WorkflowInbound         = "cti_inbound"          // 客户呼入工作流，处理物理客户呼入
+	WorkflowBatchPredictive = "cti_batch_predictive" // 预测批量外呼工作流
+	WorkflowBatchSynergy    = "cti_batch_synergy"    // 协同批量外呼工作流
 )
 
 // WorkflowDefinitions 返回所有 CTI 业务工作流的定义。
@@ -38,6 +40,38 @@ func WorkflowDefinitions() []workflow.Definition {
 		},
 		{
 			ID:      WorkflowBatchOutbound,
+			Initial: "task_ready",
+			Transitions: []workflow.Transition{
+				{From: "task_ready", On: "acquire_slot", To: "slot_acquired"},
+				{From: "slot_acquired", On: "select_number", To: "number_selected"},
+				{From: "slot_acquired", On: "selection_failed", To: "list_failed"},
+				{From: "number_selected", On: "dispatch_originate", To: "originating"},
+				{From: "originating", On: "terminal_event", To: "list_finished"},
+				{From: "list_finished", On: "cdr_persisted", To: "cdr_finalized"},
+				{From: "cdr_finalized", On: "billing_completed", To: "billing_done"},
+				{From: "billing_done", On: "recording_completed", To: "recording_done"},
+				{From: "recording_done", On: "callback_completed", To: "finished"},
+			},
+			Handlers: map[workflow.StepName]workflow.Handler{},
+		},
+		{
+			ID:      WorkflowBatchPredictive,
+			Initial: "task_ready",
+			Transitions: []workflow.Transition{
+				{From: "task_ready", On: "acquire_slot", To: "slot_acquired"},
+				{From: "slot_acquired", On: "select_number", To: "number_selected"},
+				{From: "slot_acquired", On: "selection_failed", To: "list_failed"},
+				{From: "number_selected", On: "dispatch_originate", To: "originating"},
+				{From: "originating", On: "terminal_event", To: "list_finished"},
+				{From: "list_finished", On: "cdr_persisted", To: "cdr_finalized"},
+				{From: "cdr_finalized", On: "billing_completed", To: "billing_done"},
+				{From: "billing_done", On: "recording_completed", To: "recording_done"},
+				{From: "recording_done", On: "callback_completed", To: "finished"},
+			},
+			Handlers: map[workflow.StepName]workflow.Handler{},
+		},
+		{
+			ID:      WorkflowBatchSynergy,
 			Initial: "task_ready",
 			Transitions: []workflow.Transition{
 				{From: "task_ready", On: "acquire_slot", To: "slot_acquired"},

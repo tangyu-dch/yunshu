@@ -59,6 +59,11 @@ type ExtensionStatusReader interface {
 	GetExtensionStatus(ctx context.Context, extension string) (ExtensionStatus, bool, error)
 }
 
+// ExtensionStatusWriter 写入 Redis 中的分机在线/忙闲状态。
+type ExtensionStatusWriter interface {
+	SetExtensionStatus(ctx context.Context, extension string, status ExtensionStatus) error
+}
+
 // OutboundGuard 对齐  OutboundRequestGuard 的 API 外呼兜底校验。
 //
 // 正常路径 CTI 会先做校验；ESL 内部入口仍需要兜底，避免绕过用户、商户、余额和坐席约束。
@@ -223,6 +228,13 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 		}
 		fsAddr = selected
 	}
+	profile := contracts.CallFlowBatchOutbound
+	if req.Request.CallMode == 1 {
+		profile = contracts.CallFlowBatchPredictive
+	} else if req.Request.CallMode == 2 {
+		profile = contracts.CallFlowBatchSynergy
+	}
+
 	plan := BuildBatchOutboundPlan(req.CallID, req.Version, fsAddr, req.Request, logger)
 	cmd := telephony.NewCommand(
 		"batch-originate:"+req.CallID,
@@ -231,7 +243,7 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 		plan.CustomerUUID,
 		plan.FSAddr,
 		contracts.LegRoleCustomer,
-		contracts.CallFlowBatchOutbound,
+		profile,
 		map[string]any{
 			"originateMode":   plan.OriginateMode,
 			"agentId":         plan.AgentID,
@@ -249,6 +261,9 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 			"extra":           req.Request.Extra,
 			"userId":          req.Request.UserID,
 			"merchantId":      req.Request.MerchantID,
+			"callMode":        req.Request.CallMode,
+			"callRatio":       req.Request.CallRatio,
+			"queueEnable":     req.Request.QueueEnable,
 		},
 	)
 	if err := s.CommandService.Execute(ctx, cmd); err != nil {

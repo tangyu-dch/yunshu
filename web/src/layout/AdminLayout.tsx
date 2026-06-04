@@ -138,9 +138,7 @@ const navItems: NavItem[] = [
     icon: <FileSearchOutlined />,
     platform: 'merchant',
     children: [
-      { key: '/merchant/batch-call-task', icon: <FileSearchOutlined />, label: '批量外呼', permission: 'merchant:batch-task:read' },
-      { key: '/merchant/batch-call-dialpad', icon: <FileSearchOutlined />, label: '拨号盘', permission: 'merchant:batch-dialpad:read' },
-      { key: '/merchant/webrtc-dialpad', icon: <PhoneOutlined />, label: 'WebRTC 拨号盘', permission: 'merchant:batch-dialpad:read' },
+      { key: '/merchant/batch-call-task', icon: <FileSearchOutlined />, label: '批量任务', permission: 'merchant:batch-task:read' },
       { key: '/merchant/call-record', icon: <FileSearchOutlined />, label: '通话记录', permission: 'merchant:call-record:read' },
       { key: '/merchant/phone-group', icon: <FileSearchOutlined />, label: '号码组', permission: 'merchant:phone-group:read' },
     ],
@@ -170,6 +168,7 @@ const navItems: NavItem[] = [
     icon: <SettingOutlined />,
     platform: 'merchant',
     children: [
+      { key: '/merchant/department', icon: <ApartmentOutlined />, label: '部门管理', permission: 'merchant:department:read' },
       { key: '/merchant/account', icon: <TeamOutlined />, label: '账号管理', permission: 'merchant:account:read' },
       { key: '/merchant/billing', icon: <DatabaseOutlined />, label: '套餐账务' },
       { key: '/merchant/api-doc', icon: <DatabaseOutlined />, label: '接口对接' },
@@ -201,14 +200,13 @@ const breadcrumbMap: Record<string, string[]> = {
   '/operate/blacklist': ['安全防范', '黑名单管理'],
   '/operate/whitelist': ['安全防范', '白名单管理'],
   '/operate/api-doc': ['系统运营', '运营 API 浏览器'],
-  '/merchant/batch-call-task': ['外呼业务', '批量外呼任务'],
-  '/merchant/batch-call-dialpad': ['外呼业务', '批量话务拨号盘'],
-  '/merchant/webrtc-dialpad': ['外呼业务', 'WebRTC 坐席拨号盘'],
+  '/merchant/batch-call-task': ['外呼业务', '批量任务'],
   '/merchant/call-record': ['外呼业务', '通话话单查询'],
   '/merchant/phone-group': ['外呼业务', '外呼号码组'],
   '/merchant/ai-model-flow': ['智能流管理', 'AI 流程编排'],
   '/merchant/ai-model-config': ['智能流管理', 'AI 厂商与模型'],
   '/merchant/skill-group': ['坐席技能', '坐席技能组配置'],
+  '/merchant/department': ['系统设置', '部门管理'],
   '/merchant/account': ['系统设置', '账号与分权'],
   '/merchant/billing': ['系统设置', '套餐计费账单'],
   '/merchant/api-doc': ['系统设置', 'API 开发对接中心'],
@@ -554,7 +552,7 @@ export function AdminLayout() {
             </Button>,
           ]}
           onCancel={() => setProfileOpen(false)}
-          destroyOnClose
+          destroyOnHidden
           width={650}
           className="dark:bg-[#15181e]"
         >
@@ -704,7 +702,7 @@ export function AdminLayout() {
           title={<span className="text-base font-semibold dark:text-white">个人设置</span>}
           onCancel={() => setSettingsOpen(false)}
           footer={null}
-          destroyOnClose
+          destroyOnHidden
           width={500}
         >
           <div className="py-4">

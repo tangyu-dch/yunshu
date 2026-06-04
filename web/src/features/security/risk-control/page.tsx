@@ -764,7 +764,7 @@ export function RiskControlPage() {
         }}
         onOk={() => poolForm.submit()}
         confirmLoading={savePoolMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={poolForm} layout="vertical" onFinish={submitPoolStrategy}>
           <Form.Item name="id" hidden><InputNumber /></Form.Item>
@@ -797,7 +797,7 @@ export function RiskControlPage() {
         }}
         onOk={() => riskForm.submit()}
         confirmLoading={saveRiskMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={riskForm} layout="vertical" onFinish={submitRiskControl}>
           <Form.Item name="name" label="风控策略名称" rules={[{ required: true, message: '请输入策略名称' }]}>
@@ -924,7 +924,7 @@ export function RiskControlPage() {
         }}
         onOk={submitBindings}
         confirmLoading={saveBindingsMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
 
         <div className="mb-3">

@@ -24,6 +24,9 @@ type BatchCallReq struct {
 	AIFlag         bool           `json:"aiFlag,omitempty"`
 	Push           bool           `json:"push"`
 	Extra          string         `json:"extra,omitempty"`
+	CallMode       int            `json:"callMode,omitempty"`
+	CallRatio      float64        `json:"callRatio,omitempty"`
+	QueueEnable    bool           `json:"queueEnable,omitempty"`
 }
 
 type BatchTaskState string

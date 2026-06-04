@@ -580,7 +580,7 @@ export function AiModelFlowPage() {
         onCancel={() => setIsConfigModalOpen(false)}
         footer={null}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={configForm}
@@ -868,7 +868,7 @@ export function AiModelFlowPage() {
         onCancel={() => setIsFlowEditModalOpen(false)}
         footer={null}
         width={600}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={flowForm}

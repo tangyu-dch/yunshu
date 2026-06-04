@@ -500,7 +500,7 @@ export function ExtensionPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
         width={560}
         okText={editingId ? '保存修改' : '创建分机'}
       >

@@ -682,7 +682,7 @@ export function MerchantPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
         width={720}
       >
         <Form
@@ -853,7 +853,7 @@ export function MerchantPage() {
         onCancel={() => setDecisionModalOpen(false)}
         onOk={() => decisionForm.submit()}
         confirmLoading={decisionSubmitting}
-        destroyOnClose
+        destroyOnHidden
         width={950}
         okText="一键应用配置"
         cancelText="取消"

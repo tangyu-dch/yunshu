@@ -58,6 +58,11 @@ export type BatchTaskItem = {
   unconnectedInterval?: number
   callTimePeriod?: string
   aiFlag?: boolean
+  skillGroupId?: number
+  departmentId?: number
+  callMode?: number
+  callRatio?: number
+  queueEnable?: boolean
 }
 
 export type CallRecordItem = {
@@ -95,6 +100,7 @@ export type AiFlowItem = {
 
 export type PoolItem = {
   id: number
+  merchantId?: number
   name: string
   remark: string
   gateway: string
