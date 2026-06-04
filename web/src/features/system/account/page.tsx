@@ -12,6 +12,8 @@ type AccountFormValues = {
   roleId?: string
   accountType: string
   enable: boolean
+  organizationId?: number
+  seatNumber?: string
 }
 
 export function AccountPage() {
@@ -98,6 +100,8 @@ export function AccountPage() {
         roleId: record?.roleId ?? '',
         accountType: record?.accountType ?? 'merchant_user',
         enable: Boolean(record?.enable),
+        organizationId: record?.organizationId ? Number(record.organizationId) : undefined,
+        seatNumber: record?.seatNumber ?? '',
       })
     }, 0)
   }
@@ -180,6 +184,11 @@ export function AccountPage() {
               const info = types[value] || { label: value, color: 'default' }
               return <Tag color={info.color}>{info.label}</Tag>
             },
+          },
+          {
+            title: '座席号',
+            dataIndex: 'seatNumber',
+            render: (value: string) => value || '-',
           },
           {
             title: '归属商户 ID',
@@ -272,6 +281,12 @@ export function AccountPage() {
                   label: `[${m.id}] ${m.name}`,
                 }))}
               />
+            </Form.Item>
+          )}
+
+          {selectedAccountType === 'merchant_user' && (
+            <Form.Item name="seatNumber" label="座席号">
+              <Input placeholder="请输入座席工号/号，例如 8001" />
             </Form.Item>
           )}
 

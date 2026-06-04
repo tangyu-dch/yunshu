@@ -1,8 +1,8 @@
-import { Button, Form, Input, Modal, Popconfirm, Space, Switch, Tag, Typography, message } from 'antd'
+import { Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { TableWrap } from '@/components/TableWrap'
-import { deleteMerchantAccounts, fetchMerchantAccounts, saveMerchantAccount, toggleMerchantAccountEnable, resetMerchantAccountPassword } from '@/api/operate'
+import { deleteMerchantAccounts, fetchMerchantAccounts, saveMerchantAccount, toggleMerchantAccountEnable, resetMerchantAccountPassword, fetchDepartmentsList } from '@/api/operate'
 import { useAuthStore } from '@/store/auth'
 
 type AccountFormValues = {
@@ -13,6 +13,8 @@ type AccountFormValues = {
   roleId?: string
   accountType: string
   enable: boolean
+  organizationId?: number
+  seatNumber?: string
 }
 
 export function MerchantAccountPage() {
@@ -32,6 +34,13 @@ export function MerchantAccountPage() {
   const { data } = useQuery({
     queryKey: ['merchant', 'account', pageNumber, pageSize, filterUser],
     queryFn: () => fetchMerchantAccounts(pageNumber, pageSize, filterUser),
+  })
+
+  // 拉取商户部门列表
+  const { data: deptsData } = useQuery({
+    queryKey: ['merchant', 'department', 'list', currentMerchantId],
+    queryFn: () => fetchDepartmentsList(currentMerchantId ? Number(currentMerchantId) : undefined),
+    enabled: !!currentMerchantId,
   })
 
   const toggleMutation = useMutation({
@@ -104,6 +113,8 @@ export function MerchantAccountPage() {
         roleId: record?.roleId ?? '',
         accountType: record?.accountType ?? 'merchant_user',
         enable: Boolean(record?.enable),
+        organizationId: record?.organizationId ? Number(record.organizationId) : undefined,
+        seatNumber: record?.seatNumber ?? '',
       })
     }, 0)
   }
@@ -166,6 +177,19 @@ export function MerchantAccountPage() {
               const info = types[value] || { label: value, color: 'default' }
               return <Tag color={info.color}>{info.label}</Tag>
             },
+          },
+          {
+            title: '所属部门',
+            dataIndex: 'organizationId',
+            render: (value: number) => {
+              const dept = deptsData?.find((d: any) => d.id === value)
+              return dept ? dept.name : '-'
+            },
+          },
+          {
+            title: '座席号',
+            dataIndex: 'seatNumber',
+            render: (value: string) => value || '-',
           },
           {
             title: '归属商户 ID',
@@ -251,6 +275,21 @@ export function MerchantAccountPage() {
 
           <Form.Item name="accountType" label="账号类型">
             <Tag color="green">商户普通用户</Tag>
+          </Form.Item>
+
+          <Form.Item name="organizationId" label="所属部门">
+            <Select
+              placeholder="请选择所属部门"
+              allowClear
+              options={deptsData?.map((d: any) => ({
+                value: d.id,
+                label: d.name,
+              }))}
+            />
+          </Form.Item>
+
+          <Form.Item name="seatNumber" label="座席号">
+            <Input placeholder="请输入座席工号/号，例如 8001" />
           </Form.Item>
 
           <Form.Item name="roleId" label="自定义权限角色代码 (选填)">

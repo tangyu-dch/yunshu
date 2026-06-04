@@ -133,12 +133,15 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 	}
 
 	// 编辑时：如果前端未传密码（留空），从数据库保留旧密码
+	// 新增时：如果未传密码（留空），自动生成 8 位随机密码
 	// Kamailio 的 subscriber 表要求 ha1 / ha1b 始终与 password 保持一致
 	if normalized.ID > 0 && normalized.Password == "" {
 		existing, err := s.Repository.GetByID(ctx, normalized.ID)
 		if err == nil && existing.Password != "" {
 			normalized.Password = existing.Password
 		}
+	} else if normalized.ID == 0 && normalized.Password == "" {
+		normalized.Password = GenerateRandomPassword(8)
 	}
 
 	// 始终重算 HA1 / HA1b（参考 Kamailio auth_db 模块）：
