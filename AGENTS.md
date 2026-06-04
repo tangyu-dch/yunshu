@@ -201,14 +201,14 @@ The command updates the generated summary below from `internal/contracts`.
 
 This section is generated from `internal/contracts`. Run `go run ./cmd/update-agents` after contract changes.
 
-- HTTP route contracts: 36
+- HTTP route contracts: 38
 - Redis contracts: 17
 - MQ contracts: 7
 
 Service route counts:
 
 - `cc-edge`: 5
-- `cc-console`: 22
+- `cc-console`: 24
 - `cc-call`: 9
 - `cc-worker`: 0
 

@@ -63,9 +63,9 @@ func TestConsoleProtectedRoutesRequireToken(t *testing.T) {
 	token, err := server.console.Auth.Login(context.Background(), authdomain.LoginRequest{
 		Username:   "admin",
 		Password:   "admin123",
-		MerchantID: "12",
-		UserID:     "34",
-		RoleID:     "56",
+		MerchantID: "",
+		UserID:     "9999",
+		RoleID:     "super_admin",
 		Internal:   true,
 	})
 	if err != nil {
@@ -89,8 +89,8 @@ func TestConsolePermissionMiddlewareEnforcesRoutePermissions(t *testing.T) {
 	deniedToken, err := server.console.Auth.Login(context.Background(), authdomain.LoginRequest{
 		Username:   "merchant",
 		Password:   "merchant123",
-		MerchantID: "12",
-		UserID:     "34",
+		MerchantID: "1001",
+		UserID:     "2001",
 		RoleID:     "merchant_user",
 		Internal:   false,
 	})
@@ -108,8 +108,8 @@ func TestConsolePermissionMiddlewareEnforcesRoutePermissions(t *testing.T) {
 	allowedToken, err := server.console.Auth.Login(context.Background(), authdomain.LoginRequest{
 		Username:   "merchant",
 		Password:   "merchant123",
-		MerchantID: "12",
-		UserID:     "34",
+		MerchantID: "1001",
+		UserID:     "2001",
 		RoleID:     "merchant_admin",
 		Internal:   false,
 		Permissions: []string{

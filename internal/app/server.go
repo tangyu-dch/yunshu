@@ -77,6 +77,7 @@ type ConsoleRuntime struct {
 	AIConfig         *operatedomain.AIModelConfigManagementService
 	Gateway          *operatedomain.GatewayManagementService
 	Rtpengine        *operatedomain.RtpengineManagementService
+	Dispatcher       *operatedomain.DispatcherManagementService
 	Extension        *operatedomain.ExtensionManagementService
 	Pool             *operatedomain.PoolManagementService
 	PoolPhone        *operatedomain.PoolPhoneManagementService
@@ -322,11 +323,15 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	}
 	logger.Info("cc-console FreeSWITCH 管理能力已启用", "databaseConfigured", gormDB != nil)
 	rtpengineRepository := operatedomain.RtpengineRepository(telephony.NewMemoryRtpengineRepository())
+	dispatcherRepository := operatedomain.DispatcherRepository(telephony.NewMemoryDispatcherRepository())
 	if gormDB != nil {
 		rtpengineRepository = telephony.NewRtpengineRepository(gormDB, logger)
 		logger.Info("运营端 Kamailio rtpengine 配置将从数据库读取", "table", "cc_res_rtpengine")
+		dispatcherRepository = telephony.NewGormDispatcherRepository(gormDB, logger)
+		logger.Info("运营端 Kamailio dispatcher 配置将从数据库读取", "table", "cc_res_freeswitch")
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端 Kamailio rtpengine 管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_rtpengine 表仓储")
+		logger.Warn("未配置 MySQL DSN，运营端 Kamailio dispatcher 管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_freeswitch 表仓储")
 	}
 	riskControlRepository := operatedomain.RiskControlRepository(security.NewMemoryRiskControlRepository())
 	if gormDB != nil {
@@ -356,6 +361,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 
 	var proxyConfigService *operatedomain.ProxyConfigManagementService
 	rtpengineService := &operatedomain.RtpengineManagementService{Repository: rtpengineRepository, Logger: logger}
+	dispatcherService := &operatedomain.DispatcherManagementService{Repository: dispatcherRepository, Logger: logger}
 
 	if gormDB != nil {
 		proxyConfigRepo := system.NewProxyConfigRepository(gormDB, logger)
@@ -366,9 +372,11 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		}
 		reloader := &kamailioRtpengineReloader{repo: proxyConfigRepo, logger: logger}
 		rtpengineService.Reloader = reloader
+		dispReloader := telephony.NewKamailioDispatcherReloader(proxyConfigRepo, logger)
+		dispatcherService.Reloader = dispReloader
 		proxyConfigService = operatedomain.NewProxyConfigManagementService(proxyConfigRepo, reloader, logger)
 	} else {
-		logger.Warn("未配置 MySQL DSN，系统参数配置与 RTPEngine 热刷新未启用")
+		logger.Warn("未配置 MySQL DSN，系统参数配置与 RTPEngine/Dispatcher 热刷新未启用")
 	}
 
 	return &ConsoleRuntime{
@@ -390,6 +398,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		AIConfig:         aiConfigService,
 		Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
 		Rtpengine:        rtpengineService,
+		Dispatcher:       dispatcherService,
 		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, Logger: logger},
 		Pool:             &operatedomain.PoolManagementService{Repository: poolRepository, Logger: logger},
 		PoolPhone:        &operatedomain.PoolPhoneManagementService{Repository: phoneRepository, Logger: logger},
@@ -508,12 +517,13 @@ func (s *Server) routes() {
 		httpoperate.RegisterSkillGroupRoutes(s.gin, s.console.SkillGroup)
 		httpoperate.RegisterGatewayRoutes(s.gin, s.console.Gateway)
 		httpoperate.RegisterRtpengineRoutes(s.gin, s.console.Rtpengine)
+		httpoperate.RegisterDispatcherRoutes(s.gin, s.console.Dispatcher)
 		httpoperate.RegisterRiskControlRoutes(s.gin, s.console.RiskControl)
 		httpoperate.RegisterPhoneAttributionRoutes(s.gin, s.console.PhoneAttribution)
 		httpoperate.RegisterProxyConfigRoutes(s.gin, s.console.ProxyConfig)
 		httpoperate.RegisterAreaCodeRoutes(s.gin, s.console.AreaCode)
 		httpoperate.RegisterInstallerRoutes(s.gin, s.installer)
-		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
+		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/kamailio/dispatcher", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
 	default:
 		s.registerCompatibilityRoutes()
 	}
@@ -556,6 +566,37 @@ func (s *Server) consoleAccessMiddleware() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "token 无效或已过期"))
 			c.Abort()
 			return
+		}
+
+		// 联动实时校验账号的数据库状态（启用和删除状态）
+		if s.console.Account != nil {
+			accID, _ := strconv.Atoi(ticket.Tenant.UserID)
+			if accID > 0 {
+				acc, err := s.console.Account.Repository.GetByID(c.Request.Context(), accID)
+				if err != nil || !acc.Enable {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "账号已被停用或删除"))
+					c.Abort()
+					return
+				}
+			}
+		}
+
+		// 联动实时校验所属商户的数据库状态（启用、删除以及服务时限）
+		if s.console.Merchant != nil && ticket.Tenant.MerchantID != "" {
+			mchID, err := strconv.Atoi(strings.TrimSpace(ticket.Tenant.MerchantID))
+			if err == nil && mchID > 0 {
+				mch, err := s.console.Merchant.Repository.GetByID(c.Request.Context(), mchID)
+				if err != nil || !mch.Enable {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户主体已被停用或删除"))
+					c.Abort()
+					return
+				}
+				if mch.ExpiredTime != nil && mch.ExpiredTime.Before(time.Now().UTC()) {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户服务已过期"))
+					c.Abort()
+					return
+				}
+			}
 		}
 		required, found, err := s.requiredConsolePermission(c.Request.Context(), path, c.Request.Method)
 		if err != nil {
@@ -739,7 +780,9 @@ func seedMemoryAccounts(repo *system.MemoryAccountRepository, logger *slog.Logge
 			accountType = operatedomain.AccountTypeMerchantUser
 			dataScope = operatedomain.DataScopeMerchant
 		}
+		id, _ := strconv.Atoi(account.UserID)
 		if _, err := repo.Save(context.Background(), operatedomain.Account{
+			ID:          id,
 			Username:    account.Username,
 			Password:    account.Password,
 			MerchantID:  account.MerchantID,
