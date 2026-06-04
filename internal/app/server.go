@@ -360,6 +360,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	authCacheInvalidator := buildAuthCacheInvalidator(redisClient, logger)
 
 	var proxyConfigService *operatedomain.ProxyConfigManagementService
+	var dispReloader operatedomain.DispatcherReloadPort
 	rtpengineService := &operatedomain.RtpengineManagementService{Repository: rtpengineRepository, Logger: logger}
 	dispatcherService := &operatedomain.DispatcherManagementService{Repository: dispatcherRepository, Logger: logger}
 
@@ -372,7 +373,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		}
 		reloader := &kamailioRtpengineReloader{repo: proxyConfigRepo, logger: logger}
 		rtpengineService.Reloader = reloader
-		dispReloader := telephony.NewKamailioDispatcherReloader(proxyConfigRepo, logger)
+		dispReloader = telephony.NewKamailioDispatcherReloader(proxyConfigRepo, logger)
 		dispatcherService.Reloader = dispReloader
 		proxyConfigService = operatedomain.NewProxyConfigManagementService(proxyConfigRepo, reloader, logger)
 	} else {
@@ -386,7 +387,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		Account:          &operatedomain.AccountManagementService{Repository: accountRepository, Logger: logger},
 		Channel:          &operatedomain.ChannelManagementService{Repository: channelRepository, Logger: logger},
 		Blacklist:        &operatedomain.BlacklistManagementService{Repository: blacklistRepository, Logger: logger},
-		FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Logger: logger},
+		FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Reloader: dispReloader, Logger: logger},
 		Merchant:         &operatedomain.MerchantManagementService{Repository: merchantRepository, Logger: logger},
 		Rate:             &operatedomain.RateManagementService{Repository: rateRepository, Logger: logger},
 		Whitelist:        &operatedomain.WhitelistManagementService{Repository: whitelistRepository, Logger: logger},
