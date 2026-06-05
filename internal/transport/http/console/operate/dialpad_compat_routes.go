@@ -2,9 +2,13 @@ package operate
 
 import (
 	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,13 +29,23 @@ import (
 	"yunshu/internal/infra/config"
 	"yunshu/internal/infra/resource"
 	"yunshu/internal/infra/storage"
+	"yunshu/internal/transport/http/middleware"
 )
 
 // Keys and Constants matching the desktop client configuration
-const (
-	SIPCredentialKey = "vL4oU4jJ8qS3oC4v"
-	PhoneNumberKey   = "2has1d8jef49v0ru"
+var (
+	// SIPCredentialKey 和 PhoneNumberKey 从环境变量读取，默认值仅用于开发环境
+	// 生产环境必须通过 SIP_CREDENTIAL_KEY 和 PHONE_NUMBER_KEY 环境变量设置安全密钥
+	SIPCredentialKey = getEnvOrDefault("SIP_CREDENTIAL_KEY", "vL4oU4jJ8qS3oC4v")
+	PhoneNumberKey   = getEnvOrDefault("PHONE_NUMBER_KEY", "2has1d8jef49v0ru")
 )
+
+func getEnvOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
 
 // DialpadLoginReq matches LoginParams of the desktop client
 type DialpadLoginReq struct {
@@ -208,6 +222,18 @@ func RegisterDialpadCompatRoutes(
 	db *gorm.DB,
 	updateCfg config.DialpadUpdateConfig,
 ) {
+	// 生产环境强制校验密钥安全性
+	if gin.Mode() == gin.ReleaseMode && !isTest() {
+		if os.Getenv("SIP_CREDENTIAL_KEY") == "" || os.Getenv("SIP_CREDENTIAL_KEY") == "vL4oU4jJ8qS3oC4v" {
+			slog.Error("生产环境下必须通过 SIP_CREDENTIAL_KEY 环境变量设置自定义安全密钥")
+			panic("生产环境未配置安全的 SIP_CREDENTIAL_KEY")
+		}
+		if os.Getenv("PHONE_NUMBER_KEY") == "" || os.Getenv("PHONE_NUMBER_KEY") == "2has1d8jef49v0ru" {
+			slog.Error("生产环境下必须通过 PHONE_NUMBER_KEY 环境变量设置自定义安全密钥")
+			panic("生产环境未配置安全的 PHONE_NUMBER_KEY")
+		}
+	}
+
 	// 创建路由子组并装载版本及强制更新校验中间件，以确保客户端升级闭环
 	var group gin.IRoutes = r
 	if rg, ok := r.(*gin.Engine); ok {
@@ -219,7 +245,7 @@ func RegisterDialpadCompatRoutes(
 	r = group
 
 	// 1. Dialpad Login
-	r.POST("/mer/auth/dialpad/login", func(c *gin.Context) {
+	r.POST("/mer/auth/dialpad/login", middleware.RateLimitMiddleware(3, 0.2), func(c *gin.Context) {
 		var req DialpadLoginReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
@@ -437,13 +463,13 @@ func RegisterDialpadCompatRoutes(
 		}
 
 		// Encrypt credentials
-		encryptedNum, err := encryptECBHex(ext.ExtensionNumber, []byte(SIPCredentialKey))
+		encryptedNum, err := encryptHex(ext.ExtensionNumber, []byte(SIPCredentialKey))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "分机加密错误"))
 			return
 		}
 
-		encryptedPassword, err := encryptECBHex(ext.Password, []byte(SIPCredentialKey))
+		encryptedPassword, err := encryptHex(ext.Password, []byte(SIPCredentialKey))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "密码加密错误"))
 			return
@@ -469,7 +495,7 @@ func RegisterDialpadCompatRoutes(
 	})
 
 	// 5. Make Call (REST audit/sync)
-	r.POST("/mer/v1/call", func(c *gin.Context) {
+	r.POST("/mer/v1/call", middleware.RateLimitMiddleware(5, 1.0), func(c *gin.Context) {
 		_, ok := authenticateDialpad(c, authService)
 		if !ok {
 			return
@@ -487,7 +513,7 @@ func RegisterDialpadCompatRoutes(
 		}
 
 		// Decrypt number to make sure it's valid
-		_, err := decryptECBHex(req.CalledNumber, []byte(PhoneNumberKey))
+		_, err := decryptHex(req.CalledNumber, []byte(PhoneNumberKey))
 		if err != nil {
 			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "号码解密失败"))
 			return
@@ -699,14 +725,17 @@ func RegisterDialpadCompatRoutes(
 			}
 			// 如果是本地物理路径，直接流式下载
 			localPath := release.DownloadURL
-			if strings.HasPrefix(localPath, "/") {
-				localPath = localPath[1:]
+			// 安全检查：防止路径穿越攻击
+			cleanedPath, err := secureLocalPath(localPath)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
+				return
 			}
-			if _, err := os.Stat(localPath); err == nil {
+			if _, err := os.Stat(cleanedPath); err == nil {
 				c.Header("Content-Description", "File Transfer")
-				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s-%s%s", version, platform, arch, filepath.Ext(localPath)))
+				c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=yunshu-phone-%s-%s-%s%s", version, platform, arch, filepath.Ext(cleanedPath)))
 				c.Header("Content-Type", "application/octet-stream")
-				c.File(localPath)
+				c.File(cleanedPath)
 				return
 			}
 		}
@@ -757,6 +786,16 @@ func RegisterDialpadCompatRoutes(
 
 	// 9c. Dialpad Version Management — Upload (POST /mer/version/upload)
 	r.POST("/mer/version/upload", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		// 必须是系统内置/外部超级管理员或运营管理员才能上传新版本
+		if !tenant.Internal {
+			c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "需要系统管理员权限"))
+			return
+		}
+
 		version := c.PostForm("version")
 		platform := c.PostForm("platform")
 		arch := c.PostForm("arch")
@@ -862,6 +901,14 @@ func RegisterDialpadCompatRoutes(
 
 	// 9e. Dialpad Version Management — Delete (POST /mer/version/delete)
 	r.POST("/mer/version/delete", func(c *gin.Context) {
+		tenant, ok := authenticateDialpad(c, authService)
+		if !ok {
+			return
+		}
+		if !tenant.Internal {
+			c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "需要系统管理员权限"))
+			return
+		}
 		var req struct {
 			ID int `json:"id"`
 		}
@@ -953,8 +1000,70 @@ func releaseExtensionForUser(db *gorm.DB, tenant contracts.TenantContext) {
 	}
 }
 
-// --- AES ECB Padding Helpers ---
+// --- AES ECB and GCM Security Helpers ---
 
+// encryptHex 优先采用 AES-GCM 进行安全加密
+func encryptHex(plaintext string, key []byte) (string, error) {
+	return encryptGCMHex(plaintext, key)
+}
+
+// decryptHex 优先采用 AES-GCM 进行解密，失败时自动退避到旧版 AES-ECB 解密，确保向后兼容性
+func decryptHex(hexText string, key []byte) (string, error) {
+	if decrypted, err := decryptGCMHex(hexText, key); err == nil {
+		return decrypted, nil
+	}
+	return decryptECBHex(hexText, key)
+}
+
+// encryptGCMHex 使用 AES-GCM 模式加密
+func encryptGCMHex(plaintext string, key []byte) (string, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, aesgcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := aesgcm.Seal(nil, nonce, []byte(plaintext), nil)
+	result := append(nonce, ciphertext...)
+	return hex.EncodeToString(result), nil
+}
+
+// decryptGCMHex 使用 AES-GCM 模式解密
+func decryptGCMHex(hexText string, key []byte) (string, error) {
+	cipherBytes, err := hex.DecodeString(hexText)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	aesgcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := aesgcm.NonceSize()
+	if len(cipherBytes) < nonceSize {
+		return "", errors.New("ciphertext too short")
+	}
+	nonce := cipherBytes[:nonceSize]
+	ciphertext := cipherBytes[nonceSize:]
+	plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plaintext), nil
+}
+
+// encryptECBHex 使用 AES-ECB 模式加密。
+// WARNING: ECB 模式不提供语义安全（相同明文块产生相同密文块）。
+// 已被 encryptHex (AES-GCM) 替代，仅保留用于向后兼容测试。
 func encryptECBHex(plaintext string, key []byte) (string, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -1014,4 +1123,41 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 		}
 	}
 	return data[:len(data)-padding], nil
+}
+
+// secureLocalPath 校验本地文件路径是否合法，防范路径穿越攻击
+func secureLocalPath(localPath string) (string, error) {
+	cleaned := filepath.Clean(localPath)
+	absPath, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", err
+	}
+	// 限制物理基准目录：当前目录 (workspace) 和父级目录 (yunshu-phone 项目)
+	allowedBases := []string{".", ".."}
+	allowed := false
+	for _, base := range allowedBases {
+		absBase, err := filepath.Abs(base)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(absBase, absPath)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return "", errors.New("越权访问非法的物理文件路径")
+	}
+	return cleaned, nil
+}
+
+func isTest() bool {
+	// Check if running under go test
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return flag.Lookup("test.v") != nil || strings.HasSuffix(os.Args[0], ".test")
 }

@@ -47,10 +47,7 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) (int, error) {
 		handler := d.Handlers[entry.Destination]
 		if handler == nil {
 			logger.Warn("outbox 未找到 destination handler，等待后续重试或人工修复", "outboxId", entry.ID, "destination", entry.Destination)
-			backoffDelay := time.Duration(1<<uint(entry.Attempts)) * 5 * time.Second
-			if backoffDelay > time.Hour {
-				backoffDelay = time.Hour
-			}
+			backoffDelay := d.retryDelayForAttempt(entry.Attempts)
 			if err := d.Store.MarkFailed(ctx, entry.ID, now.Add(backoffDelay)); err != nil {
 				return dispatched, err
 			}
@@ -59,11 +56,8 @@ func (d *OutboxDispatcher) DispatchOnce(ctx context.Context) (int, error) {
 		logger.Info("开始投递 outbox", "outboxId", entry.ID, "destination", entry.Destination, "aggregateType", entry.AggregateType, "aggregateId", entry.AggregateID)
 		if err := handler(ctx, entry); err != nil {
 			logger.Error("outbox 投递失败，等待重试", "outboxId", entry.ID, "destination", entry.Destination, "error", err.Error())
-			// 计算指数退避：next_attempt = now + 2^attempts * 5s，上限 1 小时
-			backoffDelay := time.Duration(1<<uint(entry.Attempts)) * 5 * time.Second
-			if backoffDelay > time.Hour {
-				backoffDelay = time.Hour
-			}
+			// 计算指数退避：next_attempt = now + retryDelayForAttempt(attempts)
+			backoffDelay := d.retryDelayForAttempt(entry.Attempts)
 			if markErr := d.Store.MarkFailed(ctx, entry.ID, now.Add(backoffDelay)); markErr != nil {
 				return dispatched, markErr
 			}
@@ -164,9 +158,15 @@ func (d *OutboxDispatcher) lease() time.Duration {
 	return 30 * time.Second
 }
 
-func (d *OutboxDispatcher) retryDelay() time.Duration {
-	if d.RetryDelay > 0 {
-		return d.RetryDelay
+func (d *OutboxDispatcher) retryDelayForAttempt(attempts int) time.Duration {
+	base := d.RetryDelay
+	if base <= 0 {
+		base = time.Minute
 	}
-	return time.Minute
+	// 指数退避: base * 2^attempts, 最大 1 小时
+	delay := base * (1 << uint(attempts))
+	if delay > time.Hour {
+		delay = time.Hour
+	}
+	return delay
 }

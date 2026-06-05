@@ -87,7 +87,7 @@ func main() {
 	if cfg.Console.CallBaseURL != "" {
 		// 估算 Console 基础地址，一般是 callBaseURL 或者是 localhost:8080
 		// 因为 daemon 是同主机部署，可以直接请求控制台地址
-		consoleBase = "http://localhost:8080"
+		consoleBase = cfg.Console.CallBaseURL
 	}
 
 	// 检查是否具备 Linux 的 ipset/iptables 环境和 root 权限

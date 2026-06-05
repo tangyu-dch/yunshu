@@ -24,7 +24,7 @@ import (
 // RegisterConsumers 注册 cc-call 内部事件消费者。
 // 当前消费者负责订阅事件总线，并在事件发生时提取上下文，向 CTI 或 ESL 引擎发送状态推进信号。
 // 涵盖 API 外呼、批量外呼、拨号盘直呼以及客户呼入四大经典通信流程。
-func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, statusReader esl.ExtensionStatusReader, batchRepo cti.BatchTaskRepository, queue cti.CallQueue, logger *slog.Logger) {
+func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, statusReader esl.ExtensionStatusReader, batchRepo cti.BatchTaskRepository, queue cti.CallQueue, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -166,11 +166,15 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 							capturedAgentMerchantID := agentMerchantID
 							go func() {
 								// ACW 冷却：5 秒后再置为空闲并检查排队
-								time.Sleep(5 * time.Second)
-								bgCtx := context.Background()
+								select {
+								case <-time.After(5 * time.Second):
+								case <-lifetimeCtx.Done():
+									return
+								}
+								bgCtx := lifetimeCtx
 
 								// 将分机状态原子置为空闲
-								if werr := capturedWriter.SetExtensionStatus(bgCtx, capturedExt, esl.ExtensionStatusIdle); werr != nil {
+								if werr := capturedWriter.SetExtensionStatus(lifetimeCtx, capturedExt, esl.ExtensionStatusIdle); werr != nil {
 									logger.Error("ACW 冷却后置分机为空闲失败", "extension", capturedExt, "error", werr.Error())
 									return
 								}
@@ -343,7 +347,7 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 				// 客户应答：
 				if legRole == string(contracts.LegRoleCustomer) {
 					if workflowID == esl.WorkflowESLBatchPredictive || workflowID == esl.WorkflowESLBatchOutbound {
-						return handleBatchOutboundCustomerAnswer(ctx, event, sessionService, originate, batchRepo, queue, logger)
+						return handleBatchOutboundCustomerAnswer(lifetimeCtx, event, sessionService, originate, batchRepo, queue, logger)
 					}
 				}
 				// 坐席应答：切断补振铃并桥接双腿
@@ -406,7 +410,7 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 				_ = json.Unmarshal([]byte(flowJSON), &flow)
 			}
 			if flow.FlowGraph != nil {
-				engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+				engine := NewAIVoiceEngine(lifetimeCtx, originate.CommandService, sessionService.Store, statusReader, logger)
 				_ = engine.ProcessASRText(ctx, &session, flow, text)
 			}
 		}
@@ -427,7 +431,7 @@ func RegisterConsumers(bus events.Bus, ctiRunner *workflow.Runner, eslRunner *wo
 				_ = json.Unmarshal([]byte(flowJSON), &flow)
 			}
 			if flow.FlowGraph != nil {
-				engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+				engine := NewAIVoiceEngine(lifetimeCtx, originate.CommandService, sessionService.Store, statusReader, logger)
 				_ = engine.ProcessDTMFKey(ctx, &session, flow, digit)
 			}
 		}
@@ -1047,11 +1051,14 @@ func handleBatchOutboundCustomerAnswer(ctx context.Context, event contracts.Even
 				capturedSkillGroupID := skillGroupID
 				go func() {
 					const queueWaitTimeout = 30 * time.Second
-					time.Sleep(queueWaitTimeout)
-					bgCtx := context.Background()
+					select {
+					case <-time.After(queueWaitTimeout):
+					case <-ctx.Done():
+						return
+					}
 
 					// 原子从队列中移除，返回 removed>0 说明客户仍在等待（超时需挂断）
-					removed, rErr := queue.Remove(bgCtx, capturedMerchantID, capturedSkillGroupID, capturedCallID)
+					removed, rErr := queue.Remove(ctx, capturedMerchantID, capturedSkillGroupID, capturedCallID)
 					if rErr != nil {
 						logger.Error("排队超时：从队列清理失败", "callId", capturedCallID, "error", rErr.Error())
 						return
@@ -1073,7 +1080,7 @@ func handleBatchOutboundCustomerAnswer(ctx context.Context, event contracts.Even
 						contracts.CallFlowBatchPredictive,
 						map[string]any{"cause": "NO_ANSWER", "reason": "queue_wait_timeout"},
 					)
-					if herr := originate.CommandService.Execute(bgCtx, hangupCmd); herr != nil {
+					if herr := originate.CommandService.Execute(ctx, hangupCmd); herr != nil {
 						logger.Error("排队超时挂断客户腿失败", "callId", capturedCallID, "error", herr.Error())
 					} else {
 						logger.Info("排队超时已成功挂断客户腿", "callId", capturedCallID)
@@ -1564,7 +1571,7 @@ func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvel
 			_ = json.Unmarshal([]byte(flowJSON), &flow)
 		}
 
-		engine := NewAIVoiceEngine(originate.CommandService, sessionService.Store, statusReader, logger)
+		engine := NewAIVoiceEngine(ctx, originate.CommandService, sessionService.Store, statusReader, logger)
 		err := engine.StartAIVoiceFlow(ctx, &session, flow)
 		if err != nil {
 			logger.Error("云枢运行时：AI 智能话术流启动失败，降级回退人工坐席", "error", err.Error())

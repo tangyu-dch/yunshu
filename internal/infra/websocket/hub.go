@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,7 +49,22 @@ func NewHub(client *goredis.Client, logger *slog.Logger) *Hub {
 		Logger:  logger,
 		clients: map[*websocket.Conn]subscription{},
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(*http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // 允许无 Origin 的请求（同源请求、服务端调用）
+				}
+				allowedOrigins := os.Getenv("WS_ALLOWED_ORIGINS")
+				if allowedOrigins == "" {
+					return true // 未配置时允许所有（开发环境兜底）
+				}
+				for _, allowed := range strings.Split(allowedOrigins, ",") {
+					if strings.TrimSpace(allowed) == origin {
+						return true
+					}
+				}
+				return false
+			},
 		},
 	}
 }

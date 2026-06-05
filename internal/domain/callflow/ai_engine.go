@@ -22,15 +22,20 @@ type AIVoiceEngine struct {
 	SessionStore   esl.SessionStore
 	StatusReader   esl.ExtensionStatusReader
 	Logger         *slog.Logger
+	lifetimeCtx    context.Context
 }
 
 // NewAIVoiceEngine 创建智能语音 IVR 运行时寻路引擎。
-func NewAIVoiceEngine(cmdService *esl.CommandService, store esl.SessionStore, statusReader esl.ExtensionStatusReader, logger *slog.Logger) *AIVoiceEngine {
+func NewAIVoiceEngine(lifetimeCtx context.Context, cmdService *esl.CommandService, store esl.SessionStore, statusReader esl.ExtensionStatusReader, logger *slog.Logger) *AIVoiceEngine {
+	if lifetimeCtx == nil {
+		lifetimeCtx = context.Background()
+	}
 	return &AIVoiceEngine{
 		CommandService: cmdService,
 		SessionStore:   store,
 		StatusReader:   statusReader,
 		Logger:         logger,
+		lifetimeCtx:    lifetimeCtx,
 	}
 }
 
@@ -341,11 +346,15 @@ func (e *AIVoiceEngine) executeNode(ctx context.Context, session *esl.CallSessio
 
 			logger.Info("云枢呼叫运行时：TTS 播报启动，开启智能定时器，完毕后自动流转", "estimatedSeconds", playSeconds)
 			go func() {
-				time.Sleep(time.Duration(playSeconds) * time.Second)
+				select {
+				case <-time.After(time.Duration(playSeconds) * time.Second):
+				case <-e.lifetimeCtx.Done():
+					return
+				}
 				nextTargetNode := e.findNodeByID(graph, nextEdges[0].Target)
 				if nextTargetNode != nil {
 					// 异步流动执行下一个节点时，我们需要一个干净的上下文，并重新保存状态
-					_ = e.executeNode(context.Background(), session, graph, nextTargetNode)
+					_ = e.executeNode(e.lifetimeCtx, session, graph, nextTargetNode)
 				}
 			}()
 		}

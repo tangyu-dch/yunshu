@@ -35,13 +35,20 @@ func OpenMySQL(cfg Config) (*gorm.DB, error) {
 	}
 	if cfg.MaxIdleConns > 0 {
 		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	} else {
+		sqlDB.SetMaxIdleConns(10) // 呼叫中心场景默认 10 个空闲连接
 	}
 	if cfg.MaxOpenConns > 0 {
 		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	} else {
+		sqlDB.SetMaxOpenConns(100) // 默认最大 100 个连接
 	}
 	if cfg.ConnMaxLifetime > 0 {
 		sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	} else {
+		sqlDB.SetConnMaxLifetime(30 * time.Minute)
 	}
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	return gormDB, nil
 }
 

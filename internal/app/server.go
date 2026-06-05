@@ -10,8 +10,10 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -54,6 +56,8 @@ type Server struct {
 	worker      *WorkerRuntime
 	installer   *installer.Installer
 	cfg         config.Config
+	ctx         context.Context
+	cancel      context.CancelFunc
 }
 
 // ConsoleRuntime 聚合 cc-console 管理端运行时依赖。
@@ -89,42 +93,62 @@ type ConsoleRuntime struct {
 	AreaCode         operatedomain.AreaCodeRepository
 	License          *operatedomain.LicenseService
 	IPBlock          *operatedomain.IPBlockManagementService
+	DB               *gorm.DB
 }
 
 // NewServer 负责创建单个服务进程的 Gin 引擎，并注册通用探活、契约发现和领域路由。
 // 这里保持装配逻辑集中，避免各个 cmd 入口散落不同的中间件和基础路由。
-func NewServer(name contracts.ServiceName) *Server {
+func NewServer(name contracts.ServiceName) (*Server, error) {
 	return NewServerWithConfig(name, config.Config{})
 }
 
 // NewServerWithConfig 按配置创建服务。
 // cc-call 可以通过配置切换内存事件总线或 Redis Stream 事件总线。
-func NewServerWithConfig(name contracts.ServiceName, cfg config.Config) *Server {
+func NewServerWithConfig(name contracts.ServiceName, cfg config.Config) (*Server, error) {
 	gin.SetMode(gin.ReleaseMode)
-	s := &Server{Name: name, gin: gin.New(), cfg: cfg}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{Name: name, gin: gin.New(), cfg: cfg, ctx: ctx, cancel: cancel}
 	if name == contracts.ServiceCall {
-		s.callRuntime = NewCallRuntimeWithConfig(cfg, buildEventBus(cfg), slog.Default())
+		var err error
+		s.callRuntime, err = NewCallRuntimeWithConfig(ctx, cfg, buildEventBus(cfg), slog.Default())
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 	}
 	if name == contracts.ServiceConsole {
-		s.console = NewConsoleRuntimeWithConfig(cfg, slog.Default())
+		var err error
+		s.console, err = NewConsoleRuntimeWithConfig(cfg, slog.Default())
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 		s.installer = installer.NewInstaller(slog.Default())
 	}
 	if name == contracts.ServiceWorker {
-		s.worker = NewWorkerRuntimeWithConfig(cfg, slog.Default())
+		var err error
+		s.worker, err = NewWorkerRuntimeWithConfig(cfg, slog.Default())
+		if err != nil {
+			cancel()
+			return nil, err
+		}
 		s.worker.Dispatcher.Events = buildEventBus(cfg)
-		s.worker.Start(context.Background(), cfg.Worker.Outbox.Interval)
+		s.worker.Start(s.ctx, cfg.Worker.Outbox.Interval)
 	}
 	s.routes()
-	return s
+	return s, nil
 }
 
 // NewConsoleRuntimeWithConfig 创建 cc-console 管理端运行时。
 // 这里复用 cc-call 的数据库和 FreeSWITCH registry 装配规则，保证管理端和呼叫端看到同一套配置真相。
-func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *ConsoleRuntime {
+func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) (*ConsoleRuntime, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	gormDB := openRuntimeDB(cfg, logger)
+	gormDB, err := openRuntimeDB(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
 	var redisClient *goredis.Client
 	if len(cfg.Redis.Addrs) > 0 {
 		redisClient = redisinfra.NewClient(cfg.Redis)
@@ -135,7 +159,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	registry := buildFSRegistry(cfg, gormDB, logger)
 	var authStore authdomain.SessionStore = authdomain.NewMemorySessionStore()
 	if redisClient != nil {
-		authStore = authdomain.NewRedisSessionStore(redisClient, "")
+		authStore = redisinfra.NewRedisSessionStore(redisClient, "")
 		logger.Info("管理端会话将写入 Redis", "keyPrefix", contracts.KeyConsoleAuthSessionPrefix)
 	}
 	authService := &authdomain.AuthService{Store: authStore, TTL: 12 * time.Hour, Logger: logger}
@@ -457,18 +481,55 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		AreaCode:         areaCodeRepository,
 		License:          licenseService,
 		IPBlock:          ipBlockService,
-	}
+		DB:               gormDB,
+	}, nil
 }
 
-// ListenAndServe 启动 HTTP 服务。后续接入优雅停机时也应在这一层统一处理。
-func (s *Server) ListenAndServe(addr string) error {
+// ListenAndServe 启动 HTTP 服务。在 context 被取消时触发优雅停机。
+func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	server := &http.Server{
 		Addr:              addr,
 		Handler:           s.gin,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
-	slog.Info("服务已启动", "service", s.Name, "addr", addr)
-	return server.ListenAndServe()
+
+	errChan := make(chan error, 1)
+	go func() {
+		slog.Info("服务已启动", "service", s.Name, "addr", addr)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errChan <- err
+		}
+		close(errChan)
+	}()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("收到关闭通知，开始优雅关闭...", "service", s.Name)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		s.Shutdown(shutdownCtx)
+		return server.Shutdown(shutdownCtx)
+	case err := <-errChan:
+		return err
+	}
+}
+
+// Shutdown 执行 Server 内部相关资源的释放工作，防止 goroutine 泄漏。
+func (s *Server) Shutdown(ctx context.Context) {
+	if s.cancel != nil {
+		s.cancel()
+	}
+	if s.callRuntime != nil {
+		if s.callRuntime.WSHubCancel != nil {
+			s.callRuntime.WSHubCancel()
+		}
+		if s.callRuntime.ASRServer != nil {
+			s.callRuntime.ASRServer.Stop()
+		}
+		if s.callRuntime.FSPool != nil {
+			s.callRuntime.FSPool.CloseAll()
+		}
+	}
 }
 
 // Run 是所有 cmd 服务入口共用的启动函数，保证参数解析、日志和退出语义一致。
@@ -493,7 +554,17 @@ func Run(name contracts.ServiceName) {
 			*addr = cfg.Service.Addr
 		}
 	}
-	if err := NewServerWithConfig(name, cfg).ListenAndServe(*addr); err != nil {
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	s, err := NewServerWithConfig(name, cfg)
+	if err != nil {
+		slog.Error("服务初始化失败", "service", name, "error", err)
+		os.Exit(1)
+	}
+
+	if err := s.ListenAndServe(ctx, *addr); err != nil {
 		slog.Error("服务异常停止", "service", name, "error", err)
 		os.Exit(1)
 	}
@@ -543,7 +614,7 @@ func (s *Server) routes() {
 		httpesl.RegisterRoutes(s.gin, s.callRuntime.Originate, s.callRuntime.Command, s.callRuntime.Session, s.callRuntime.GatewaySync, s.callRuntime.FSNodes, s.callRuntime.FSPool, s.callRuntime.DB)
 	case contracts.ServiceConsole:
 		httpoperate.RegisterAuthRoutes(s.gin, s.console.Auth)
-		httpoperate.RegisterDialpadCompatRoutes(s.gin, s.console.Auth, s.console.CallRecord, s.console.Extension, openRuntimeDB(s.cfg, slog.Default()), s.cfg.Console.Dialpad)
+		httpoperate.RegisterDialpadCompatRoutes(s.gin, s.console.Auth, s.console.CallRecord, s.console.Extension, s.console.DB, s.cfg.Console.Dialpad)
 		httpoperate.RegisterPermissionRoutes(s.gin, s.console.Permissions)
 		httpoperate.RegisterAccountRoutes(s.gin, s.console.Account)
 		httpoperate.RegisterFreeSwitchRoutes(s.gin, s.console.FreeSwitch)

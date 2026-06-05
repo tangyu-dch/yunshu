@@ -32,11 +32,14 @@ type WorkerRuntime struct {
 }
 
 // NewWorkerRuntimeWithConfig 创建 worker 运行时。
-func NewWorkerRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *WorkerRuntime {
+func NewWorkerRuntimeWithConfig(cfg config.Config, logger *slog.Logger) (*WorkerRuntime, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	gormDB := openRuntimeDB(cfg, logger)
+	gormDB, err := openRuntimeDB(cfg, logger)
+	if err != nil {
+		return nil, err
+	}
 	outboxStore := buildOutboxStore(gormDB, logger)
 	cdrStore := buildCDRStore(gormDB, logger)
 	billingStore := buildBillingStore(gormDB, logger)
@@ -85,7 +88,7 @@ func NewWorkerRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *WorkerR
 		Logger:     logger,
 	}
 	logger.Info("cc-worker outbox 投递器已初始化", "workerId", dispatcher.WorkerID, "batchSize", dispatcher.BatchSize, "retryDelay", dispatcher.RetryDelay, "lease", dispatcher.Lease)
-	return &WorkerRuntime{Outbox: outboxStore, CDR: cdrStore, Billing: billingStore, Settlement: settlementStore, Recording: recordingStore, Reporting: reportingStore, Downstream: downstreamStore, Dispatcher: dispatcher, Logger: logger}
+	return &WorkerRuntime{Outbox: outboxStore, CDR: cdrStore, Billing: billingStore, Settlement: settlementStore, Recording: recordingStore, Reporting: reportingStore, Downstream: downstreamStore, Dispatcher: dispatcher, Logger: logger}, nil
 }
 
 // Start 启动 worker 后台循环。

@@ -20,7 +20,7 @@ import (
 func TestWorkerRuntimeDispatchesProjectionOutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "projection:1",
@@ -51,7 +51,7 @@ func TestWorkerRuntimeDispatchesProjectionOutbox(t *testing.T) {
 func TestWorkerRuntimeDispatchesBillingOutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:billing:call-1",
@@ -85,7 +85,7 @@ func TestWorkerRuntimeDispatchesBillingSettlementOutbox(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.Worker.Billing.DefaultRatePerMin = 0.5
-	runtime := NewWorkerRuntimeWithConfig(cfg, nil)
+	runtime := newTestWorkerRuntime(t, cfg)
 	settlementStore := runtime.Settlement.(*settlementinfra.SettlementMemoryStore)
 	settlementStore.Balance[88] = 100
 	ctx := context.Background()
@@ -139,7 +139,7 @@ func TestWorkerRuntimeDispatchesBillingSettlementOutbox(t *testing.T) {
 func TestWorkerRuntimeDispatchesRecordingOutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:recording:call-1",
@@ -183,7 +183,7 @@ func TestWorkerRuntimeUploadsRecordingHTTP(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.Worker.Recording.URL = server.URL
-	runtime := NewWorkerRuntimeWithConfig(cfg, nil)
+	runtime := newTestWorkerRuntime(t, cfg)
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:recording:call-1",
@@ -212,7 +212,7 @@ func TestWorkerRuntimeUploadsRecordingHTTP(t *testing.T) {
 func TestWorkerRuntimeDispatchesReportProjectionOutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:report:call-1",
@@ -244,7 +244,7 @@ func TestWorkerRuntimeDispatchesReportProjectionOutbox(t *testing.T) {
 func TestWorkerRuntimeDispatchesDownstreamOutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:downstream:call-1",
@@ -288,7 +288,7 @@ func TestWorkerRuntimeDeliversDownstreamHTTP(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.Worker.Downstream.URL = server.URL
-	runtime := NewWorkerRuntimeWithConfig(cfg, nil)
+	runtime := newTestWorkerRuntime(t, cfg)
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:downstream:call-1",
@@ -329,7 +329,7 @@ func TestWorkerRuntimeDispatchesBatchCallback(t *testing.T) {
 
 	cfg := testConfig()
 	cfg.Worker.Callback.URL = server.URL
-	runtime := NewWorkerRuntimeWithConfig(cfg, nil)
+	runtime := newTestWorkerRuntime(t, cfg)
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "callback:1",
@@ -354,7 +354,7 @@ func TestWorkerRuntimeDispatchesBatchCallback(t *testing.T) {
 func TestWorkerRuntimeDispatchesCDROutbox(t *testing.T) {
 	t.Parallel()
 
-	runtime := NewWorkerRuntimeWithConfig(config.Config{}, nil)
+	runtime := newTestWorkerRuntime(t, config.Config{})
 	ctx := context.Background()
 	if err := runtime.Outbox.Append(ctx, outbox.Entry{
 		ID:             "cdr:call-1",

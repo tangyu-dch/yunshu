@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"yunshu/internal/contracts"
@@ -30,11 +31,18 @@ import (
 	"yunshu/internal/infra/system"
 	"yunshu/internal/infra/telephony"
 	wsinfra "yunshu/internal/infra/websocket"
+	infrahttp "yunshu/internal/infra/http"
+	"yunshu/internal/infra/storage"
 	"yunshu/pkg/idempotency"
 	"yunshu/pkg/workflow"
 
 	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+)
+
+var (
+	dbMigrationOnce sync.Once
+	dbMigrationErr  error
 )
 
 // CallRuntime 聚合 cc-call 进程内的 CTI 和 ESL 业务服务。
@@ -57,46 +65,59 @@ type CallRuntime struct {
 	Candidates     cti.CandidateSource
 	Marker         cti.CandidateMarker
 	WSHub          *wsinfra.Hub
+	WSHubCancel    context.CancelFunc
 	ASRServer      *wsinfra.ASRServer
 }
 
 // NewCallRuntime 创建 cc-call 运行时依赖。
-func NewCallRuntime(logger *slog.Logger) *CallRuntime {
-	return NewCallRuntimeWithConfig(config.Config{}, nil, logger)
+func NewCallRuntime(logger *slog.Logger) (*CallRuntime, error) {
+	return NewCallRuntimeWithConfig(context.Background(), config.Config{}, nil, logger)
 }
 
 // NewCallRuntimeWithEventBus 创建可注入事件总线的 cc-call 运行时。
 // 生产环境注入 Redis Stream bus，本地开发和单元测试默认使用内存 bus。
-func NewCallRuntimeWithEventBus(bus events.Bus, logger *slog.Logger) *CallRuntime {
-	return NewCallRuntimeWithConfig(config.Config{}, bus, logger)
+func NewCallRuntimeWithEventBus(bus events.Bus, logger *slog.Logger) (*CallRuntime, error) {
+	return NewCallRuntimeWithConfig(context.Background(), config.Config{}, bus, logger)
 }
 
 // NewCallRuntimeWithConfig 按配置创建 cc-call 运行时。
 // 有 FS 节点配置时使用真实 ESL 连接池；没有节点时使用内存执行器便于本地开发。
-func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Logger) *CallRuntime {
+func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events.Bus, logger *slog.Logger) (*CallRuntime, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
+
+	// 注入基础设施层的 HTTP 客户端与 TTS 缓存存储实现，解耦 domain 依赖
+	callflow.SetHTTPClient(infrahttp.NewDefaultHTTPClient(15 * time.Second))
+	callflow.SetTTSCacheStore(storage.NewLocalTTSCacheStore(""))
 	if bus == nil {
 		bus = events.NewMemoryBus(logger)
 	}
 	ctiEngine, err := workflow.NewEngine(cti.WorkflowDefinitions()...)
 	if err != nil {
-		panic(err)
+		logger.Error("CTI 工作流引擎初始化失败", "error", err.Error())
+		return nil, fmt.Errorf("cti workflow engine init: %w", err)
 	}
 	eslEngine, err := workflow.NewEngine(esl.WorkflowDefinitions()...)
 	if err != nil {
-		panic(err)
+		logger.Error("ESL 工作流引擎初始化失败", "error", err.Error())
+		return nil, fmt.Errorf("esl workflow engine init: %w", err)
 	}
 	ctiRunner := workflow.NewRunner(ctiEngine, workflow.NewMemoryInstanceStore(), logger)
 	eslRunner := workflow.NewRunner(eslEngine, workflow.NewMemoryInstanceStore(), logger)
 
-	gormDB := openRuntimeDB(cfg, logger)
+	gormDB, err := openRuntimeDB(cfg, logger)
+	if err != nil {
+		return nil, fmt.Errorf("open runtime db: %w", err)
+	}
 	redisClient := redisinfra.NewClient(cfg.Redis)
 	var wsHub *wsinfra.Hub
+	var wsCancel context.CancelFunc
 	if len(cfg.Redis.Addrs) > 0 {
 		wsHub = wsinfra.NewHub(redisClient, logger)
-		wsHub.Start(context.Background())
+		var wsCtx context.Context
+		wsCtx, wsCancel = context.WithCancel(ctx)
+		wsHub.Start(wsCtx)
 		logger.Info("CTI WebSocket Hub 已启用", "topic", wsinfra.PushTopic)
 	} else {
 		logger.Warn("未配置 Redis 地址，CTI WebSocket Hub 未启用", "impact", "无法跨实例推送批量投影刷新")
@@ -107,7 +128,7 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 	nodes, err := nodeRegistry.ListEnabled(context.Background())
 	if err != nil {
 		logger.Error("读取 FreeSWITCH 节点配置失败", "error", err.Error())
-		panic(err)
+		return nil, fmt.Errorf("list FreeSWITCH nodes: %w", err)
 	}
 	fsNodes := fsNodeConfigs(nodes)
 	executor := esl.CommandExecutor(&esl.MemoryCommandExecutor{Logger: logger})
@@ -117,7 +138,7 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 	callflow.RegisterProjectionConsumers(bus, reliableOutbox, logger)
 	var pool *fsesl.ConnectionPool
 	if len(fsNodes) > 0 {
-		pool = fsesl.NewConnectionPool(fsNodes, cfg.FreeSwitch.Reconnect.Interval, cfg.FreeSwitch.Reconnect.MaxAttempts, logger)
+		pool = fsesl.NewConnectionPool(ctx, fsNodes, cfg.FreeSwitch.Reconnect.Interval, cfg.FreeSwitch.Reconnect.MaxAttempts, logger)
 		pool.LeaseRegistry = nodeRegistry
 		pool.LeaseOwner = buildFSLeaseOwner(cfg.Service.Name)
 		pool.LeaseTTL = cfg.FreeSwitch.EventLeaseTTL
@@ -187,7 +208,7 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 		callQueue = selectioninfra.NewRedisCallQueue(redisClient)
 	}
 
-	callflow.RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, logger)
+	callflow.RegisterConsumers(ctx, bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, logger)
 	var batchScheduler *cti.BatchSchedulerService
 	if gormDB != nil {
 		batchScheduler = &cti.BatchSchedulerService{
@@ -206,7 +227,7 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 	var asrServer *wsinfra.ASRServer
 	if !runningUnderGoTest() {
 		asrServer = wsinfra.NewASRServer(":9002", bus, session.Store, logger)
-		if err := asrServer.Start(context.Background()); err != nil {
+		if err := asrServer.Start(ctx); err != nil {
 			logger.Warn("云枢 ASR 旁路推流 WebSocket 服务启动失败，端口可能已被占用", "error", err.Error())
 		} else {
 			logger.Info("云枢 ASR 旁路推流 WebSocket 服务已在端口 9002 启动")
@@ -214,22 +235,22 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 	}
 
 	if gormDB != nil && redisClient != nil {
-		go startOfflineExtensionUnbinder(context.Background(), gormDB, redisClient, logger)
+		go startOfflineExtensionUnbinder(ctx, gormDB, redisClient, logger)
 	}
 
-	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub, ASRServer: asrServer}
+	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub, WSHubCancel: wsCancel, ASRServer: asrServer}, nil
 }
 
 // openRuntimeDB 打开数据库连接。
-// 必须配置并成功连接 MySQL，否则程序直接退出。彻底移除了 SQLite 开发库和 Fallback 兜底逻辑。
-func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
+// 必须配置并成功连接 MySQL，否则返回 error。彻底移除了 SQLite 开发库和 Fallback 兜底逻辑。
+func openRuntimeDB(cfg config.Config, logger *slog.Logger) (*gorm.DB, error) {
 	if runningUnderGoTest() && cfg.MySQL.DSN == "" {
 		logger.Info("测试环境下未配置 MySQL DSN，跳过数据库连接")
-		return nil
+		return nil, nil
 	}
 	if cfg.MySQL.DSN == "" {
 		logger.Error("数据库配置错误：MySQL DSN 不能为空！彻底移除了 SQLite 内存兜底。")
-		panic("MySQL DSN is empty")
+		return nil, fmt.Errorf("MySQL DSN is empty")
 	}
 	gormDB, err := db.OpenMySQL(db.Config{
 		DSN:             cfg.MySQL.DSN,
@@ -239,67 +260,71 @@ func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
 	})
 	if err != nil {
 		logger.Error("无法连接 MySQL 数据库，程序直接退出（已移除 SQLite 内存兜底）", "error", err.Error())
-		panic(fmt.Sprintf("Failed to connect to MySQL: %v", err))
+		return nil, fmt.Errorf("failed to connect to MySQL: %w", err)
 	}
 	logger.Info("MySQL 数据库连接已建立")
 
 	// 执行自动迁移
-	if errMig := gormDB.AutoMigrate(
-		&system.ProxyConfigModel{},
-		&system.ConsoleAccountModel{},
-		&system.ConsoleRoleModel{},
-		&system.ConsolePermissionModel{},
-		&system.ConsoleRolePermissionModel{},
-		&system.ConsoleRoutePermissionModel{},
-		&resource.MerchantModel{},
-		&resource.MerchantBillingOverviewModel{},
-		&merchant.MerchantBillingRechargeModel{},
-		&telephony.GatewayModel{},
-		&telephony.ChannelModel{},
-		&telephony.PoolModel{},
-		&resource.PoolPhoneModel{},
-		&resource.PoolPhoneSkillGroupModel{},
-		&resource.SkillGroupModel{},
-		&resource.UserSkillGroupModel{},
-		&resource.MerchantUserModel{},
-		&resource.ExtensionModel{},
-		&resource.PhoneGroupModel{},
-		&resource.PhoneGroupPoolPhoneRefModel{},
-		&resource.PhoneGroupSkillGroupRefModel{},
-		&business.AIModelFlowModel{},
-		&business.AIModelConfigModel{},
-		&security.BlacklistModel{},
-		&security.BlacklistGatewayModel{},
-		&security.BlacklistDataModel{},
-		&security.BlacklistChannelModel{},
-		&security.WhitelistDataModel{},
-		&security.WhitelistDataMerchantModel{},
-		&merchant.CallRateModel{},
-		&merchant.CallRateMerchantModel{},
-		&business.MerchantBatchCallTaskModel{},
-		&business.MerchantBatchCallTaskListModel{},
-		&telephony.RtpengineModel{},
-		&security.RiskControlModel{},
-		&security.RiskControlMerchantModel{},
-		&system.AreaCodeModel{},
-		&system.PhoneAttributionModel{},
-		&telephony.FreeswitchModel{},
-		&telephony.FreeswitchEventLeaseModel{},
-		&business.RecordModel{},
-		&business.RecordingJobModel{},
-		&business.ReportProjectionModel{},
-		&business.PushJobModel{},
-		&business.SettlementJobModel{},
-		&business.MessageOutboxModel{},
-		&resource.DialpadVersionModel{},
-		&resource.DepartmentModel{},
-		&system.IPBlockLogModel{},
-	); errMig != nil {
-		logger.Error("MySQL 数据库自动迁移失败", "error", errMig.Error())
+	dbMigrationOnce.Do(func() {
+		dbMigrationErr = gormDB.AutoMigrate(
+			&system.ProxyConfigModel{},
+			&system.ConsoleAccountModel{},
+			&system.ConsoleRoleModel{},
+			&system.ConsolePermissionModel{},
+			&system.ConsoleRolePermissionModel{},
+			&system.ConsoleRoutePermissionModel{},
+			&resource.MerchantModel{},
+			&resource.MerchantBillingOverviewModel{},
+			&merchant.MerchantBillingRechargeModel{},
+			&telephony.GatewayModel{},
+			&telephony.ChannelModel{},
+			&telephony.PoolModel{},
+			&resource.PoolPhoneModel{},
+			&resource.PoolPhoneSkillGroupModel{},
+			&resource.SkillGroupModel{},
+			&resource.UserSkillGroupModel{},
+			&resource.MerchantUserModel{},
+			&resource.ExtensionModel{},
+			&resource.PhoneGroupModel{},
+			&resource.PhoneGroupPoolPhoneRefModel{},
+			&resource.PhoneGroupSkillGroupRefModel{},
+			&business.AIModelFlowModel{},
+			&business.AIModelConfigModel{},
+			&security.BlacklistModel{},
+			&security.BlacklistGatewayModel{},
+			&security.BlacklistDataModel{},
+			&security.BlacklistChannelModel{},
+			&security.WhitelistDataModel{},
+			&security.WhitelistDataMerchantModel{},
+			&merchant.CallRateModel{},
+			&merchant.CallRateMerchantModel{},
+			&business.MerchantBatchCallTaskModel{},
+			&business.MerchantBatchCallTaskListModel{},
+			&telephony.RtpengineModel{},
+			&security.RiskControlModel{},
+			&security.RiskControlMerchantModel{},
+			&system.AreaCodeModel{},
+			&system.PhoneAttributionModel{},
+			&telephony.FreeswitchModel{},
+			&telephony.FreeswitchEventLeaseModel{},
+			&business.RecordModel{},
+			&business.RecordingJobModel{},
+			&business.ReportProjectionModel{},
+			&business.PushJobModel{},
+			&business.SettlementJobModel{},
+			&business.MessageOutboxModel{},
+			&resource.DialpadVersionModel{},
+			&resource.DepartmentModel{},
+			&system.IPBlockLogModel{},
+		)
+	})
+	if dbMigrationErr != nil {
+		logger.Error("MySQL 数据库自动迁移失败", "error", dbMigrationErr.Error())
+		return nil, fmt.Errorf("auto migrate: %w", dbMigrationErr)
 	} else {
-		logger.Info("MySQL 数据库自动迁移成功")
+		logger.Info("MySQL 数据库自动迁移处理完成")
 	}
-	return gormDB
+	return gormDB, nil
 }
 
 func runningUnderGoTest() bool {

@@ -419,12 +419,14 @@ func (r *BatchRepository) GetDetails(ctx context.Context, taskID int) ([]operate
 		Callee      string
 		DurationSec int
 	}
-	r.DB.WithContext(ctx).
+	if err := r.DB.WithContext(ctx).
 		Table("cc_biz_cdr").
 		Select("callee, MAX(duration_sec) as duration_sec").
 		Where("batch_task_id = ?", taskID).
 		Group("callee").
-		Scan(&cdrs)
+		Scan(&cdrs).Error; err != nil {
+		return nil, fmt.Errorf("查询 CDR 明细失败: %w", err)
+	}
 
 	cdrMap := make(map[string]int)
 	for _, c := range cdrs {

@@ -71,7 +71,10 @@ func (e *OpenAIASREngine) Transcribe(ctx context.Context, audioData []byte, form
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bodyBuf)
+	reqCtx, reqCancel := context.WithTimeout(ctx, 12*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bodyBuf)
 	if err != nil {
 		return "", err
 	}
@@ -79,12 +82,14 @@ func (e *OpenAIASREngine) Transcribe(ctx context.Context, audioData []byte, form
 	req.Header.Set("Content-Type", bodyWriter.FormDataContentType())
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 12 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("OpenAI Whisper 物理 ASR 接口请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("OpenAI Whisper ASR 接口返回错误，状态码: %d", resp.StatusCode)
@@ -143,7 +148,10 @@ func (e *OpenAITTSEngine) Synthesize(ctx context.Context, text string, config ma
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
@@ -151,12 +159,14 @@ func (e *OpenAITTSEngine) Synthesize(ctx context.Context, text string, config ma
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("OpenAI TTS 物理合成接口请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode == http.StatusOK {
 		return io.ReadAll(resp.Body)
@@ -219,7 +229,10 @@ func (e *OpenAILLMEngine) GenerateReply(ctx context.Context, systemPrompt, userM
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -227,12 +240,14 @@ func (e *OpenAILLMEngine) GenerateReply(ctx context.Context, systemPrompt, userM
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("OpenAI 物理 API 调用失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("OpenAI 物理大模型接口报错，状态码: %d", resp.StatusCode)

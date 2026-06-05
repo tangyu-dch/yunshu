@@ -663,8 +663,17 @@ func (r *MemoryAccountRepository) ResolveLoginIdentity(_ context.Context, req au
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, account := range r.accounts {
-		if account.Username != username || !account.Enable || account.Password != password {
+		if account.Username != username || !account.Enable {
 			continue
+		}
+		if strings.HasPrefix(account.Password, "$2a$") {
+			if err := bcrypt.CompareHashAndPassword([]byte(account.Password), []byte(password)); err != nil {
+				continue
+			}
+		} else {
+			if account.Password != password {
+				continue
+			}
 		}
 		if err := r.ensureMemoryMerchantLoginAllowed(account); err != nil {
 			return authdomain.LoginIdentity{}, err
@@ -720,9 +729,13 @@ func defaultAccountModel(account authdomain.LoginAccount, now time.Time) (Consol
 			dataScope = operate.DataScopeGlobal
 		}
 	}
-	hash, err := hashPassword(account.Password)
-	if err != nil {
-		return ConsoleAccountModel{}, err
+	hash := account.Password
+	var err error
+	if !strings.HasPrefix(hash, "$2a$") {
+		hash, err = hashPassword(account.Password)
+		if err != nil {
+			return ConsoleAccountModel{}, err
+		}
 	}
 	return ConsoleAccountModel{
 		Username:     strings.ToLower(strings.TrimSpace(account.Username)),

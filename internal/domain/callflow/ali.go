@@ -51,7 +51,10 @@ func (e *AliASREngine) Transcribe(ctx context.Context, audioData []byte, format 
 	}
 
 	url := fmt.Sprintf("https://nls-gateway.cn-shanghai.aliyuncs.com/stream/v1/asr?appkey=%s&format=%s&sample_rate=16000", appkey, format)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(audioData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewReader(audioData))
 	if err != nil {
 		return "", err
 	}
@@ -59,12 +62,14 @@ func (e *AliASREngine) Transcribe(ctx context.Context, audioData []byte, format 
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("X-NLS-Token", token)
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("阿里 ASR 物理请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("阿里 ASR 物理接口报错，状态码: %d", resp.StatusCode)
@@ -135,19 +140,24 @@ func (e *AliTTSEngine) Synthesize(ctx context.Context, text string, config map[s
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("阿里 TTS 物理请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	// 阿里一句话语音合成在成功时直接返回音频二进制流，Content-Type 为 audio/mpeg
 	if resp.StatusCode == http.StatusOK {
@@ -211,7 +221,10 @@ func (e *AliLLMEngine) GenerateReply(ctx context.Context, systemPrompt, userMess
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -219,12 +232,14 @@ func (e *AliLLMEngine) GenerateReply(ctx context.Context, systemPrompt, userMess
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("阿里通义千问物理调用失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("阿里通义千问物理大模型返回错误，状态码: %d", resp.StatusCode)

@@ -8,6 +8,7 @@ import (
 
 	"yunshu/internal/contracts"
 	authdomain "yunshu/internal/domain/auth"
+	"yunshu/internal/transport/http/middleware"
 )
 
 // RegisterAuthRoutes 注册管理端登录和 token 查询接口。
@@ -17,7 +18,7 @@ func RegisterAuthRoutes(r gin.IRoutes, service *authdomain.AuthService) {
 }
 
 func registerLoginRoutes(r gin.IRoutes, service *authdomain.AuthService, prefix string, internal bool) {
-	r.POST(prefix+"/login", func(c *gin.Context) {
+	r.POST(prefix+"/login", middleware.RateLimitMiddleware(3, 0.2), func(c *gin.Context) {
 		if service == nil {
 			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "认证服务未启用"))
 			return
@@ -90,15 +91,19 @@ func registerLoginRoutes(r gin.IRoutes, service *authdomain.AuthService, prefix 
 }
 
 func tokenFromRequest(c *gin.Context) string {
-	if token := c.Query("token"); token != "" {
+	// Token 仅通过 Authorization Header 传递，不再支持 URL 参数（防止日志泄露）
+	if auth := c.GetHeader("Authorization"); auth != "" {
+		if strings.HasPrefix(auth, "Bearer ") {
+			return strings.TrimPrefix(auth, "Bearer ")
+		}
+		return auth
+	}
+	if token := c.GetHeader("X-Token"); token != "" {
 		return token
 	}
-	header := strings.TrimSpace(c.GetHeader("Authorization"))
-	if strings.HasPrefix(strings.ToLower(header), "bearer ") {
-		return strings.TrimSpace(header[7:])
+	// Cookie 方式保留（兼容 WebSocket 升级场景）
+	if token, err := c.Cookie("session_token"); err == nil && token != "" {
+		return token
 	}
-	if header != "" {
-		return header
-	}
-	return strings.TrimSpace(c.GetHeader("X-Token"))
+	return ""
 }

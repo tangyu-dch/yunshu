@@ -4,15 +4,31 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"yunshu/internal/infra/config"
 	"yunshu/internal/infra/installer"
 	"yunshu/internal/infra/system"
 )
 
 func main() {
-	dsn := "root:db123456@tcp(127.0.0.1:3306)/yunshu?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := os.Getenv("MYSQL_DSN")
+	if dsn == "" {
+		dsn = os.Getenv("DB_DSN")
+	}
+	if dsn == "" {
+		// 优先从 configs/default.yaml 加载
+		if cfg, err := config.Load("configs/default.yaml"); err == nil && cfg.MySQL.DSN != "" {
+			dsn = cfg.MySQL.DSN
+		}
+	}
+	if dsn == "" {
+		dsn = "root:@tcp(127.0.0.1:3306)/yunshu?charset=utf8mb4&parseTime=True&loc=Local"
+		slog.Warn("使用默认无密码 MySQL DSN，仅适用于开发环境。生产环境请设置 MYSQL_DSN/DB_DSN 环境变量或配置 configs/default.yaml")
+	}
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("Failed to open DB: %v", err)

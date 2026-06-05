@@ -12,7 +12,10 @@ import (
 func TestServerHealth(t *testing.T) {
 	t.Parallel()
 
-	server := NewServer(contracts.ServiceCall)
+	server, err := NewServer(contracts.ServiceCall)
+	if err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
 
