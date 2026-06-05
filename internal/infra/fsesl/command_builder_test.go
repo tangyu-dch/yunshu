@@ -65,7 +65,7 @@ func TestBuildOriginateArgsCustomerFirstGateway(t *testing.T) {
 func TestBuildOriginateArgsAgentFirstUserProtocol(t *testing.T) {
 	t.Parallel()
 
-	// 1. 测试用例：显式要求使用 useUserProtocol
+	// 1. 测试用例：显式要求使用 useUserProtocol，但依然要强制走 sofia/external
 	cmd1 := contracts.TelephonyCommand{
 		CommandID: "originate:call-1",
 		Command:   "originate",
@@ -77,11 +77,11 @@ func TestBuildOriginateArgsAgentFirstUserProtocol(t *testing.T) {
 		},
 	}
 	args1 := BuildOriginateArgs(cmd1)
-	if !strings.Contains(args1, "user/100001 &park()") {
-		t.Fatalf("expected user/100001 protocol, got: %s", args1)
+	if !strings.Contains(args1, "sofia/external/100001@default &park()") {
+		t.Fatalf("expected sofia/external/100001@default, got: %s", args1)
 	}
 
-	// 2. 测试用例：满足 4~6 位且未指定外置网关 IP，自动转换
+	// 2. 测试用例：即使满足 4~6 位且未指定外置网关 IP，也必须走 sofia/external
 	cmd2 := contracts.TelephonyCommand{
 		CommandID: "originate:call-2",
 		Command:   "originate",
@@ -92,8 +92,8 @@ func TestBuildOriginateArgsAgentFirstUserProtocol(t *testing.T) {
 		},
 	}
 	args2 := BuildOriginateArgs(cmd2)
-	if !strings.Contains(args2, "user/100002@my-sip-domain &park()") {
-		t.Fatalf("expected user/100002@my-sip-domain protocol, got: %s", args2)
+	if !strings.Contains(args2, "sofia/external/100002@my-sip-domain &park()") {
+		t.Fatalf("expected sofia/external/100002@my-sip-domain, got: %s", args2)
 	}
 }
 

@@ -95,13 +95,6 @@ func BuildOriginateArgs(cmd contracts.TelephonyCommand) string {
 	}
 	domainOrGateway := stringValue(cmd, "domainOrGateway", stringValue(cmd, "domain", "default"))
 	if mode == contracts.OriginateModeAgentFirst {
-		// 如果显式要求使用 user 协议，或者分机长度为 4~6 位且未指定外置网关 IP，则优先使用 user/ 协议以支持多端同振
-		if boolValue(cmd, "useUserProtocol", false) || (len(destination) >= 4 && len(destination) <= 6 && !strings.Contains(domainOrGateway, ":") && domainOrGateway != "default") {
-			if domainOrGateway != "default" && !strings.Contains(domainOrGateway, ":") {
-				return fmt.Sprintf("{%s}user/%s@%s &park()", optionText, destination, domainOrGateway)
-			}
-			return fmt.Sprintf("{%s}user/%s &park()", optionText, destination)
-		}
 		return fmt.Sprintf("{%s}sofia/external/%s@%s &park()", optionText, destination, domainOrGateway)
 	}
 	if boolValue(cmd, "register", true) {
