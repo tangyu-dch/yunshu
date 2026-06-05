@@ -11,27 +11,29 @@ import (
 
 // RecordModel 映射 Go-native CDR 收口表。
 type RecordModel struct {
-	CallID       string    `gorm:"column:call_id;primaryKey;size:128"`
-	UUID         string    `gorm:"column:uuid;size:128;index"`
-	FSAddr       string    `gorm:"column:fs_addr;size:128;index"`
-	Profile      string    `gorm:"column:profile;size:64;index"`
-	MerchantID   int       `gorm:"column:merchant_id;index"`
-	UserID       int       `gorm:"column:user_id;index"`
-	BatchTaskID  int       `gorm:"column:batch_task_id;index"`
-	BatchTelID   int       `gorm:"column:batch_call_tel_id;index"`
-	Caller       string    `gorm:"column:caller;size:64;index"`
-	Callee       string    `gorm:"column:callee;size:64;index"`
-	DurationSec  int       `gorm:"column:duration_sec;index"`
-	HangupCause  string    `gorm:"column:hangup_cause;size:128"`
-	FinalState   string    `gorm:"column:final_state;size:64;index"`
-	RecordFile   string    `gorm:"column:record_file_path;size:512"`
-	CompletedAt  time.Time `gorm:"column:completed_at;index"`
-	EventID      string    `gorm:"column:event_id;size:160;uniqueIndex"`
-	EventVersion int       `gorm:"column:event_version"`
-	OutboxID     string    `gorm:"column:outbox_id;size:128;uniqueIndex"`
-	RawPayload   JSONMap   `gorm:"column:raw_payload;type:json"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
-	UpdatedAt    time.Time `gorm:"column:updated_at"`
+	CallID               string    `gorm:"column:call_id;primaryKey;size:128"`
+	UUID                 string    `gorm:"column:uuid;size:128;index"`
+	FSAddr               string    `gorm:"column:fs_addr;size:128;index"`
+	Profile              string    `gorm:"column:profile;size:64;index"`
+	MerchantID           int       `gorm:"column:merchant_id;index"`
+	UserID               int       `gorm:"column:user_id;index"`
+	BatchTaskID          int       `gorm:"column:batch_task_id;index"`
+	BatchTelID           int       `gorm:"column:batch_call_tel_id;index"`
+	Caller               string    `gorm:"column:caller;size:64;index"`
+	Callee               string    `gorm:"column:callee;size:64;index"`
+	Extension            string    `gorm:"column:extension;size:64;index"`
+	SipHangupDisposition string    `gorm:"column:sip_hangup_disposition;size:64;index"`
+	DurationSec          int       `gorm:"column:duration_sec;index"`
+	HangupCause          string    `gorm:"column:hangup_cause;size:128"`
+	FinalState           string    `gorm:"column:final_state;size:64;index"`
+	RecordFile           string    `gorm:"column:record_file_path;size:512"`
+	CompletedAt          time.Time `gorm:"column:completed_at;index"`
+	EventID              string    `gorm:"column:event_id;size:160;uniqueIndex"`
+	EventVersion         int       `gorm:"column:event_version"`
+	OutboxID             string    `gorm:"column:outbox_id;size:128;uniqueIndex"`
+	RawPayload           JSONMap   `gorm:"column:raw_payload;type:json"`
+	CreatedAt            time.Time `gorm:"column:created_at"`
+	UpdatedAt            time.Time `gorm:"column:updated_at"`
 }
 
 // TableName 返回 CDR 收口表名。
@@ -70,6 +72,7 @@ func (s *CdrGormStore) SaveFromOutbox(ctx context.Context, entry Entry) error {
 			"merchant_id", "user_id", "batch_task_id", "batch_call_tel_id", "record_file_path",
 			"caller", "callee", "duration_sec",
 			"completed_at", "event_id", "event_version", "outbox_id", "raw_payload", "updated_at",
+			"extension", "sip_hangup_disposition",
 		}),
 	}).Create(&model).Error
 	if err != nil {
@@ -89,26 +92,28 @@ func (s *CdrGormStore) now() time.Time {
 
 func modelFromRecord(record Record, now time.Time) RecordModel {
 	return RecordModel{
-		CallID:       record.CallID,
-		UUID:         record.UUID,
-		FSAddr:       record.FSAddr,
-		Profile:      record.Profile,
-		MerchantID:   record.MerchantID,
-		UserID:       record.UserID,
-		BatchTaskID:  record.BatchTaskID,
-		BatchTelID:   record.BatchTelID,
-		Caller:       record.Caller,
-		Callee:       record.Callee,
-		DurationSec:  record.DurationSec,
-		HangupCause:  record.HangupCause,
-		FinalState:   record.FinalState,
-		RecordFile:   record.RecordFile,
-		CompletedAt:  record.CompletedAt,
-		EventID:      record.EventID,
-		EventVersion: record.EventVersion,
-		OutboxID:     record.OutboxID,
-		RawPayload:   JSONMap(record.RawPayload),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		CallID:               record.CallID,
+		UUID:                 record.UUID,
+		FSAddr:               record.FSAddr,
+		Profile:              record.Profile,
+		MerchantID:           record.MerchantID,
+		UserID:               record.UserID,
+		BatchTaskID:          record.BatchTaskID,
+		BatchTelID:           record.BatchTelID,
+		Caller:               record.Caller,
+		Callee:               record.Callee,
+		DurationSec:          record.DurationSec,
+		HangupCause:          record.HangupCause,
+		FinalState:           record.FinalState,
+		RecordFile:           record.RecordFile,
+		CompletedAt:          record.CompletedAt,
+		EventID:              record.EventID,
+		EventVersion:         record.EventVersion,
+		OutboxID:             record.OutboxID,
+		RawPayload:           JSONMap(record.RawPayload),
+		Extension:            record.Extension,
+		SipHangupDisposition: record.SipHangupDisposition,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 }

@@ -93,7 +93,15 @@ func TestSkillGroupManagementDeleteAndAssociations(t *testing.T) {
 		t.Fatalf("号码关联错误，得到: %v", phones)
 	}
 
-	// 4. 删除技能组
+	// 4. 当存在活动任务引用时，删除应该失败
+	repo.MockActiveTasks = true
+	err = service.Delete(ctx, []operate.SkillGroup{group})
+	if !errors.Is(err, operate.ErrSkillGroupReferenced) {
+		t.Fatalf("期望由于活动任务引用删除失败，得到: %v", err)
+	}
+
+	// 5. 消除引用后，删除成功
+	repo.MockActiveTasks = false
 	err = service.Delete(ctx, []operate.SkillGroup{group})
 	if err != nil {
 		t.Fatal(err)
@@ -106,18 +114,20 @@ func TestSkillGroupManagementDeleteAndAssociations(t *testing.T) {
 
 // fakeSkillGroupRepository 实现 operate.SkillGroupRepository 接口，用于纯内存单元测试。
 type fakeSkillGroupRepository struct {
-	nextID      int
-	skillGroups map[int]operate.SkillGroup
-	usersMap    map[int][]int
-	phonesMap   map[int][]int
+	nextID          int
+	skillGroups     map[int]operate.SkillGroup
+	usersMap        map[int][]int
+	phonesMap       map[int][]int
+	MockActiveTasks bool
 }
 
 func newFakeSkillGroupRepository() *fakeSkillGroupRepository {
 	return &fakeSkillGroupRepository{
-		nextID:      1,
-		skillGroups: make(map[int]operate.SkillGroup),
-		usersMap:    make(map[int][]int),
-		phonesMap:   make(map[int][]int),
+		nextID:          1,
+		skillGroups:     make(map[int]operate.SkillGroup),
+		usersMap:        make(map[int][]int),
+		phonesMap:       make(map[int][]int),
+		MockActiveTasks: false,
 	}
 }
 
@@ -194,4 +204,8 @@ func (r *fakeSkillGroupRepository) UsersBySkillGroup(_ context.Context, skillGro
 
 func (r *fakeSkillGroupRepository) PhonesBySkillGroup(_ context.Context, skillGroupID int) ([]int, error) {
 	return r.phonesMap[skillGroupID], nil
+}
+
+func (r *fakeSkillGroupRepository) HasActiveTasks(_ context.Context, ids []int) (bool, error) {
+	return r.MockActiveTasks, nil
 }

@@ -17,6 +17,8 @@ var (
 	ErrSkillGroupNotFound = errors.New("skill group not found")
 	// ErrSkillGroupConflict 表示技能组名称冲突。
 	ErrSkillGroupConflict = errors.New("skill group conflict")
+	// ErrSkillGroupReferenced 表示技能组已被活动任务引用，不能直接删除。
+	ErrSkillGroupReferenced = errors.New("skill group referenced")
 )
 
 // SkillGroup 表示  兼容 `skill_group` 表中的技能组配置。
@@ -53,6 +55,7 @@ type SkillGroupRepository interface {
 	ReplacePhones(ctx context.Context, skillGroupID int, phoneIDs []int) error
 	UsersBySkillGroup(ctx context.Context, skillGroupID int) ([]int, error)
 	PhonesBySkillGroup(ctx context.Context, skillGroupID int) ([]int, error)
+	HasActiveTasks(ctx context.Context, ids []int) (bool, error)
 }
 
 type SkillGroupManagementService struct {
@@ -104,6 +107,15 @@ func (s *SkillGroupManagementService) Delete(ctx context.Context, skillGroups []
 	ids := filterPositiveSkillGroupIDs(skillGroups)
 	if len(ids) == 0 {
 		return ErrInvalidSkillGroup
+	}
+	referenced, err := s.Repository.HasActiveTasks(ctx, ids)
+	if err != nil {
+		logger.Error("商户端删除技能组前检查任务引用失败", "skillGroupCount", len(ids), "error", err.Error())
+		return err
+	}
+	if referenced {
+		logger.Warn("商户端删除技能组失败，技能组仍被运行中的外呼任务引用", "skillGroupCount", len(ids))
+		return ErrSkillGroupReferenced
 	}
 	logger.Info("商户端开始删除技能组", "skillGroupCount", len(ids))
 	if err := s.Repository.Delete(ctx, ids); err != nil {

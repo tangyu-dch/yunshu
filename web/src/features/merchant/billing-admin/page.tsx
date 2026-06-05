@@ -78,23 +78,27 @@ export function BillingPage() {
 
   function openEdit(record: any) {
     setSelectedMerchantId(String(record.merchantId))
-    editForm.setFieldsValue({
-      id: record.id,
-      merchantId: String(record.merchantId),
-      paymentMode: record.paymentMode ?? 1,
-      creditLimit: record.creditLimit ?? 0,
-    })
     setEditOpen(true)
+    setTimeout(() => {
+      editForm.setFieldsValue({
+        id: record.id,
+        merchantId: String(record.merchantId),
+        paymentMode: record.paymentMode ?? 1,
+        creditLimit: record.creditLimit ?? 0,
+      })
+    }, 0)
   }
 
   function openRecharge(record: any) {
     setSelectedMerchantId(String(record.merchantId))
-    rechargeForm.setFieldsValue({
-      merchantId: String(record.merchantId),
-      amount: 100,
-      remark: '',
-    })
     setRechargeOpen(true)
+    setTimeout(() => {
+      rechargeForm.setFieldsValue({
+        merchantId: String(record.merchantId),
+        amount: 100,
+        remark: '',
+      })
+    }, 0)
   }
 
   return (

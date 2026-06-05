@@ -3,7 +3,6 @@ package selection
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -12,8 +11,6 @@ import (
 
 	"yunshu/internal/domain/cti"
 )
-
-var ErrRuntimeConcurrencyExhausted = errors.New("runtime number concurrency exhausted")
 
 // claimScript 是高并发原子起呼占用的核心 Lua 脚本。
 // 它接收 3 个 KEYS 和 4 个 ARGV 参数：
@@ -143,11 +140,11 @@ func (a *RedisAllocator) Claim(ctx context.Context, req cti.SelectionRequest, ca
 		return cti.RuntimeAllocation{}, cti.ErrNoAvailableNumber
 	}
 
-	var lastErr error = ErrRuntimeConcurrencyExhausted
+	var lastErr error = cti.ErrRuntimeConcurrencyExhausted
 	for _, candidate := range candidates {
 		limit := candidate.Concurrency
 		if limit <= 0 {
-			lastErr = ErrRuntimeConcurrencyExhausted
+			lastErr = cti.ErrRuntimeConcurrencyExhausted
 			continue
 		}
 
@@ -174,7 +171,7 @@ func (a *RedisAllocator) Claim(ctx context.Context, req cti.SelectionRequest, ca
 
 		accepted, _ := strconv.Atoi(fmt.Sprint(values[0]))
 		if accepted != 1 {
-			lastErr = ErrRuntimeConcurrencyExhausted
+			lastErr = cti.ErrRuntimeConcurrencyExhausted
 			continue
 		}
 

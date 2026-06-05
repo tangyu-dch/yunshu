@@ -211,7 +211,7 @@ export function InstallPage() {
         {/* 步骤 0: 环境预检 */}
         {currentStep === 0 && (
           <Card
-            bordered={false}
+            variant="borderless"
             className="bg-slate-900/70 border border-slate-800 shadow-2xl rounded-2xl p-4 sm:p-6"
           >
             <Space direction="vertical" size="large" className="w-full">
@@ -314,7 +314,7 @@ export function InstallPage() {
         {/* 步骤 1: 参数配置 */}
         {currentStep === 1 && (
           <Card
-            bordered={false}
+            variant="borderless"
             className="bg-slate-900/70 border border-slate-800 shadow-2xl rounded-2xl p-4 sm:p-6"
           >
             <Form
@@ -442,7 +442,7 @@ export function InstallPage() {
         {/* 步骤 2: 容器拉起部署 */}
         {currentStep === 2 && (
           <Card
-            bordered={false}
+            variant="borderless"
             className="bg-slate-900/70 border border-slate-800 shadow-2xl rounded-2xl p-4 sm:p-6"
           >
             <Space direction="vertical" size="large" className="w-full">
@@ -519,7 +519,7 @@ export function InstallPage() {
         {/* 步骤 3: 数据库迁移与种子数据填充 */}
         {currentStep === 3 && (
           <Card
-            bordered={false}
+            variant="borderless"
             className="bg-slate-900/70 border border-slate-800 shadow-2xl rounded-2xl p-4 sm:p-6"
           >
             <Space direction="vertical" size="large" className="w-full">
@@ -556,7 +556,7 @@ export function InstallPage() {
         {/* 步骤 4: 安装成功 */}
         {currentStep === 4 && (
           <Card
-            bordered={false}
+            variant="borderless"
             className="bg-slate-900/70 border border-slate-800 shadow-2xl rounded-2xl p-4 sm:p-6"
           >
             <div className="flex flex-col items-center text-center py-8">

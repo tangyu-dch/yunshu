@@ -1,10 +1,11 @@
-import { LockOutlined, UserOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Card, ConfigProvider, Form, Input, Radio, Select, Space, Typography, theme as antdTheme, message } from 'antd'
+import { LockOutlined, UserOutlined, SunOutlined, MoonOutlined } from '@ant-design/icons'
+import { Alert, App, Button, Card, ConfigProvider, Form, Input, Select, Space, Typography, theme as antdTheme, message } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import { login as loginRequest } from '@/api/auth'
 import { useAuthStore } from '@/store/auth'
+import { useUiStore } from '@/store/ui'
 
 const schema = z.object({
   platform: z.enum(['operate', 'merchant']),
@@ -24,6 +25,10 @@ export function LoginPage({ platformType }: LoginPageProps) {
   const [form] = Form.useForm()
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  const theme = useUiStore((state) => state.theme)
+  const setTheme = useUiStore((state) => state.setTheme)
+  const isDark = theme === 'dark'
 
   const actualPlatform = platformType || 'merchant'
 
@@ -57,7 +62,7 @@ export function LoginPage({ platformType }: LoginPageProps) {
   return (
     <ConfigProvider
       theme={{
-        algorithm: antdTheme.darkAlgorithm,
+        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
           colorPrimary: '#2563eb',
           borderRadius: 8,
@@ -66,19 +71,56 @@ export function LoginPage({ platformType }: LoginPageProps) {
       }}
     >
       <App>
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-          <Card className="w-full max-w-md shadow-soft border-slate-900 bg-slate-950/80 backdrop-blur-md">
-            <Space direction="vertical" size="large" className="w-full">
-              <div>
-                <Typography.Title level={2} className="!mb-1 !text-white font-semibold">
-                  云枢管理端 - {actualPlatform === 'operate' ? '系统运营平台' : '商户管理端'}
+        <div className={`relative flex min-h-screen items-center justify-center px-4 overflow-hidden select-none transition-colors duration-300 ${isDark ? 'bg-slate-950' : 'bg-slate-50'}`}>
+          {/* Theme switcher */}
+          <Button
+            type="text"
+            icon={isDark ? <SunOutlined /> : <MoonOutlined />}
+            onClick={() => setTheme(isDark ? 'light' : 'dark')}
+            className={`absolute top-4 right-4 z-20 transition-colors ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
+            size="large"
+          />
+
+          {/* Glowing gradient background blobs for high-end NOC feel */}
+          {isDark ? (
+            <>
+              <div className="absolute top-[-20%] left-[-15%] w-[70%] h-[70%] rounded-full bg-blue-900/10 blur-[130px] pointer-events-none animate-pulse duration-[8000ms]"></div>
+              <div className="absolute bottom-[-20%] right-[-15%] w-[70%] h-[70%] rounded-full bg-indigo-900/15 blur-[130px] pointer-events-none animate-pulse duration-[12000ms]"></div>
+              <div className="absolute top-[30%] right-[10%] w-[300px] h-[300px] rounded-full bg-purple-900/5 blur-[100px] pointer-events-none"></div>
+            </>
+          ) : (
+            <>
+              <div className="absolute top-[-20%] left-[-15%] w-[70%] h-[70%] rounded-full bg-blue-100/30 blur-[130px] pointer-events-none animate-pulse duration-[8000ms]"></div>
+              <div className="absolute bottom-[-20%] right-[-15%] w-[70%] h-[70%] rounded-full bg-indigo-100/40 blur-[130px] pointer-events-none animate-pulse duration-[12000ms]"></div>
+              <div className="absolute top-[30%] right-[10%] w-[300px] h-[300px] rounded-full bg-purple-100/15 blur-[100px] pointer-events-none"></div>
+            </>
+          )}
+
+          <Card className={`w-full max-w-md backdrop-blur-xl relative z-10 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 ${isDark ? 'border-slate-900 bg-slate-950/40 shadow-blue-950/20' : 'border-slate-200/80 bg-white/70 shadow-slate-200/30'}`}>
+            {/* Top border highlight glow line */}
+            <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-600"></div>
+            
+            <Space direction="vertical" size="large" className="w-full pt-2">
+              {/* Premium Logo and Title Section */}
+              <div className="text-center">
+                <div className="flex justify-center mb-4">
+                  <div className="relative flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 shadow-lg shadow-blue-500/30">
+                    <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                    </svg>
+                    <div className="absolute inset-0 rounded-xl bg-blue-500/20 blur-md -z-10 animate-pulse"></div>
+                  </div>
+                </div>
+                <Typography.Title level={3} className={`!mb-1.5 font-bold tracking-tight bg-clip-text text-transparent ${isDark ? 'bg-gradient-to-r from-white via-slate-100 to-slate-350' : 'bg-gradient-to-r from-slate-800 via-slate-700 to-slate-900'}`}>
+                  云枢呼叫中心系统
                 </Typography.Title>
-                <Typography.Text type="secondary" className="text-slate-400">
+                <Typography.Text className={`text-xs font-medium ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   {actualPlatform === 'operate' 
-                    ? '软交换与系统全局配置终端' 
-                    : '批量呼叫与 AI 话务控制中心'}
+                    ? '系统运营端 — 软交换与底层配置中心' 
+                    : '商户管理端 — 批量外呼与 AI 话务调度'}
                 </Typography.Text>
               </div>
+
               {loginError && (
                 <Alert
                   message={loginError}
@@ -86,9 +128,10 @@ export function LoginPage({ platformType }: LoginPageProps) {
                   showIcon
                   closable
                   onClose={() => setLoginError(null)}
-                  className="border-red-900 bg-red-950/40 text-red-200"
+                  className={`text-xs rounded-lg ${isDark ? 'border-red-900 bg-red-950/30 text-red-200' : 'border-red-200 bg-red-50 text-red-700'}`}
                 />
               )}
+
               <Form
                 form={form}
                 layout="vertical"
@@ -101,7 +144,6 @@ export function LoginPage({ platformType }: LoginPageProps) {
                 onFinish={async (values) => {
                   setLoginError(null)
                   setLoading(true)
-                  // 强制覆盖 platform 字段，保障安全边界
                   const valuesToSubmit = {
                     ...values,
                     platform: actualPlatform,
@@ -145,49 +187,64 @@ export function LoginPage({ platformType }: LoginPageProps) {
                   }
                 }}
               >
-                {/* 剥离单选 Radio 切换，由实际配置的路由静态绑定 */}
                 <Form.Item name="platform" noStyle>
                   <input type="hidden" />
                 </Form.Item>
 
-                <Form.Item name="username" label={<span className="text-slate-300">账号</span>} rules={[{ required: true, message: '请输入账号' }]}>
-                  <Input prefix={<UserOutlined className="text-slate-500" />} className="bg-slate-900 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500" placeholder="账号名称" />
+                <Form.Item name="username" label={<span className={`text-xs font-semibold ${isDark ? 'text-slate-350' : 'text-slate-600'}`}>账号</span>} rules={[{ required: true, message: '请输入账号' }]}>
+                  <Input 
+                    prefix={<UserOutlined className="text-slate-500 mr-1" />} 
+                    className={`transition-all rounded-lg h-10 ${isDark ? 'bg-slate-900/60 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500/80 focus:bg-slate-900' : 'bg-white/80 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500'}`} 
+                    placeholder="请输入账号名称" 
+                  />
                 </Form.Item>
-                <Form.Item name="password" label={<span className="text-slate-300">密码</span>} rules={[{ required: true, message: '请输入密码' }]}>
-                  <Input.Password prefix={<LockOutlined className="text-slate-500" />} className="bg-slate-900 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500" placeholder="••••••••" />
+
+                <Form.Item name="password" label={<span className={`text-xs font-semibold ${isDark ? 'text-slate-350' : 'text-slate-600'}`}>密码</span>} rules={[{ required: true, message: '请输入密码' }]}>
+                  <Input.Password 
+                    prefix={<LockOutlined className="text-slate-500 mr-1" />} 
+                    className={`transition-all rounded-lg h-10 ${isDark ? 'bg-slate-900/60 border-slate-800 text-white placeholder-slate-600 focus:border-blue-500/80 focus:bg-slate-900' : 'bg-white/80 border-slate-200 text-slate-800 placeholder-slate-400 focus:border-blue-500'}`} 
+                    placeholder="请输入密码" 
+                  />
                 </Form.Item>
                 
                 {useMockAuth ? (
-                  <Form.Item name="permissionProfile" label={<span className="text-slate-300">权限模板</span>}>
+                  <Form.Item name="permissionProfile" label={<span className={`text-xs font-semibold ${isDark ? 'text-slate-350' : 'text-slate-600'}`}>权限模板</span>}>
                     <Select
-                      className="bg-slate-900 border-slate-800 text-white"
+                      className={`rounded-lg h-10 ${isDark ? 'bg-slate-900/60 border-slate-800 text-white' : 'bg-white/80 border-slate-200 text-slate-800'}`}
+                      popupClassName={isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}
                       options={
                         actualPlatform === 'operate' 
                           ? [
-                              { value: 'console', label: '超级管理员' },
-                              { value: 'operate', label: '运营管理员' },
+                              { value: 'console', label: '超级管理员 (Console)' },
+                              { value: 'operate', label: '运营管理员 (Operate)' },
                             ]
                           : [
-                              { value: 'merchant', label: '商户管理员' },
+                              { value: 'merchant', label: '商户管理员 (Merchant)' },
                             ]
                       }
                     />
                   </Form.Item>
                 ) : null}
                 
-                <Button loading={loading} type="primary" htmlType="submit" block size="large" className="bg-blue-600 hover:bg-blue-700 border-none font-medium mt-2">
-                  登录
+                <Button 
+                  loading={loading} 
+                  type="primary" 
+                  htmlType="submit" 
+                  block 
+                  size="large" 
+                  className="bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 border-none font-medium mt-4 h-10 rounded-lg shadow-lg shadow-blue-500/10 text-white"
+                >
+                  确认登录
                 </Button>
 
-                {/* 运营平台可以调整到商户登录，但是商户平台入口是完全隐藏与隔离的 */}
                 {actualPlatform === 'operate' ? (
-                  <div className="text-center mt-6 border-t border-slate-900 pt-4">
+                  <div className={`text-center mt-6 border-t pt-4 ${isDark ? 'border-slate-900/80' : 'border-slate-200'}`}>
                     <Button 
                       type="link" 
                       onClick={() => navigate('/login')} 
-                      className="text-slate-400 hover:text-white transition-colors"
+                      className={`transition-colors text-xs ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-800'}`}
                     >
-                      切换至商户登录
+                      切换至商户登录 ➔
                     </Button>
                   </div>
                 ) : null}

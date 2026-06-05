@@ -132,6 +132,35 @@ func (r *DepartmentRepository) ListAll(ctx context.Context, merchantID int) ([]o
 	return records, nil
 }
 
+// HasBindings 检查部门是否被活动外呼任务或账号引用。
+func (r *DepartmentRepository) HasBindings(ctx context.Context, ids []int) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var count int64
+	// 检查 cc_biz_task 是否绑定了未完成的任务
+	if err := r.DB.WithContext(ctx).Table("cc_biz_task").
+		Where("department_id IN ? AND state != ? AND del_flag = ?", ids, 3, false).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	if count > 0 {
+		return true, nil
+	}
+	// 检查 cc_sys_account (即 console_account) 是否绑定了部门
+	if r.DB.Migrator().HasColumn("cc_sys_account", "department_id") {
+		if err := r.DB.WithContext(ctx).Table("cc_sys_account").
+			Where("department_id IN ? AND del_flag = ?", ids, false).
+			Count(&count).Error; err != nil {
+			return false, err
+		}
+		if count > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (r *DepartmentRepository) logger() *slog.Logger {
 	if r.Logger != nil {
 		return r.Logger
@@ -162,15 +191,17 @@ func departmentToModel(d operate.Department) DepartmentModel {
 
 // MemoryDepartmentRepository 内存版本的部门仓储，供单元测试使用。
 type MemoryDepartmentRepository struct {
-	mu     sync.Mutex
-	nextID int
-	depts  map[int]operate.Department
+	mu           sync.Mutex
+	nextID       int
+	depts        map[int]operate.Department
+	MockBindings bool
 }
 
 func NewMemoryDepartmentRepository() *MemoryDepartmentRepository {
 	return &MemoryDepartmentRepository{
-		nextID: 1,
-		depts:  make(map[int]operate.Department),
+		nextID:       1,
+		depts:        make(map[int]operate.Department),
+		MockBindings: false,
 	}
 }
 
@@ -247,4 +278,10 @@ func (r *MemoryDepartmentRepository) ListAll(_ context.Context, merchantID int) 
 		}
 	}
 	return records, nil
+}
+
+func (r *MemoryDepartmentRepository) HasBindings(_ context.Context, ids []int) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.MockBindings, nil
 }

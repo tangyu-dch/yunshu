@@ -335,7 +335,6 @@ func defaultConsolePermissions() []ConsolePermissionModel {
 
 		{Code: string(contracts.PermissionOperateRoleRead), Name: "角色权限查看", Module: "operate", Description: "管理端角色列表和权限配置查看", Enable: true},
 		{Code: string(contracts.PermissionOperateRoleWrite), Name: "角色权限编辑", Module: "operate", Description: "管理端角色和权限配置修改", Enable: true},
-		{Code: string(contracts.PermissionMerchantBillingWrite), Name: "商户账务配置", Module: "merchant", Description: "商户端套餐选择与绑定", Enable: true},
 	}
 }
 
@@ -419,8 +418,6 @@ func defaultMerchantAdminPermissions() []string {
 		string(contracts.PermissionMerchantDepartmentRead),
 		string(contracts.PermissionMerchantDepartmentWrite),
 		string(contracts.PermissionMerchantDepartmentDelete),
-
-		string(contracts.PermissionMerchantBillingWrite),
 	}
 }
 

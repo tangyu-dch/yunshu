@@ -34,6 +34,7 @@ type RuntimeAllocator interface {
 type RuntimeSelector struct {
 	RuleSelector Selector
 	Allocator    RuntimeAllocator
+	Marker       CandidateMarker
 	Logger       *slog.Logger
 }
 
@@ -42,6 +43,14 @@ func (s RuntimeSelector) SelectAndClaim(ctx context.Context, req SelectionReques
 	logger := s.Logger
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if s.Marker != nil {
+		marked, err := s.Marker.MarkCandidates(ctx, req, req.Candidates)
+		if err != nil {
+			logger.Error("运行时选号标记候选失败", "callId", req.CallID, "merchantId", req.MerchantID, "error", err.Error())
+			return SelectionResult{Success: false, Reason: "标记选号候选失败: " + err.Error()}, nil, err
+		}
+		req.Candidates = marked
 	}
 	eligible, trace := eligibleCandidates(req)
 	if len(eligible) == 0 {

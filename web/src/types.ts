@@ -84,6 +84,8 @@ export type CallRecordItem = {
   userId: number
   profile: string
   recordFilePath?: string
+  hangupCause?: string
+  sipHangupDisposition?: string
 }
 
 export type AiFlowItem = {
@@ -143,4 +145,44 @@ export type DispatcherItem = {
   attrs?: string
 }
 
+export type SipTraceItem = {
+  id: number
+  timestamp: string
+  timeUs: number
+  method: string
+  status: string
+  fromIp: string
+  toIp: string
+  direction: string
+  rawMsg: string
+}
+
+export type CallSipTraceResult = {
+  callId: string
+  nodes: string[]
+  trace: SipTraceItem[]
+}
+
+export interface IPBlockConfig {
+  countries: string
+  onlyAllowCn: boolean
+}
+
+export interface IPBlockLog {
+  id: number
+  ip: string
+  countryCode: string
+  callId: string
+  method: string
+  blockedAt: string
+}
+
+export interface IPBlockLogQuery {
+  pageNumber: number
+  pageSize: number
+  ip?: string
+  countryCode?: string
+  startTime?: string
+  endTime?: string
+}
 

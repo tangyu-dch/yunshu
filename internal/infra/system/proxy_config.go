@@ -97,6 +97,8 @@ func (r *ProxyConfigRepository) EnsureDefaults(ctx context.Context) error {
 		{operate.KeyRtpengineSdpIp, "127.0.0.1", "RTPEngine 在 SDP 中宣告的公网 IP (NAT 穿透关键)"},
 		{operate.KeyRtpengineStartPort, "30000", "RTPEngine 媒体端口范围起始 (默认 30000)"},
 		{operate.KeyRtpengineEndPort, "30100", "RTPEngine 媒体端口范围结束 (默认 30100)"},
+		{"system.nearby_cities", `{"510100":["511300","510600","510700"],"440100":["440600","441900","440300"]}`, "号码选择相邻/邻近城市匹配配置(JSON)"},
+		{operate.KeySipTraceEnable, "0", "是否开启 SIP 信令链路追踪 (1-开启, 0-关闭)"},
 	}
 
 	for _, d := range defaults {

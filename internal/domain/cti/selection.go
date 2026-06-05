@@ -38,6 +38,7 @@ type NumberCandidate struct {
 	BlacklistHit       bool   `json:"blacklistHit"`
 	Priority           int    `json:"priority,omitempty"`
 	SelectionStrategy  string `json:"selectionStrategy,omitempty"`
+	LocalMatchRank     int    `json:"localMatchRank,omitempty"` // 归属地本地/邻近匹配优先级分数 (1:本地, 2-50:邻近城市, 100:省内, 9999/0:外地)
 }
 
 type SelectionRequest struct {
@@ -157,6 +158,13 @@ func eligibleCandidates(req SelectionRequest) ([]NumberCandidate, []SelectionTra
 		if eligible[i].WhitelistHit != eligible[j].WhitelistHit {
 			return eligible[i].WhitelistHit
 		}
+
+		rankI := getSortRank(eligible[i])
+		rankJ := getSortRank(eligible[j])
+		if rankI != rankJ {
+			return rankI < rankJ
+		}
+
 		switch strings.ToUpper(strategy) {
 		case "RANDOM":
 			hI := fnvHash(eligible[i].Phone + req.CallID)
@@ -176,6 +184,13 @@ func eligibleCandidates(req SelectionRequest) ([]NumberCandidate, []SelectionTra
 		return eligible[i].Phone < eligible[j].Phone
 	})
 	return eligible, trace
+}
+
+func getSortRank(c NumberCandidate) int {
+	if c.LocalMatchRank == 0 {
+		return 9999
+	}
+	return c.LocalMatchRank
 }
 
 func fnvHash(s string) uint32 {

@@ -286,21 +286,48 @@ func (r *MerchantRepository) Save(ctx context.Context, merchant operate.Merchant
 	return merchantFromModel(model, merchant.RateID), nil
 }
 
-// Delete 逻辑删除商户。
+// Delete 逻辑删除商户，并级联逻辑删除该商户底下的控制台账号。
 func (r *MerchantRepository) Delete(ctx context.Context, ids []int) error {
-	r.logger().Info("开始逻辑删除商户", "merchantIds", ids)
-	result := r.DB.WithContext(ctx).Model(&MerchantModel{}).
-		Where("id IN ?", ids).
-		Updates(map[string]any{"del_flag": true, "updated_time": time.Now().UTC()})
-	if result.Error != nil {
-		r.logger().Error("逻辑删除商户数据库更新异常", "merchantIds", ids, "error", result.Error.Error())
-		return result.Error
+	r.logger().Info("开始逻辑删除商户及级联删除控制台账号", "merchantIds", ids)
+	if len(ids) == 0 {
+		return nil
 	}
-	if result.RowsAffected == 0 {
-		r.logger().Warn("逻辑删除商户失败：未匹配到有效记录", "merchantIds", ids)
-		return operate.ErrMerchantNotFound
+	var merchantIDStrs []string
+	for _, id := range ids {
+		merchantIDStrs = append(merchantIDStrs, strconv.Itoa(id))
 	}
-	r.logger().Info("逻辑删除商户成功", "merchantIds", ids, "rowsAffected", result.RowsAffected)
+	now := time.Now().UTC()
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 逻辑删除商户自身
+		result := tx.Model(&MerchantModel{}).
+			Where("id IN ?", ids).
+			Updates(map[string]any{"del_flag": true, "updated_time": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return operate.ErrMerchantNotFound
+		}
+
+		// 2. 级联逻辑删除商户底下的控制台账号
+		if err := tx.Table("cc_sys_account").
+			Where("merchant_id IN ? AND del_flag = ?", merchantIDStrs, false).
+			Updates(map[string]any{
+				"del_flag":     true,
+				"updated_time": now,
+				"deleted_time": &now,
+			}).Error; err != nil {
+			r.logger().Error("级联逻辑删除商户控制台账号失败", "merchantIds", ids, "error", err.Error())
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		r.logger().Error("逻辑删除商户事务执行异常", "merchantIds", ids, "error", err.Error())
+		return err
+	}
+	r.logger().Info("逻辑删除商户及级联删除控制台账号成功", "merchantIds", ids)
 	return nil
 }
 

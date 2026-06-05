@@ -107,15 +107,28 @@ func (r *ChannelRepository) Delete(ctx context.Context, ids []int) error {
 	return nil
 }
 
+// HasBindings 检查渠道是否仍被网关引用。
+func (r *ChannelRepository) HasBindings(ctx context.Context, ids []int) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := r.DB.WithContext(ctx).Table("cc_tel_gateway").Where("channel_id IN ? AND del_flag = ?", ids, false).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 // MemoryChannelRepository 供本地开发和测试使用。
 type MemoryChannelRepository struct {
-	mu       sync.Mutex
-	nextID   int
-	channels map[int]operate.Channel
+	mu           sync.Mutex
+	nextID       int
+	channels     map[int]operate.Channel
+	MockBindings bool
 }
 
 func NewMemoryChannelRepository() *MemoryChannelRepository {
-	return &MemoryChannelRepository{nextID: 1, channels: map[int]operate.Channel{}}
+	return &MemoryChannelRepository{nextID: 1, channels: map[int]operate.Channel{}, MockBindings: false}
 }
 
 func (r *MemoryChannelRepository) Page(_ context.Context, req operate.ChannelPageRequest) (operate.ChannelPageResult, error) {
@@ -190,6 +203,12 @@ func (r *MemoryChannelRepository) Delete(_ context.Context, ids []int) error {
 		delete(r.channels, id)
 	}
 	return nil
+}
+
+func (r *MemoryChannelRepository) HasBindings(_ context.Context, ids []int) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.MockBindings, nil
 }
 
 // PoolRepository 基于 GORM 的号码池管理仓储。
@@ -911,20 +930,37 @@ func (r *SkillGroupRepository) PhonesBySkillGroup(ctx context.Context, skillGrou
 	return ids, nil
 }
 
+// HasActiveTasks 检查技能组是否被活动中的外呼任务引用。
+func (r *SkillGroupRepository) HasActiveTasks(ctx context.Context, ids []int) (bool, error) {
+	if len(ids) == 0 {
+		return false, nil
+	}
+	var count int64
+	// state = 3 表示完成。state != 3 且 del_flag = false 即为活动中的任务。
+	if err := r.DB.WithContext(ctx).Table("cc_biz_task").
+		Where("skill_group_id IN ? AND state != ? AND del_flag = ?", ids, 3, false).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 type MemorySkillGroupRepository struct {
-	mu          sync.Mutex
-	nextID      int
-	skillGroups map[int]operate.SkillGroup
-	users       map[int]map[int]struct{}
-	phones      map[int]map[int]struct{}
+	mu              sync.Mutex
+	nextID          int
+	skillGroups     map[int]operate.SkillGroup
+	users           map[int]map[int]struct{}
+	phones          map[int]map[int]struct{}
+	MockActiveTasks bool
 }
 
 func NewMemorySkillGroupRepository() *MemorySkillGroupRepository {
 	return &MemorySkillGroupRepository{
-		nextID:      1,
-		skillGroups: map[int]operate.SkillGroup{},
-		users:       map[int]map[int]struct{}{},
-		phones:      map[int]map[int]struct{}{},
+		nextID:          1,
+		skillGroups:     map[int]operate.SkillGroup{},
+		users:           map[int]map[int]struct{}{},
+		phones:          map[int]map[int]struct{}{},
+		MockActiveTasks: false,
 	}
 }
 
@@ -1059,6 +1095,12 @@ func (r *MemorySkillGroupRepository) PhonesBySkillGroup(_ context.Context, skill
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+func (r *MemorySkillGroupRepository) HasActiveTasks(_ context.Context, ids []int) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.MockActiveTasks, nil
 }
 
 func channelToModel(channel operate.Channel) ChannelModel {

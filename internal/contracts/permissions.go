@@ -82,9 +82,11 @@ const (
 	PermissionMerchantDepartmentWrite  PermissionCode = "merchant:department:write"
 	PermissionMerchantDepartmentDelete PermissionCode = "merchant:department:delete"
 
-	PermissionOperateRoleRead      PermissionCode = "operate:role:read"
-	PermissionOperateRoleWrite     PermissionCode = "operate:role:write"
-	PermissionMerchantBillingWrite PermissionCode = "merchant:billing:write"
+	PermissionOperateRoleRead  PermissionCode = "operate:role:read"
+	PermissionOperateRoleWrite PermissionCode = "operate:role:write"
+
+	PermissionOperateLicenseRead  PermissionCode = "operate:license:read"
+	PermissionOperateLicenseWrite PermissionCode = "operate:license:write"
 )
 
 // PermissionRule 定义一个路径和 HTTP 方法对应的功能权限。
@@ -108,8 +110,7 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/operate/role/permissions/", Method: "GET", Permission: PermissionOperateRoleRead},
 	{Prefix: "/operate/role/permissions/save", Method: "POST", Permission: PermissionOperateRoleWrite},
 	{Prefix: "/operate/permission", Method: "GET", Permission: PermissionOperateRoleRead},
-	{Prefix: "/merchant/billing/rate/bind", Method: "POST", Permission: PermissionMerchantBillingWrite},
-	{Prefix: "/operate/rate/list-active", Method: "GET", Permission: PermissionMerchantBillingWrite},
+	{Prefix: "/operate/rate/list-active", Method: "GET", Permission: PermissionOperateRateRead},
 
 	{Prefix: "/operate/merchant/page", Method: "POST", Permission: PermissionOperateMerchantRead},
 	{Prefix: "/operate/merchant/detail/", Method: "GET", Permission: PermissionOperateMerchantRead},
@@ -275,6 +276,12 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/department/list", Method: "GET", Permission: PermissionMerchantDepartmentRead},
 	{Prefix: "/merchant/department/save", Method: "POST", Permission: PermissionMerchantDepartmentWrite},
 	{Prefix: "/merchant/department/delete", Method: "POST", Permission: PermissionMerchantDepartmentDelete},
+
+	{Prefix: "/operate/license/fingerprint", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/fingerprint/download", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/status", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/upload", Method: "POST", Permission: PermissionOperateLicenseWrite},
+	{Prefix: "/operate/license/download", Method: "GET", Permission: PermissionOperateLicenseRead},
 }
 
 // RequiredPermissionForRequest 根据请求路径和方法返回需要的功能权限。

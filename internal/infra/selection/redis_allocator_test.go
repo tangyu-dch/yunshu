@@ -48,7 +48,7 @@ func TestRedisAllocatorRejectsWhenConcurrencyExhausted(t *testing.T) {
 	if _, err := allocator.Claim(context.Background(), cti.SelectionRequest{CallID: "call-1", MerchantID: "88"}, candidates); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := allocator.Claim(context.Background(), cti.SelectionRequest{CallID: "call-2", MerchantID: "88"}, candidates); !errors.Is(err, ErrRuntimeConcurrencyExhausted) {
+	if _, err := allocator.Claim(context.Background(), cti.SelectionRequest{CallID: "call-2", MerchantID: "88"}, candidates); !errors.Is(err, cti.ErrRuntimeConcurrencyExhausted) {
 		t.Fatalf("expected concurrency exhausted, got %v", err)
 	}
 }
@@ -102,9 +102,9 @@ func TestRedisAllocatorClaimTryNextWhenFirstExhausted(t *testing.T) {
 		t.Fatalf("expected 10010, got %s", second.Caller)
 	}
 
-	// 3. 第三个请求 call-3 分配，因为两个都满额了，应该抛出 ErrRuntimeConcurrencyExhausted
+	// 3. 第三个请求 call-3 分配，因为两个都满额了，应该抛出 cti.ErrRuntimeConcurrencyExhausted
 	_, err = allocator.Claim(context.Background(), cti.SelectionRequest{CallID: "call-3", MerchantID: "88"}, candidates)
-	if !errors.Is(err, ErrRuntimeConcurrencyExhausted) {
+	if !errors.Is(err, cti.ErrRuntimeConcurrencyExhausted) {
 		t.Fatalf("expected concurrency exhausted error, got %v", err)
 	}
 }
@@ -159,7 +159,7 @@ func TestRedisAllocator_GatewayAndPhoneConcurrencyStress(t *testing.T) {
 			// 原子试选与双重并发卡点申请
 			allocation, err := allocator.Claim(context.Background(), req, candidates)
 			if err != nil {
-				if errors.Is(err, ErrRuntimeConcurrencyExhausted) {
+				if errors.Is(err, cti.ErrRuntimeConcurrencyExhausted) {
 					atomic.AddInt64(&blockedCalls, 1)
 				} else {
 					atomic.AddInt64(&systemErrors, 1)

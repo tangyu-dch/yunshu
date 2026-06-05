@@ -59,17 +59,20 @@ func (riskControlMerchantModel) TableName() string {
 	return "cc_sec_risk_merchant"
 }
 
-// phoneAttributionModel 映射数据库的 `phone_attribution` 号码归属地索引表。
+// phoneAttributionModel 映射号码归属地索引表。
 // 通过号码的前 7 位（号段）查询其对应的省份和城市区划编码，用于盲区风控策略判断。
 type phoneAttributionModel struct {
-	AreaCode string `gorm:"column:area_code;primaryKey"` // 号码前7位 (例如 "1380013")
-	ProvCode string `gorm:"column:prov_code"`            // 省份行政区划代码 (例如 "440000")
-	CityCode string `gorm:"column:city_code"`            // 城市行政区划代码 (例如 "440300")
+	AreaCode        string `gorm:"column:area_code;primaryKey"` // 号码前7位 (例如 "1380013")
+	Province        string `gorm:"column:province"`             // 省份名称
+	City            string `gorm:"column:city"`                 // 城市名称
+	ProvCode        string `gorm:"column:prov_code"`            // 省份行政区划代码 (例如 "440000")
+	CityCode        string `gorm:"column:city_code"`            // 城市行政区划代码 (例如 "440300")
+	ServiceProvider string `gorm:"column:isp"`                  // 运营商
 }
 
-// TableName 指定 phoneAttributionModel 对应的物理表名为 `cc_sys_attribution`。
+// TableName 指定 phoneAttributionModel 对应的物理表名为 `cc_sys_phone_attribution`。
 func (phoneAttributionModel) TableName() string {
-	return "cc_sys_attribution"
+	return "cc_sys_phone_attribution"
 }
 
 // calleeFeatureModel 映射数据库的 `callee_feature` 被叫号码外呼特征表。
@@ -194,6 +197,77 @@ func (m *RuntimeSelectionMarker) MarkCandidates(ctx context.Context, req cti.Sel
 		}
 		if blocked {
 			candidates[i].RiskAllowed = false
+		}
+	}
+
+	// 7. 评估候选号码的归属地本地/邻近匹配优先级分数 (LocalMatchRank)
+	var calleeAttr phoneAttributionModel
+	var calleeAttrOk bool
+	areaCode := calleeAreaCode(req.Callee)
+	if areaCode != "" {
+		attr, ok, err := m.loadPhoneAttribution(ctx, areaCode)
+		if err == nil && ok {
+			calleeAttr = attr
+			calleeAttrOk = true
+		}
+	}
+
+	if calleeAttrOk {
+		nearbyCities, err := m.loadNearbyCities(ctx, req.MerchantID)
+		if err != nil {
+			m.logger().Warn("加载邻近城市配置失败，降级为空配置", "error", err.Error())
+			nearbyCities = make(map[string][]string)
+		}
+
+		calleeCityKey := calleeAttr.CityCode
+		if calleeCityKey == "" {
+			calleeCityKey = cleanCityName(calleeAttr.City)
+		}
+		calleeNearby := nearbyCities[calleeCityKey]
+
+		for i := range candidates {
+			var candCityKey string
+			var candProvKey string
+
+			candAreaCode := calleeAreaCode(candidates[i].Phone)
+			if candAreaCode != "" {
+				if candAttr, ok, err := m.loadPhoneAttribution(ctx, candAreaCode); err == nil && ok {
+					candCityKey = candAttr.CityCode
+					candProvKey = candAttr.ProvCode
+					if candidates[i].City == "" {
+						candidates[i].City = candAttr.City
+					}
+					if candidates[i].Province == "" {
+						candidates[i].Province = candAttr.Province
+					}
+				}
+			}
+
+			if candCityKey == "" {
+				candCityKey = cleanCityName(candidates[i].City)
+			}
+			if candProvKey == "" {
+				candProvKey = cleanProvinceName(candidates[i].Province)
+			}
+
+			calleeProvKey := calleeAttr.ProvCode
+			if calleeProvKey == "" {
+				calleeProvKey = cleanProvinceName(calleeAttr.Province)
+			}
+
+			if candCityKey == calleeCityKey && candCityKey != "" {
+				candidates[i].LocalMatchRank = 1
+			} else if index := indexOf(calleeNearby, candCityKey); index >= 0 {
+				candidates[i].LocalMatchRank = 2 + index
+			} else if candProvKey == calleeProvKey && candProvKey != "" {
+				candidates[i].LocalMatchRank = 100
+			} else {
+				candidates[i].LocalMatchRank = 9999
+			}
+		}
+	} else {
+		for i := range candidates {
+			candidates[i].LocalMatchRank = 9999
 		}
 	}
 
@@ -656,20 +730,34 @@ func calleeAreaCode(callee string) string {
 
 // loadPhoneAttribution 查询归属地数据。
 func (m *RuntimeSelectionMarker) loadPhoneAttribution(ctx context.Context, areaCode string) (phoneAttributionModel, bool, error) {
+	cacheKey := "attr:" + areaCode
+	if cached, ok := m.getCache(cacheKey); ok {
+		if attr, ok := cached.(phoneAttributionModel); ok {
+			return attr, true, nil
+		}
+		return phoneAttributionModel{}, false, nil
+	}
+
 	var attr phoneAttributionModel
 	err := m.DB.WithContext(ctx).Where("area_code = ?", areaCode).First(&attr).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 缓存空白结果 30 分钟，防缓存穿透
+		m.setCacheWithTTL(cacheKey, false, 30*time.Minute)
 		return phoneAttributionModel{}, false, nil
 	}
 	if err != nil {
 		return phoneAttributionModel{}, false, err
 	}
+
+	// 缓存归属地数据 24 小时
+	m.setCacheWithTTL(cacheKey, attr, 24*time.Hour)
 	return attr, true, nil
 }
 
 // splitCSV 将逗号分隔文本解析为去重清理后的字符串切片。
 func splitCSV(raw string) []string {
-	parts := strings.Split(raw, ",")
+	trimmedRaw := strings.Trim(raw, "\"")
+	parts := strings.Split(trimmedRaw, ",")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		trimmed := strings.TrimSpace(part)
@@ -715,6 +803,18 @@ func (m *RuntimeSelectionMarker) setCache(key string, value any) {
 	m.cache.Store(key, entry)
 }
 
+// setCacheWithTTL 写入或覆盖带有指定过期时间的并发安全内存缓存记录。
+func (m *RuntimeSelectionMarker) setCacheWithTTL(key string, value any, ttl time.Duration) {
+	if m == nil {
+		return
+	}
+	entry := markerCacheEntry{Value: value}
+	if ttl > 0 {
+		entry.ExpiresAt = time.Now().UTC().Add(ttl)
+	}
+	m.cache.Store(key, entry)
+}
+
 // cacheTTL 读取有效的全局 TTL 时限，默认值为 5 分钟。
 func (m *RuntimeSelectionMarker) cacheTTL() time.Duration {
 	if m != nil && m.CacheTTL > 0 {
@@ -739,4 +839,92 @@ func (m *RuntimeSelectionMarker) logger() *slog.Logger {
 		return m.Logger
 	}
 	return slog.Default()
+}
+
+func cleanCityName(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.TrimSuffix(name, "市")
+	name = strings.TrimSuffix(name, "州")
+	name = strings.TrimSuffix(name, "县")
+	name = strings.TrimSuffix(name, "地区")
+	return name
+}
+
+func cleanProvinceName(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.TrimSuffix(name, "省")
+	name = strings.TrimSuffix(name, "自治区")
+	name = strings.TrimSuffix(name, "特别行政区")
+	return name
+}
+
+func (m *RuntimeSelectionMarker) loadNearbyCities(ctx context.Context, merchantID string) (map[string][]string, error) {
+	cacheKey := fmt.Sprintf("merchant:%s:nearby_cities", merchantID)
+	if cached, ok := m.getCache(cacheKey); ok {
+		if val, good := cached.(map[string][]string); good {
+			return val, nil
+		}
+	}
+	var row struct {
+		ConfigValue string `gorm:"column:config_value"`
+	}
+	// 优先读取商户特定的邻近城市配置
+	err := m.DB.WithContext(ctx).Table("cc_sys_config").Select("config_value").Where("config_key = ?", fmt.Sprintf("merchant.%s.nearby_cities", merchantID)).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// 未配置商户级规则时，回退到全局系统配置
+		err = m.DB.WithContext(ctx).Table("cc_sys_config").Select("config_value").Where("config_key = ?", "system.nearby_cities").First(&row).Error
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		res := make(map[string][]string)
+		m.setCacheWithTTL(cacheKey, res, 5*time.Minute)
+		return res, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var rawMap map[string][]string
+	if err := json.Unmarshal([]byte(row.ConfigValue), &rawMap); err != nil {
+		res := make(map[string][]string)
+		m.setCacheWithTTL(cacheKey, res, 5*time.Minute)
+		return res, nil
+	}
+	res := make(map[string][]string)
+	for k, v := range rawMap {
+		cleanedK := strings.TrimSpace(k)
+		if !isNumeric(cleanedK) {
+			cleanedK = cleanCityName(cleanedK)
+		}
+		cleanedV := make([]string, 0, len(v))
+		for _, city := range v {
+			trimmedCity := strings.TrimSpace(city)
+			if !isNumeric(trimmedCity) {
+				trimmedCity = cleanCityName(trimmedCity)
+			}
+			cleanedV = append(cleanedV, trimmedCity)
+		}
+		res[cleanedK] = cleanedV
+	}
+	m.setCacheWithTTL(cacheKey, res, 10*time.Minute)
+	return res, nil
+}
+
+func isNumeric(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func indexOf(slice []string, val string) int {
+	for i, item := range slice {
+		if item == val {
+			return i
+		}
+	}
+	return -1
 }

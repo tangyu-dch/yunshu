@@ -2,6 +2,7 @@ import type { TenantContext } from '@/store/auth'
 import { generateIntegritySignature, useAuthStore } from '@/store/auth'
 
 export type PagePermission =
+  | 'operate:license:read'
   | 'operate:freeswitch:read'
   | 'operate:gateway:read'
   | 'operate:dispatcher:read'

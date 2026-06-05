@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios'
-import { message } from 'antd'
+import { message } from '@/utils/antd'
 import { useAuthStore, generateIntegritySignature } from '@/store/auth'
 
 type BackendResult<T = unknown> = {
@@ -54,7 +54,7 @@ http.interceptors.response.use(
     if (isBackendResult(response.data)) {
       if (response.data.code !== 0) {
         const errorMsg = response.data.message || '请求失败'
-        message.error(errorMsg)
+        message.error({ content: errorMsg, key: errorMsg })
         throw new Error(errorMsg)
       }
       response.data = response.data.data
@@ -70,7 +70,7 @@ http.interceptors.response.use(
       }
     }
     const errorMsg = error.response?.data?.message || error.message || '网络请求失败'
-    message.error(errorMsg)
+    message.error({ content: errorMsg, key: errorMsg })
     return Promise.reject(new Error(errorMsg))
   },
 )

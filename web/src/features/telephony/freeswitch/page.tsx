@@ -130,7 +130,7 @@ export function FreeSwitchPage() {
       {/* 软交换核心指标集群看板 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2 animate-fade-in">
         {/* 1. 软交换集群规模 & 健康度 */}
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-blue-50 to-indigo-100/50 dark:from-indigo-950/30 dark:to-slate-900/30 border border-blue-100/50 dark:border-indigo-900/20 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-blue-50 to-indigo-100/50 dark:from-indigo-950/30 dark:to-slate-900/30 border border-blue-100/50 dark:border-indigo-900/20 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div>
               <div className="text-[10px] font-bold text-indigo-500 dark:text-indigo-400 uppercase font-mono tracking-wider">软交换核心集群</div>
@@ -150,7 +150,7 @@ export function FreeSwitchPage() {
         </Card>
 
         {/* 2. 话务并发负载率 */}
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-purple-50 to-fuchsia-100/50 dark:from-purple-950/30 dark:to-slate-900/30 border border-purple-100/50 dark:border-purple-900/20 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-purple-50 to-fuchsia-100/50 dark:from-purple-950/30 dark:to-slate-900/30 border border-purple-100/50 dark:border-purple-900/20 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div className="w-full">
               <div className="text-[10px] font-bold text-purple-500 dark:text-purple-400 uppercase font-mono tracking-wider">并发与话务负载</div>
@@ -175,7 +175,7 @@ export function FreeSwitchPage() {
         </Card>
 
         {/* 3. 物理节点与 ESL 连接 */}
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-emerald-50 to-teal-100/50 dark:from-emerald-950/30 dark:to-slate-900/30 border border-emerald-100/50 dark:border-emerald-900/20 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-emerald-50 to-teal-100/50 dark:from-emerald-950/30 dark:to-slate-900/30 border border-emerald-100/50 dark:border-emerald-900/20 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div className="w-full">
               <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase font-mono tracking-wider">节点负载分配</div>

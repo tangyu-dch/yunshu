@@ -2,7 +2,9 @@ package merchant
 
 import (
 	"context"
+	"strconv"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -91,5 +93,84 @@ func TestMerchantRepository_ExtensionCascades(t *testing.T) {
 		if ext.HA1 != expectedHA1 || ext.HA1b != expectedHA1b {
 			t.Errorf("updated extension %s has incorrect hashes, ha1: %s, ha1b: %s", ext.ExtensionNumber, ext.HA1, ext.HA1b)
 		}
+	}
+}
+
+type DummyConsoleAccountModel struct {
+	ID          int        `gorm:"column:id;primaryKey;autoIncrement"`
+	Username    string     `gorm:"column:username"`
+	MerchantID  string     `gorm:"column:merchant_id"`
+	DelFlag     bool       `gorm:"column:del_flag"`
+	UpdatedTime time.Time  `gorm:"column:updated_time"`
+	DeletedTime *time.Time `gorm:"column:deleted_time"`
+}
+
+func (DummyConsoleAccountModel) TableName() string {
+	return "cc_sys_account"
+}
+
+func TestMerchantRepository_DeleteCascadesAccounts(t *testing.T) {
+	t.Parallel()
+
+	db, err := gorm.Open(sqlite.Open("file:merchant_delete_test_db?mode=memory&cache=shared&_busy_timeout=10000"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 迁移商户表和虚拟系统账号表以及费率映射表
+	err = db.AutoMigrate(&MerchantModel{}, &DummyConsoleAccountModel{}, &ExtensionModel{}, &MerchantBillingOverviewModel{}, &CallRateMerchantModel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo := NewMerchantRepository(db, nil, nil)
+	ctx := context.Background()
+
+	// 1. 创建商户
+	mch, err := repo.Save(ctx, operate.Merchant{
+		Name:      "测试被删商户",
+		Account:   "test_to_delete",
+		Enable:    true,
+		MaxAgents: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 在该商户下创建一个账号
+	account := DummyConsoleAccountModel{
+		Username:   "mch_admin",
+		MerchantID: strconv.Itoa(mch.ID),
+		DelFlag:    false,
+	}
+	if err := db.Create(&account).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 执行逻辑删除商户
+	err = repo.Delete(ctx, []int{mch.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. 验证商户已被逻辑删除
+	var deletedMch MerchantModel
+	if err := db.Where("id = ?", mch.ID).First(&deletedMch).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !deletedMch.DelFlag {
+		t.Fatalf("expected merchant del_flag to be true")
+	}
+
+	// 5. 验证账号已被逻辑级联删除
+	var deletedAcc DummyConsoleAccountModel
+	if err := db.Where("id = ?", account.ID).First(&deletedAcc).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !deletedAcc.DelFlag {
+		t.Fatalf("expected console account del_flag to be true after cascade delete")
+	}
+	if deletedAcc.DeletedTime == nil {
+		t.Fatalf("expected deleted_time of console account to be non-nil")
 	}
 }

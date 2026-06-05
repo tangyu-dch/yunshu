@@ -10,6 +10,7 @@ import { BatchTaskPage } from '@/features/business/batch-call-task/page'
 import { CallRecordPage } from '@/features/business/call-record/page'
 import { DashboardPage } from '@/features/dashboard/page'
 import { ForbiddenPage } from '@/features/auth/forbidden/page'
+import { NotFoundPage } from '@/features/auth/not-found/page'
 import { DispatcherPage } from '@/features/resource/dispatcher/page'
 import { FreeSwitchPage } from '@/features/telephony/freeswitch/page'
 import { GatewayPage } from '@/features/telephony/gateway/page'
@@ -38,13 +39,16 @@ import { ProxyConfigPage } from '@/features/system/proxy-config/page'
 import { MediaConfigPage } from '@/features/telephony/media-config/page'
 import { InstallPage } from '@/features/install/page'
 import { DialpadVersionPage } from '@/features/system/dialpad/page'
+import { LicensePage } from '@/features/system/license/page'
+import { IPBlockPage } from '@/features/security/ip-block/page'
 
 
 
 function Guard({ children }: { children: ReactElement }) {
   const state = useAuthStore()
   if (!state.token) {
-    return <Navigate to="/login" replace />
+    const isOperate = window.location.pathname.startsWith('/operate')
+    return <Navigate to={isOperate ? "/login/operate" : "/login"} replace />
   }
 
   // 严格的路由跳转签名审计
@@ -52,11 +56,13 @@ function Guard({ children }: { children: ReactElement }) {
     const expected = generateIntegritySignature(state.tenant, state.token)
     if (state.signature !== expected) {
       console.error('【安全拦截】检测到 localStorage 认证凭证与完整性校验签名不匹配！正在强行销毁会话。')
+      const isOperate = state.tenant?.internal
+      const redirectUrl = isOperate ? '/login/operate?error=security_tampering' : '/login?error=security_tampering'
       setTimeout(() => {
         state.logout()
-        window.location.assign('/login?error=security_tampering')
+        window.location.assign(redirectUrl)
       }, 0)
-      return <Navigate to="/login?error=security_tampering" replace />
+      return <Navigate to={redirectUrl} replace />
     }
   }
 
@@ -85,16 +91,18 @@ function RequirePermission({
     const expected = generateIntegritySignature(state.tenant, state.token)
     if (state.signature !== expected) {
       console.error('【安全拦截】检测到已篡改的认证凭证！正在强行销毁会话。')
+      const isOperate = state.tenant?.internal
+      const redirectUrl = isOperate ? '/login/operate?error=security_tampering' : '/login?error=security_tampering'
       setTimeout(() => {
         state.logout()
-        window.location.assign('/login?error=security_tampering')
+        window.location.assign(redirectUrl)
       }, 0)
-      return <Navigate to="/login?error=security_tampering" replace />
+      return <Navigate to={redirectUrl} replace />
     }
   }
 
   if (!hasPermission(state.tenant, permission)) {
-    return <ForbiddenPage />
+    return <NotFoundPage />
   }
   return children
 }
@@ -137,10 +145,12 @@ export const router = createBrowserRouter([
       { path: 'operate/channel', element: <RequirePermission permission="operate:channel:read"><ChannelPage /></RequirePermission> },
       { path: 'operate/extension', element: <RequirePermission permission="operate:extension:read"><ExtensionPage /></RequirePermission> },
       { path: 'operate/risk-control', element: <RequirePermission permission="operate:riskcontrol:read"><RiskControlPage /></RequirePermission> },
+      { path: 'operate/ip-block', element: <RequirePermission permission="operate:riskcontrol:read"><IPBlockPage /></RequirePermission> },
       { path: 'operate/phone-attribution', element: <RequirePermission permission="operate:phone:read"><PhoneAttributionPage /></RequirePermission> },
       { path: 'operate/proxy-config', element: <RequirePermission permission="operate:freeswitch:read"><ProxyConfigPage /></RequirePermission> },
       { path: 'operate/media-config', element: <RequirePermission permission="operate:freeswitch:read"><MediaConfigPage /></RequirePermission> },
       { path: 'operate/dialpad', element: <RequirePermission permission="operate:account:read"><DialpadVersionPage /></RequirePermission> },
+      { path: 'operate/license', element: <LicensePage /> },
       { path: 'operate/call-record', element: <RequirePermission permission="operate:merchant:read"><CallRecordPage /></RequirePermission> },
 
       { path: 'operate/api-doc', element: <RequirePermission permission="operate:account:read"><OperatorApiDocPage /></RequirePermission> },
@@ -150,11 +160,16 @@ export const router = createBrowserRouter([
       { path: 'merchant/ai-model-flow', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },
       { path: 'merchant/ai-model-config', element: <RequirePermission permission="merchant:ai-flow:read"><AiModelFlowPage /></RequirePermission> },
 
+      { path: 'merchant/pool', element: <RequirePermission permission="merchant:account:read"><PoolPage /></RequirePermission> },
+      { path: 'merchant/pool-phone', element: <RequirePermission permission="merchant:account:read"><PoolPhonePage /></RequirePermission> },
+
       { path: 'merchant/skill-group', element: <RequirePermission permission="merchant:skill-group:read"><SkillGroupPage /></RequirePermission> },
       { path: 'merchant/phone-group', element: <RequirePermission permission="merchant:phone-group:read"><PhoneGroupPage /></RequirePermission> },
       { path: 'merchant/account', element: <RequirePermission permission="merchant:account:read"><MerchantAccountPage /></RequirePermission> },
       { path: 'merchant/billing', element: <MerchantBillingPage /> },
       { path: 'merchant/api-doc', element: <MerchantApiDocPage /> },
+      { path: '*', element: <NotFoundPage /> },
     ],
   },
+  { path: '*', element: <NotFoundPage /> },
 ])

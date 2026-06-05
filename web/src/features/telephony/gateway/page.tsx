@@ -183,7 +183,7 @@ export function GatewayPage() {
       {/* 运营看板数据指标 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="配置网关线路总数"
               value={data?.total ?? 0}
@@ -193,7 +193,7 @@ export function GatewayPage() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="已启用正常中继"
               value={(data?.records ?? []).filter((r) => r.enable).length}
@@ -204,7 +204,7 @@ export function GatewayPage() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="总承载并发上限"
               value={(data?.records ?? []).reduce((sum, r) => sum + (r.concurrency ?? 0), 0)}

@@ -42,7 +42,9 @@ import {
   savePool,
   fetchPools,
   fetchGatewayPage,
-  fetchChannels
+  fetchChannels,
+  rechargeMerchant,
+  fetchLicenseStatus
 } from '@/api/operate'
 import { useAuthStore } from '@/store/auth'
 import { useUiStore } from '@/store/ui'
@@ -64,7 +66,8 @@ import {
   PartitionOutlined,
   NodeIndexOutlined,
   GatewayOutlined,
-  GlobalOutlined
+  GlobalOutlined,
+  PayCircleOutlined
 } from '@ant-design/icons'
 
 type MerchantFormValues = {
@@ -95,11 +98,35 @@ export function MerchantPage() {
   const queryClient = useQueryClient()
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
+  // 获取授权状态及隔离模式
+  const { data: licenseStatus } = useQuery({
+    queryKey: ['system', 'license', 'status'],
+    queryFn: fetchLicenseStatus,
+  })
+  const tenantMode = licenseStatus?.tenantMode || 'single'
+
   // 决策配置中心状态
   const [decisionModalOpen, setDecisionModalOpen] = useState(false)
   const [decisionMerchantId, setDecisionMerchantId] = useState<number | null>(null)
   const [decisionForm] = Form.useForm()
   const [decisionFormValues, setDecisionFormValues] = useState<any>({ riskControlIds: [], poolStrategies: {} })
+
+  // 快速充值状态与 Form
+  const [rechargeOpen, setRechargeOpen] = useState(false)
+  const [rechargeMerchantId, setRechargeMerchantId] = useState<number | null>(null)
+  const [rechargeForm] = Form.useForm()
+
+  const rechargeMutation = useMutation({
+    mutationFn: async (values: { merchantId: string; amount: number; remark?: string }) => rechargeMerchant(values),
+    onSuccess: async () => {
+      message.success('充值成功')
+      setRechargeOpen(false)
+      rechargeForm.resetFields()
+      await queryClient.invalidateQueries({ queryKey: ['operate', 'billing'] })
+      await queryClient.invalidateQueries({ queryKey: ['operate', 'merchant'] })
+    },
+    onError: (error) => message.error(error instanceof Error ? error.message : '充值失败'),
+  })
 
   // 1. 获取所有风控策略
   const { data: riskControlsData } = useQuery({
@@ -509,18 +536,20 @@ export function MerchantPage() {
       <div className="flex justify-end mb-2">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => refetch()} loading={isPending}>刷新</Button>
-          <PermissionGate permission="operate:merchant:write">
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              新增商户
-            </Button>
-          </PermissionGate>
+          {tenantMode !== 'single' && (
+            <PermissionGate permission="operate:merchant:write">
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                新增商户
+              </Button>
+            </PermissionGate>
+          )}
         </Space>
       </div>
 
       {/* 商户数据简报统计 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="商户总注册规模"
               value={data?.total ?? 0}
@@ -530,7 +559,7 @@ export function MerchantPage() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="正常运行中商户"
               value={data?.records.filter((r) => r.enable).length ?? 0}
@@ -541,7 +570,7 @@ export function MerchantPage() {
           </Card>
         </Col>
         <Col xs={24} sm={8}>
-          <Card bordered={false} className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
+          <Card variant="borderless" className="shadow-sm rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-800">
             <Statistic
               title="已超期/超限商户"
               value={data?.records.filter((r) => r.expiredTime && r.expiredTime !== '-' && dayjs(r.expiredTime).isBefore(dayjs())).length ?? 0}
@@ -637,6 +666,23 @@ export function MerchantPage() {
                 <Button size="small" type="link" onClick={() => openEdit(record.id)} className="!p-0">
                   编辑
                 </Button>
+                <PermissionGate permission="operate:billing:write">
+                  <Button
+                    size="small"
+                    type="link"
+                    icon={<PayCircleOutlined />}
+                    onClick={() => {
+                      setRechargeMerchantId(record.id)
+                      setRechargeOpen(true)
+                      setTimeout(() => {
+                        rechargeForm.setFieldsValue({ merchantId: String(record.id), amount: 100, remark: '' })
+                      }, 0)
+                    }}
+                    className="!p-0"
+                  >
+                    充值
+                  </Button>
+                </PermissionGate>
                 <Button
                   size="small"
                   type="link"
@@ -659,13 +705,15 @@ export function MerchantPage() {
                 >
                   模拟登录
                 </Button>
-                <PermissionGate permission="operate:merchant:delete">
-                  <Popconfirm title="确认物理删除该商户主体？其下关联分机及拨号盘关系将被完全解绑！" onConfirm={() => deleteMutation.mutate([record.id])}>
-                    <Button size="small" type="link" danger className="!p-0">
-                      物理删除
-                    </Button>
-                  </Popconfirm>
-                </PermissionGate>
+                {tenantMode !== 'single' && (
+                  <PermissionGate permission="operate:merchant:delete">
+                    <Popconfirm title="确认物理删除该商户主体？其下关联分机及拨号盘关系将被完全解绑！" onConfirm={() => deleteMutation.mutate([record.id])}>
+                      <Button size="small" type="link" danger className="!p-0">
+                        物理删除
+                      </Button>
+                    </Popconfirm>
+                  </PermissionGate>
+                )}
               </Space>
             ),
           },
@@ -1229,6 +1277,42 @@ export function MerchantPage() {
           </Col>
         </Row>
         )}
+      </Modal>
+
+      <Modal
+        open={rechargeOpen}
+        title="商户资金充值"
+        onCancel={() => {
+          setRechargeOpen(false)
+          rechargeForm.resetFields()
+        }}
+        onOk={() => rechargeForm.submit()}
+        confirmLoading={rechargeMutation.isPending}
+        destroyOnHidden
+      >
+        <Form
+          form={rechargeForm}
+          layout="vertical"
+          onFinish={(values) => {
+            rechargeMutation.mutate(values)
+          }}
+        >
+          <Form.Item name="merchantId" hidden>
+            <Input />
+          </Form.Item>
+
+          <Typography.Paragraph>
+            充值对象商户：<strong>{rechargeMerchantId ? (data?.records.find((m: any) => m.id === rechargeMerchantId)?.name || `商户 ID: ${rechargeMerchantId}`) : ''}</strong>
+          </Typography.Paragraph>
+
+          <Form.Item name="amount" label="充值金额 (￥)" rules={[{ required: true, message: '请输入充值金额' }]}>
+            <InputNumber className="w-full" min={0.01} precision={2} />
+          </Form.Item>
+
+          <Form.Item name="remark" label="充值说明/备注">
+            <Input placeholder="请输入付款凭证号或备注" />
+          </Form.Item>
+        </Form>
       </Modal>
     </Space>
   )

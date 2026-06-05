@@ -77,6 +77,7 @@ type RabbitMQConfig struct {
 type ConsoleConfig struct {
 	CallBaseURL string              `yaml:"callBaseURL"`
 	Dialpad     DialpadUpdateConfig `yaml:"dialpad"`
+	LicensePath string              `yaml:"licensePath"`
 }
 
 // DialpadUpdateConfig 定义桌面拨号盘客户端更新配置。
@@ -200,6 +201,9 @@ func applyEnv(cfg *Config) {
 	}
 	if value := os.Getenv("CC_CALL_BASE_URL"); value != "" {
 		cfg.Console.CallBaseURL = value
+	}
+	if value := os.Getenv("LICENSE_PATH"); value != "" {
+		cfg.Console.LicensePath = value
 	}
 	if value := os.Getenv("DIALPAD_VERSION"); value != "" {
 		cfg.Console.Dialpad.Version = value

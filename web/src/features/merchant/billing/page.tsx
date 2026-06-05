@@ -1,5 +1,5 @@
-import { Card, Col, Descriptions, Row, Space, Table, Tag, Typography, Button, Modal, Select, Form, message } from 'antd'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Card, Col, Descriptions, Row, Space, Tag } from 'antd'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   WalletOutlined,
@@ -8,36 +8,17 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import { TableWrap } from '@/components/TableWrap'
-import { fetchBillingOverview, fetchMerchants, fetchRates, fetchRechargeRecords, fetchActiveRates, bindMerchantRate } from '@/api/operate'
+import { fetchBillingOverview, fetchMerchants, fetchRates, fetchRechargeRecords } from '@/api/operate'
 import { useAuthStore } from '@/store/auth'
 
 export function MerchantBillingPage() {
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const [bindOpen, setBindOpen] = useState(false)
-  const [bindForm] = Form.useForm()
   const queryClient = useQueryClient()
 
   const tenant = useAuthStore((state) => state.tenant)
   const currentMerchantId = tenant?.merchantId
 
-  // Load active rates list for dropdown selection
-  const { data: activeRates = [] } = useQuery({
-    queryKey: ['operate', 'rate', 'active'],
-    queryFn: fetchActiveRates,
-    enabled: bindOpen,
-  })
-
-  const bindMutation = useMutation({
-    mutationFn: async (rateId: number) => bindMerchantRate(rateId),
-    onSuccess: async () => {
-      message.success('计费套餐配置已更新，并继承相关计费标准')
-      setBindOpen(false)
-      await queryClient.invalidateQueries({ queryKey: ['operate', 'merchant'] })
-      await queryClient.invalidateQueries({ queryKey: ['operate', 'rate'] })
-    },
-    onError: (error) => message.error(error instanceof Error ? error.message : '配置失败'),
-  })
 
   // Load merchants list to resolve merchant names and rate packages
   const { data: merchantsData, isLoading: isMerchantLoading } = useQuery({
@@ -91,7 +72,7 @@ export function MerchantBillingPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>
           <Card
-            bordered={false}
+            variant="borderless"
             loading={isLoading}
             className="shadow-sm border border-slate-100 hover:shadow-md transition-shadow duration-200"
           >
@@ -111,7 +92,7 @@ export function MerchantBillingPage() {
 
         <Col xs={24} sm={12} md={6}>
           <Card
-            bordered={false}
+            variant="borderless"
             loading={isLoading}
             className="shadow-sm border border-slate-100 hover:shadow-md transition-shadow duration-200"
           >
@@ -131,7 +112,7 @@ export function MerchantBillingPage() {
 
         <Col xs={24} sm={12} md={6}>
           <Card
-            bordered={false}
+            variant="borderless"
             loading={isLoading}
             className="shadow-sm border border-slate-100 hover:shadow-md transition-shadow duration-200"
           >
@@ -157,7 +138,7 @@ export function MerchantBillingPage() {
 
         <Col xs={24} sm={12} md={6}>
           <Card
-            bordered={false}
+            variant="borderless"
             loading={isLoading}
             className="shadow-sm border border-slate-100 hover:shadow-md transition-shadow duration-200"
           >
@@ -179,20 +160,9 @@ export function MerchantBillingPage() {
       {/* Package Rates Descriptions */}
       <Card
         title="套餐费率详情"
-        bordered={false}
+        variant="borderless"
         loading={isLoading}
         className="shadow-sm border border-slate-100"
-        extra={
-          <Button
-            type="primary"
-            onClick={() => {
-              bindForm.setFieldsValue({ rateId: currentMerchant?.rateId || undefined })
-              setBindOpen(true)
-            }}
-          >
-            配置套餐
-          </Button>
-        }
       >
         {currentRate ? (
           <Descriptions bordered column={{ xs: 1, sm: 2, md: 3 }}>
@@ -247,38 +217,6 @@ export function MerchantBillingPage() {
           },
         ]}
       />
-
-      <Modal
-        open={bindOpen}
-        title="配置与继承计费套餐"
-        onCancel={() => setBindOpen(false)}
-        onOk={() => bindForm.submit()}
-        confirmLoading={bindMutation.isPending}
-        destroyOnHidden
-      >
-        <Form
-          form={bindForm}
-          layout="vertical"
-          onFinish={(values) => bindMutation.mutate(values.rateId)}
-        >
-          <Form.Item
-            name="rateId"
-            label="选择要继承的计费套餐"
-            rules={[{ required: true, message: '请选择一个计费套餐' }]}
-          >
-            <Select
-              placeholder="选择关联的计费套餐"
-              options={activeRates.map((r: any) => ({
-                value: r.id,
-                label: `${r.rateName} (￥${r.billingPrice.toFixed(4)}/分钟)`,
-              }))}
-            />
-          </Form.Item>
-          <Typography.Paragraph type="secondary" className="mt-2 text-xs">
-            注意：商户平台配置新套餐后，将立即继承其计费单价及结算周期标准。所有的呼叫话单后续扣费均会按此新标准进行结算。
-          </Typography.Paragraph>
-        </Form>
-      </Modal>
     </Space>
   )
 }

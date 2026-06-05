@@ -1139,7 +1139,7 @@ app.post('/webhook', (req, res) => {
                   <div className="lg:col-span-7 space-y-8">
                     
                     {/* Section 1: 鉴权与安全签名 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-4">
                         <Tag color="blue" style={{ border: 'none', borderRadius: '4px' }}>STEP 1</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100">
@@ -1176,7 +1176,7 @@ app.post('/webhook', (req, res) => {
                     </Card>
 
                     {/* Section 2: 外呼接口 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-2">
                         <Tag color="green" style={{ border: 'none', borderRadius: '4px' }}>STEP 2</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100">
@@ -1214,7 +1214,7 @@ app.post('/webhook', (req, res) => {
                     </Card>
 
                     {/* Section 3: 创建坐席账户 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-2">
                         <Tag color="cyan" style={{ border: 'none', borderRadius: '4px' }}>STEP 3</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100 flex items-center gap-2">
@@ -1254,7 +1254,7 @@ app.post('/webhook', (req, res) => {
                     </Card>
 
                     {/* Section 4: 在线获取录音 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-2">
                         <Tag color="orange" style={{ border: 'none', borderRadius: '4px' }}>STEP 4</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100 flex items-center gap-2">
@@ -1290,7 +1290,7 @@ app.post('/webhook', (req, res) => {
                     </Card>
 
                     {/* Section 5: 通话记录获取 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-2">
                         <Tag color="magenta" style={{ border: 'none', borderRadius: '4px' }}>STEP 5</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100 flex items-center gap-2">
@@ -1331,7 +1331,7 @@ app.post('/webhook', (req, res) => {
                     </Card>
 
                     {/* Section 6: Webhook 推送 */}
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <div className="flex items-center gap-2 mb-2">
                         <Tag color="purple" style={{ border: 'none', borderRadius: '4px' }}>STEP 6</Tag>
                         <Title level={4} className="!mb-0 font-extrabold text-slate-800 dark:text-zinc-100">
@@ -2328,7 +2328,7 @@ app.post('/webhook', (req, res) => {
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                   {/* 左侧：详细的 SDK 参数与 API 指南 */}
                   <div className="lg:col-span-7 space-y-8">
-                    <Card bordered={false} className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
+                    <Card variant="borderless" className="shadow-sm rounded-2xl border border-slate-100/50 dark:border-slate-800/40">
                       <Title level={4} className="font-extrabold text-slate-800 dark:text-zinc-100 mb-4 flex items-center gap-2">
                         <RocketOutlined className="text-emerald-500" />
                         SDK 快速启动指南

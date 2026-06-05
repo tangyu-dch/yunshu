@@ -201,6 +201,12 @@ func pingFreeswitch(address string, eslPort int) NodeStatus {
 	if eslPort <= 0 {
 		eslPort = 8021
 	}
+
+	// 本地开发与宿主机运行适配：若在宿主机（非容器）环境下检测，将 freeswitch 域名映射回 127.0.0.1
+	if (address == "freeswitch" || address == "cc-freeswitch") && !isRunningInDocker() {
+		address = "127.0.0.1"
+	}
+
 	addr := net.JoinHostPort(address, strconv.Itoa(eslPort))
 
 	// 设置超短的 150ms 拨号超时

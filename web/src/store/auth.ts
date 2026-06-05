@@ -77,6 +77,7 @@ export const useAuthStore = create<AuthState>()(
       originalUsername: null,
       originalSignature: null,
       login: ({ username, token, tenant, expiresAt }) => {
+        sessionStorage.removeItem('dismiss_trial_alert')
         const signature = generateIntegritySignature(tenant, token)
         set({
           username,
@@ -91,7 +92,8 @@ export const useAuthStore = create<AuthState>()(
           originalSignature: null,
         })
       },
-      logout: () =>
+      logout: () => {
+        sessionStorage.removeItem('dismiss_trial_alert')
         set({
           token: null,
           username: 'admin',
@@ -103,7 +105,8 @@ export const useAuthStore = create<AuthState>()(
           originalPlatform: null,
           originalUsername: null,
           originalSignature: null,
-        }),
+        })
+      },
       impersonate: (merchantId, merchantAccount, merchantPermissions) =>
         set((state) => {
           // 严格的安全卡点：只有运营管理员（internal 为 true）才允许执行 impersonate

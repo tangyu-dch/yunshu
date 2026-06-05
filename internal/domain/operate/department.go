@@ -12,6 +12,8 @@ var (
 	ErrInvalidDepartment = errors.New("invalid department")
 	// ErrDepartmentNotFound 表示部门不存在。
 	ErrDepartmentNotFound = errors.New("department not found")
+	// ErrDepartmentReferenced 表示部门仍被账号或活动外呼任务引用。
+	ErrDepartmentReferenced = errors.New("department referenced")
 )
 
 // Department 表示商户组织架构中的部门。
@@ -47,6 +49,7 @@ type DepartmentRepository interface {
 	Save(ctx context.Context, dept Department) (Department, error)
 	Delete(ctx context.Context, ids []int) error
 	ListAll(ctx context.Context, merchantID int) ([]Department, error)
+	HasBindings(ctx context.Context, ids []int) (bool, error)
 }
 
 // DepartmentManagementService 承载部门管理的业务逻辑。
@@ -93,6 +96,15 @@ func (s *DepartmentManagementService) Delete(ctx context.Context, ids []int) err
 	ids = filterPositiveIDs(ids)
 	if len(ids) == 0 {
 		return ErrInvalidDepartment
+	}
+	hasBindings, err := s.Repository.HasBindings(ctx, ids)
+	if err != nil {
+		logger.Error("商户端删除部门前检查绑定失败", "deptCount", len(ids), "error", err.Error())
+		return err
+	}
+	if hasBindings {
+		logger.Warn("商户端删除部门失败，部门仍被控制台账号或活动外呼任务引用", "deptCount", len(ids))
+		return ErrDepartmentReferenced
 	}
 	logger.Info("商户端开始删除部门", "deptCount", len(ids))
 	if err := s.Repository.Delete(ctx, ids); err != nil {

@@ -187,7 +187,7 @@ export function DialpadVersionPage() {
       {/* 统计数据概览看板 */}
       <Row gutter={[16, 16]} className="animate-fade-in">
         <Col span={6}>
-          <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
+          <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
             <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">LATEST STABLE VERSION</div>
             <div className="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400 mt-2 font-mono">{latestVersionStr}</div>
             <div className="text-xs text-slate-400 dark:text-zinc-500 mt-2 flex items-center gap-1">
@@ -196,14 +196,14 @@ export function DialpadVersionPage() {
           </Card>
         </Col>
         <Col span={6}>
-          <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
+          <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
             <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">TOTAL UPLOADED PACKAGES</div>
             <div className="text-2xl font-extrabold text-slate-800 dark:text-slate-100 mt-2 font-mono">{totalVersions} <span className="text-xs font-normal text-slate-400">个文件</span></div>
             <div className="text-xs text-slate-400 dark:text-zinc-500 mt-2">包含多架构、多操作系统的独立构建包</div>
           </Card>
         </Col>
         <Col span={6}>
-          <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
+          <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
             <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">TOTAL STORAGE USED</div>
             <div className="text-2xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-2 font-mono">{formatBytes(totalStorageSize)}</div>
             <div className="text-xs text-slate-400 dark:text-zinc-500 mt-2 flex items-center gap-1">
@@ -212,7 +212,7 @@ export function DialpadVersionPage() {
           </Card>
         </Col>
         <Col span={6}>
-          <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
+          <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4">
             <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">CRITICAL FORCE UPDATES</div>
             <div className="text-2xl font-extrabold text-rose-500 mt-2 font-mono">{forceUpdateCount} <span className="text-xs font-normal text-slate-400">个强制更新</span></div>
             <div className="text-xs text-slate-400 dark:text-zinc-500 mt-2">被拦截并要求必须更新的客户端版本</div>

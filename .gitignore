@@ -81,3 +81,8 @@ data/
 *.env
 configs/config.local.yaml
 configs/config.dev.yaml
+
+# Temporary Scratch & Local Caches
+scratch/
+configs/ipblocks/
+*.lic

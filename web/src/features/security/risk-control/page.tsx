@@ -1,7 +1,7 @@
-import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, Tabs, Card, Table, Row, Col, Alert, Empty, Tooltip, message, Steps, TreeSelect } from 'antd'
-import { ApartmentOutlined, SafetyCertificateOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BranchesOutlined, CheckCircleOutlined, InfoCircleOutlined, InteractionOutlined } from '@ant-design/icons'
+import { Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, Typography, Tabs, Card, Table, Row, Col, Alert, Empty, Tooltip, message, Steps, TreeSelect, Cascader } from 'antd'
+import { ApartmentOutlined, SafetyCertificateOutlined, SettingOutlined, PlusOutlined, DeleteOutlined, EditOutlined, BranchesOutlined, CheckCircleOutlined, InfoCircleOutlined, InteractionOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
@@ -18,11 +18,18 @@ import {
   deleteRiskControls,
   fetchRiskControlMerchants,
   saveRiskControlMerchants,
-  fetchAreaCodes
+  fetchAreaCodes,
+  fetchProxyConfig,
+  saveProxyConfig
 } from '@/api/operate'
 
 const { TabPane } = Tabs
 const { Option } = Select
+
+type NearbyCityConfig = {
+  cityCode: string
+  nearbyCodes: string[]
+}
 
 type PoolStrategyFormValues = {
   id: number
@@ -156,6 +163,154 @@ export function RiskControlPage() {
   const [bindModalOpen, setBindModalOpen] = useState(false)
   const [selectedRiskId, setSelectedRiskId] = useState<number | null>(null)
   const [selectedMerchantIds, setSelectedMerchantIds] = useState<number[]>([])
+
+  // States for Nearby Cities Configuration
+  const [nearbySearchText, setNearbySearchText] = useState('')
+  const [nearbyCityList, setNearbyCityList] = useState<NearbyCityConfig[]>([])
+  const [nearbyModalOpen, setNearbyModalOpen] = useState(false)
+  const [editingNearbyIndex, setEditingNearbyIndex] = useState<number | null>(null)
+  const [nearbyForm] = Form.useForm<{ cityCode: any; nearbyCodes: any[] }>()
+
+  // 1. Fetch Queries
+  const { data: proxyConfigData, isLoading: proxyConfigLoading, refetch: refetchProxyConfig } = useQuery({
+    queryKey: ['operate', 'proxy-config'],
+    queryFn: () => fetchProxyConfig(),
+    enabled: activeTab === 'nearby',
+  })
+
+  useEffect(() => {
+    if (proxyConfigData?.nearbyCities) {
+      try {
+        const parsed = JSON.parse(proxyConfigData.nearbyCities)
+        const list: NearbyCityConfig[] = []
+        for (const [key, val] of Object.entries(parsed)) {
+          if (Array.isArray(val)) {
+            list.push({ cityCode: key, nearbyCodes: val })
+          }
+        }
+        setNearbyCityList(list)
+      } catch (e) {
+        setNearbyCityList([])
+      }
+    } else {
+      setNearbyCityList([])
+    }
+  }, [proxyConfigData])
+
+  const citiesList = useMemo(() => {
+    if (!areaCodes) return []
+    return areaCodes.filter((item: any) => item.level === 2)
+  }, [areaCodes])
+
+  const cascaderOptions = useMemo(() => {
+    if (!areaCodes) return []
+    const citiesByParent = new Map<string, any[]>()
+    areaCodes.forEach((item: any) => {
+      if (item.level === 2) {
+        const parent = item.parentCode
+        if (!citiesByParent.has(parent)) {
+          citiesByParent.set(parent, [])
+        }
+        citiesByParent.get(parent)!.push(item)
+      }
+    })
+
+    const options: any[] = []
+    areaCodes.forEach((item: any) => {
+      if (item.level === 1) {
+        const provinceCode = item.code
+        const children = citiesByParent.get(provinceCode) || []
+        options.push({
+          value: provinceCode,
+          label: item.name,
+          children: children.map((city: any) => ({
+            value: city.code,
+            label: `${city.name} (${city.code})`,
+          })),
+        })
+      }
+    })
+    return options
+  }, [areaCodes])
+
+  const areaCodeToNameMap = useMemo(() => {
+    const m = new Map<string, string>()
+    areaCodes?.forEach((item: any) => {
+      m.set(item.code, item.name)
+    })
+    return m
+  }, [areaCodes])
+
+  const filteredNearbyCityList = useMemo(() => {
+    return nearbyCityList.filter((item) => {
+      const cityName = areaCodeToNameMap.get(item.cityCode) || ''
+      const matchCity = cityName.includes(nearbySearchText) || item.cityCode.includes(nearbySearchText)
+      const matchNearby = item.nearbyCodes.some((code) => {
+        const name = areaCodeToNameMap.get(code) || ''
+        return name.includes(nearbySearchText) || code.includes(nearbySearchText)
+      })
+      return matchCity || matchNearby
+    })
+  }, [nearbyCityList, nearbySearchText, areaCodeToNameMap])
+
+  const handleNearbyFormSubmit = (values: { cityCode: string | string[]; nearbyCodes: (string | string[])[] }) => {
+    const cityCode = Array.isArray(values.cityCode)
+      ? values.cityCode[values.cityCode.length - 1]
+      : values.cityCode
+    const nearbyCodes = Array.isArray(values.nearbyCodes)
+      ? values.nearbyCodes.map((path) => (Array.isArray(path) ? path[path.length - 1] : path))
+      : []
+
+    const newList = [...nearbyCityList]
+    if (editingNearbyIndex !== null) {
+      const exists = newList.some((item, idx) => item.cityCode === cityCode && idx !== editingNearbyIndex)
+      if (exists) {
+        message.error('该城市已配置过邻近城市规则，请勿重复添加！')
+        return
+      }
+      newList[editingNearbyIndex] = { cityCode, nearbyCodes }
+    } else {
+      const exists = newList.some((item) => item.cityCode === cityCode)
+      if (exists) {
+        message.error('该城市已配置过邻近城市规则，请勿重复添加！')
+        return
+      }
+      newList.push({ cityCode, nearbyCodes })
+    }
+    setNearbyCityList(newList)
+    setNearbyModalOpen(false)
+    setEditingNearbyIndex(null)
+    nearbyForm.resetFields()
+  }
+
+  const handleNearbyDelete = (index: number) => {
+    const newList = nearbyCityList.filter((_, idx) => idx !== index)
+    setNearbyCityList(newList)
+    message.success('规则已从当前列表移除，请点击下方“保存并生效相邻城市配置”按钮提交至服务器')
+  }
+
+  const saveNearbyCitiesMutation = useMutation({
+    mutationFn: async (list: NearbyCityConfig[]) => {
+      const map: Record<string, string[]> = {}
+      list.forEach((item) => {
+        map[item.cityCode] = item.nearbyCodes
+      })
+      const jsonStr = JSON.stringify(map)
+      const latestConfig = await fetchProxyConfig()
+      const payload = {
+        ...latestConfig,
+        nearbyCities: jsonStr,
+      }
+      await saveProxyConfig(payload)
+    },
+    onSuccess: () => {
+      message.success('相邻城市匹配优先级配置已成功保存并立即生效！')
+      queryClient.invalidateQueries({ queryKey: ['operate', 'proxy-config'] })
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '保存相邻城市配置失败')
+    }
+  })
 
   // 1. Fetch Queries
   const { data: poolsData, isLoading: poolsLoading } = useQuery({
@@ -485,13 +640,12 @@ export function RiskControlPage() {
                       {poolsData.records.filter((p: any) => p.enable).map((pool: any) => {
                         const gw = pool.gatewayId ? gatewayMap.get(pool.gatewayId) : null
                         const ch = gw?.channelId ? channelMap.get(gw.channelId) : null
-                        // find matching skill groups that have phones in this pool
                         const matchedSgs = skillGroupsData?.records.slice(0, 2).map((s: any) => s.name).join(', ') || '通用呼叫'
 
                         return (
                           <div
                             key={pool.id}
-                            className="p-4 border rounded flex items-center justify-between"
+                            className="p-4 border rounded-xl"
                             style={{ 
                               borderLeft: '4px solid #10b981', 
                               transition: 'all 0.3s',
@@ -499,35 +653,37 @@ export function RiskControlPage() {
                               borderColor: 'var(--border-color)'
                             }}
                           >
-                            <div className="flex items-center gap-4 flex-wrap">
-                              <div>
-                                <span className="text-xs block" style={{ color: 'var(--text-secondary)' }}>呼叫技能组</span>
-                                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>{matchedSgs}</span>
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <div className="flex-1 min-w-[120px] bg-slate-50 dark:bg-zinc-800/60 p-3 rounded-lg border border-slate-100 dark:border-zinc-700/50">
+                                <span className="text-[10px] text-slate-400 dark:text-zinc-500 block font-mono">呼叫技能组</span>
+                                <span className="font-semibold text-xs text-slate-800 dark:text-zinc-200">{matchedSgs}</span>
                               </div>
-                              <div style={{ color: 'var(--text-secondary)' }}>➜</div>
-                              <div>
-                                <span className="text-xs block" style={{ color: 'var(--text-secondary)' }}>号码池 (策略)</span>
-                                <span className="font-semibold text-emerald-600">
-                                  {pool.name}
-                                </span>
-                                <Tag color="geekblue" style={{ marginLeft: '6px' }}>
-                                  {pool.selectionStrategy || 'CONCURRENCY'}
-                                </Tag>
+                              <ArrowRightOutlined className="text-slate-300 dark:text-zinc-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-[120px] bg-emerald-50/30 dark:bg-emerald-950/10 p-3 rounded-lg border border-emerald-100/30 dark:border-emerald-900/20">
+                                <span className="text-[10px] text-emerald-500 block font-mono">号码池 (策略)</span>
+                                <span className="font-bold text-xs text-emerald-600 dark:text-emerald-400">{pool.name}</span>
+                                <div className="mt-1">
+                                  <Tag color="processing" className="text-[9px] px-1 border-none m-0 leading-normal">
+                                    {pool.selectionStrategy || 'CONCURRENCY'}
+                                  </Tag>
+                                </div>
                               </div>
-                              <div style={{ color: 'var(--text-secondary)' }}>➜</div>
-                              <div>
-                                <span className="text-xs block" style={{ color: 'var(--text-secondary)' }}>网关 (优先级)</span>
-                                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                                  {gw ? gw.name : '未关联网关'}
-                                </span>
-                                {gw && <Tag color="blue" style={{ marginLeft: '6px' }}>Priority: {gw.code || 1}</Tag>}
+                              <ArrowRightOutlined className="text-slate-300 dark:text-zinc-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-[120px] bg-blue-50/30 dark:bg-blue-950/10 p-3 rounded-lg border border-blue-100/30 dark:border-blue-900/20">
+                                <span className="text-[10px] text-blue-500 block font-mono">呼叫网关</span>
+                                <span className="font-semibold text-xs text-blue-700 dark:text-blue-400">{gw ? gw.name : '未关联'}</span>
+                                {gw && (
+                                  <div className="mt-1">
+                                    <Tag color="warning" className="text-[9px] px-1 border-none m-0 leading-normal">
+                                      Priority: {gw.priority || 1}
+                                    </Tag>
+                                  </div>
+                                )}
                               </div>
-                              <div style={{ color: 'var(--text-secondary)' }}>➜</div>
-                              <div>
-                                <span className="text-xs block" style={{ color: 'var(--text-secondary)' }}>物理渠道</span>
-                                <span className="font-medium" style={{ color: 'var(--text-primary)' }}>
-                                  {ch ? ch.name : '未分组线路'}
-                                </span>
+                              <ArrowRightOutlined className="text-slate-300 dark:text-zinc-600 flex-shrink-0" />
+                              <div className="flex-1 min-w-[120px] bg-purple-50/30 dark:bg-purple-950/10 p-3 rounded-lg border border-purple-100/30 dark:border-purple-900/20">
+                                <span className="text-[10px] text-purple-500 block font-mono">物理渠道</span>
+                                <span className="font-semibold text-xs text-purple-700 dark:text-purple-400">{ch ? ch.name : '未分配'}</span>
                               </div>
                             </div>
                           </div>
@@ -596,6 +752,129 @@ export function RiskControlPage() {
               </Card>
             </Col>
           </Row>
+        </TabPane>
+
+        <TabPane
+          tab={
+            <span>
+              <ApartmentOutlined /> 邻近城市匹配配置
+            </span>
+          }
+          key="nearby"
+        >
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+            <Space>
+              <Input
+                placeholder="搜索配置城市/邻近城市..."
+                value={nearbySearchText}
+                onChange={(e) => setNearbySearchText(e.target.value)}
+                allowClear
+                style={{ width: 250 }}
+              />
+            </Space>
+            <Space>
+              <Button onClick={() => refetchProxyConfig()} loading={proxyConfigLoading}>
+                刷新
+              </Button>
+              <PermissionGate permission="operate:pool:write">
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+                  setEditingNearbyIndex(null)
+                  nearbyForm.resetFields()
+                  setNearbyModalOpen(true)
+                }}>
+                  新增城市映射
+                </Button>
+              </PermissionGate>
+            </Space>
+          </div>
+
+          <TableWrap
+            title="邻近城市选号匹配映射列表"
+            rowKey="cityCode"
+            dataSource={filteredNearbyCityList}
+            loading={proxyConfigLoading}
+            columns={[
+              {
+                title: '主体城市',
+                dataIndex: 'cityCode',
+                width: 200,
+                render: (code: string) => {
+                  const name = areaCodeToNameMap.get(code) || code
+                  return (
+                    <div className="flex flex-col">
+                      <span className="font-bold text-slate-800 dark:text-zinc-100">{name}</span>
+                      <span className="text-xs text-slate-400 font-mono">{code}</span>
+                    </div>
+                  )
+                }
+              },
+              {
+                title: '按优先级顺序依次试选邻近城市',
+                dataIndex: 'nearbyCodes',
+                render: (codes: string[]) => (
+                  <Space size={[4, 8]} wrap>
+                    {codes.map((code, index) => {
+                      const name = areaCodeToNameMap.get(code) || code
+                      return (
+                        <Tag key={code} color="cyan" style={{ border: 'none', padding: '2px 8px', borderRadius: '4px' }}>
+                          <span className="text-slate-400 dark:text-zinc-500 font-mono mr-1">#{index + 1}</span>
+                          <span className="font-semibold text-slate-700 dark:text-zinc-200">{name}</span>
+                          <span className="text-[10px] text-slate-400 font-mono ml-1">({code})</span>
+                        </Tag>
+                      )
+                    })}
+                  </Space>
+                )
+              },
+              {
+                title: '操作',
+                width: 150,
+                render: (_, record, index) => (
+                  <Space size="small">
+                    <PermissionGate permission="operate:pool:write">
+                      <Button size="small" icon={<EditOutlined />} onClick={() => {
+                        setEditingNearbyIndex(index)
+                        nearbyForm.setFieldsValue({
+                          cityCode: [record.cityCode.substring(0, 2) + '0000', record.cityCode],
+                          nearbyCodes: record.nearbyCodes.map((code: string) => [code.substring(0, 2) + '0000', code]),
+                        })
+                        setNearbyModalOpen(true)
+                      }}>
+                        编辑
+                      </Button>
+                    </PermissionGate>
+                    <PermissionGate permission="operate:pool:write">
+                      <Popconfirm title="确认删除这组邻近城市配置？" onConfirm={() => handleNearbyDelete(index)}>
+                        <Button size="small" danger icon={<DeleteOutlined />}>
+                          删除
+                        </Button>
+                      </Popconfirm>
+                    </PermissionGate>
+                  </Space>
+                )
+              }
+            ]}
+          />
+
+          <div className="mt-6 p-4 rounded-xl bg-slate-50 dark:bg-zinc-900/40 border border-slate-200/50 dark:border-zinc-800 flex justify-between items-center">
+            <div className="flex gap-2.5 items-start">
+              <InfoCircleOutlined className="text-slate-400 mt-0.5" />
+              <div className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed max-w-2xl">
+                <div className="font-semibold text-slate-700 dark:text-zinc-300 mb-0.5">本地号码优先 & 邻近城市匹配机制说明</div>
+                当系统呼叫某被叫时，会根据被叫号码归属地匹配该城市下的主叫号码（Rank=1）。如果该号码池中无此城市可用号码，将依照以上配置的优先级顺序依次试选邻近城市（Rank=2, 3...）。全部邻近城市无法接通时，自动 fallback 到同省其他城市（Rank=100）及全国其他可用主叫（Rank=9999），确保外呼业务永不中断。
+              </div>
+            </div>
+            <PermissionGate permission="operate:pool:write">
+              <Button
+                type="primary"
+                size="large"
+                loading={saveNearbyCitiesMutation.isPending}
+                onClick={() => saveNearbyCitiesMutation.mutate(nearbyCityList)}
+              >
+                保存并生效相邻城市配置
+              </Button>
+            </PermissionGate>
+          </div>
         </TabPane>
 
         <TabPane
@@ -702,7 +981,7 @@ export function RiskControlPage() {
           key="3"
         >
           {isSingleTenant ? (
-            <Card className="shadow-soft" bordered={false} style={{ borderRadius: '8px' }}>
+            <Card className="shadow-soft" variant="borderless" style={{ borderRadius: '8px' }}>
               <Alert
                 message="单商户模式运行中"
                 description="当前系统处于单商户运行模式，全部风控规则与号码分发路由默认全局应用给默认商户 1001 (本地默认商户)，无需手动绑定商户应用范围。"
@@ -711,7 +990,7 @@ export function RiskControlPage() {
               />
             </Card>
           ) : (
-            <Card className="shadow-soft" bordered={false} style={{ borderRadius: '8px', padding: '16px' }}>
+            <Card className="shadow-soft" variant="borderless" style={{ borderRadius: '8px', padding: '16px' }}>
               <div className="flex justify-end mb-6">
                 <PermissionGate permission="operate:riskcontrol:write">
                   <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => { setActiveTab('2'); openCreateRisk(); }}>
@@ -944,6 +1223,55 @@ export function RiskControlPage() {
             </Option>
           ))}
         </Select>
+      </Modal>
+
+      {/* 4. Modal: Add/Edit Nearby Cities Mapping */}
+      <Modal
+        open={nearbyModalOpen}
+        title={editingNearbyIndex !== null ? '编辑邻近城市映射' : '新增邻近城市映射'}
+        onCancel={() => {
+          setNearbyModalOpen(false)
+          setEditingNearbyIndex(null)
+          nearbyForm.resetFields()
+        }}
+        onOk={() => nearbyForm.submit()}
+        confirmLoading={saveNearbyCitiesMutation.isPending}
+        destroyOnHidden
+      >
+        <Form
+          form={nearbyForm}
+          layout="vertical"
+          onFinish={handleNearbyFormSubmit}
+          className="pt-4"
+        >
+          <Form.Item
+            name="cityCode"
+            label="核心匹配主体城市"
+            rules={[{ required: true, message: '请选择主体城市' }]}
+            extra="被叫归属的本地城市，作为优先级选号的第一判定点。"
+          >
+            <Cascader
+              options={cascaderOptions}
+              placeholder="请选择主体地级市"
+              showSearch
+            />
+          </Form.Item>
+
+          <Form.Item
+            name="nearbyCodes"
+            label="优先级降级选择邻近城市 (可多选，选号时按添加顺序排序)"
+            rules={[{ required: true, message: '请选择至少一个邻近城市' }]}
+            extra="当本地主体城市号码并发不足或不可用时，系统将依此处的设置顺序尝试呼叫邻近城市的备选号码。"
+          >
+            <Cascader
+              multiple
+              options={cascaderOptions}
+              placeholder="请选择邻近备选地级市"
+              showSearch
+              maxTagCount="responsive"
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </Space>
   )

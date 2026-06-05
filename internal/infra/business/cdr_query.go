@@ -43,7 +43,11 @@ func (r *QueryRepository) Page(ctx context.Context, req operate.CallRecordPageRe
 		query = query.Where("profile = ?", req.Profile)
 	}
 	if req.Extension != "" {
-		query = query.Where("caller = ? OR raw_payload LIKE ?", req.Extension, "%"+req.Extension+"%")
+		query = query.Where("extension = ? OR caller = ? OR raw_payload LIKE ?", req.Extension, req.Extension, "%"+req.Extension+"%")
+	}
+	if req.Phone != "" {
+		phone := strings.TrimSpace(req.Phone)
+		query = query.Where("caller = ? OR callee = ?", phone, phone)
 	}
 	if req.GatewayID != "" {
 		query = query.Where("fs_addr LIKE ? OR raw_payload LIKE ?", "%"+req.GatewayID+"%", "%"+req.GatewayID+"%")
@@ -117,32 +121,47 @@ func callRecordFromModel(model RecordModel) operate.CallRecord {
 		gatewayName = "网关 " + fmt.Sprint(val)
 	}
 
-	// 分机号
-	extension := ""
-	if val, ok := payload["extension"]; ok && val != nil {
-		extension = fmt.Sprint(val)
+	// 分机号 (优先读取数据库物理列，如果无值则从 raw_payload 提取以确保历史数据兼容)
+	extension := model.Extension
+	if extension == "" {
+		if val, ok := payload["extension"]; ok && val != nil && fmt.Sprint(val) != "" {
+			extension = fmt.Sprint(val)
+		} else if val, ok := payload["variable_agent_extension"]; ok && val != nil && fmt.Sprint(val) != "" {
+			extension = fmt.Sprint(val)
+		} else if val, ok := payload["agent_extension"]; ok && val != nil && fmt.Sprint(val) != "" {
+			extension = fmt.Sprint(val)
+		}
+	}
+
+	// 挂断方向细节 (同理，优先读取数据库物理列进行兼容)
+	sipHangupDisposition := model.SipHangupDisposition
+	if sipHangupDisposition == "" {
+		if val, ok := payload["sipHangupDisposition"]; ok && val != nil {
+			sipHangupDisposition = fmt.Sprint(val)
+		}
 	}
 
 	return operate.CallRecord{
-		CallID:      model.CallID,
-		UUID:        model.UUID,
-		FSAddr:      model.FSAddr,
-		Profile:     model.Profile,
-		MerchantID:  model.MerchantID,
-		UserID:      model.UserID,
-		BatchTaskID: model.BatchTaskID,
-		BatchTelID:  model.BatchTelID,
-		Caller:      model.Caller,
-		Callee:      model.Callee,
-		DurationSec: durationSec,
-		HangupCause: model.HangupCause,
-		FinalState:  model.FinalState,
-		RecordFile:  model.RecordFile,
-		CompletedAt: model.CompletedAt,
-		Billsec:     billsec,
-		Ringsec:     ringsec,
-		BillingSec:  billingSec,
-		GatewayName: gatewayName,
-		Extension:   extension,
+		CallID:               model.CallID,
+		UUID:                 model.UUID,
+		FSAddr:               model.FSAddr,
+		Profile:              model.Profile,
+		MerchantID:           model.MerchantID,
+		UserID:               model.UserID,
+		BatchTaskID:          model.BatchTaskID,
+		BatchTelID:           model.BatchTelID,
+		Caller:               model.Caller,
+		Callee:               model.Callee,
+		DurationSec:          durationSec,
+		HangupCause:          model.HangupCause,
+		FinalState:           model.FinalState,
+		RecordFile:           model.RecordFile,
+		CompletedAt:          model.CompletedAt,
+		Billsec:              billsec,
+		Ringsec:              ringsec,
+		BillingSec:           billingSec,
+		GatewayName:          gatewayName,
+		Extension:            extension,
+		SipHangupDisposition: sipHangupDisposition,
 	}
 }

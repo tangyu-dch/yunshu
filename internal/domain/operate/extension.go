@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -76,6 +77,7 @@ type ExtensionManagementService struct {
 	Repository   ExtensionManagementRepository
 	MerchantRepo MerchantRepository
 	Cache        AuthCacheInvalidator
+	License      *LicenseService
 	Logger       *slog.Logger
 }
 
@@ -119,6 +121,22 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 	if exists {
 		logger.Warn("运营端保存分机冲突", "id", normalized.ID, "extension", normalized.ExtensionNumber)
 		return Extension{}, ErrExtensionConflict
+	}
+
+	// 校验分机配额限制（MaxExtensions）
+	if normalized.ID == 0 && s.License != nil {
+		claims, errLic := s.License.LoadAndVerify(ctx)
+		if errLic != nil {
+			logger.Warn("运营端新建分机被拦截：系统授权校验失败", "error", errLic.Error())
+			return Extension{}, fmt.Errorf("【云枢授权】系统授权校验失败，禁止新建分机: %v", errLic)
+		}
+		page, errPage := s.Repository.Page(ctx, ExtensionPageRequest{PageNumber: 1, PageSize: 1})
+		if errPage == nil {
+			if int(page.Total) >= claims.Limits.MaxExtensions {
+				logger.Warn("运营端新建分机被拦截：超出授权最大分机数配额限制", "limit", claims.Limits.MaxExtensions, "current", page.Total)
+				return Extension{}, fmt.Errorf("【云枢授权】已超出最大分机数配额限制（最大允许：%d，当前已建：%d），禁止新建", claims.Limits.MaxExtensions, page.Total)
+			}
+		}
 	}
 
 	// 动态解析租户域 (SipDomain) 并重新计算 HA1 和 HA1b 哈希密码

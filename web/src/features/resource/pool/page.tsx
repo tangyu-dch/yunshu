@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useMemo } from 'react'
 import { PermissionGate } from '@/components/PermissionGate'
 import { TableWrap } from '@/components/TableWrap'
-import { QueryBar } from '@/components/QueryBar'
-import { deletePools, fetchGatewayPage, fetchPools, savePool, fetchMerchants } from '@/api/operate'
+import { QueryBar, QueryField } from '@/components/QueryBar'
+import { deletePools, fetchPools, savePool, fetchMerchants } from '@/api/operate'
 
 type PoolFormValues = {
   id?: number
@@ -17,6 +17,7 @@ type PoolFormValues = {
 }
 
 export function PoolPage() {
+  const isMerchant = window.location.pathname.startsWith('/merchant')
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [open, setOpen] = useState(false)
@@ -26,47 +27,39 @@ export function PoolPage() {
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
 
   const { data, isPending } = useQuery({
-    queryKey: ['operate', 'pool', pageNumber, pageSize, queryParams],
+    queryKey: [isMerchant ? 'merchant' : 'operate', 'pool', pageNumber, pageSize, queryParams],
     queryFn: () => fetchPools(pageNumber, pageSize, {
       name: queryParams.name || undefined,
       gatewayId: queryParams.gatewayId ? Number(queryParams.gatewayId) : undefined,
       enable: queryParams.enable,
-    })
-  })
-
-  // Fetch gateways list to select gatewayId
-  const { data: gatewaysData } = useQuery({
-    queryKey: ['operate', 'gateway', 1, 100],
-    queryFn: () => fetchGatewayPage(1, 100),
+    }, isMerchant)
   })
 
   // Fetch merchants list to assign pool
   const { data: merchantsData } = useQuery({
     queryKey: ['operate', 'merchant', 1, 100],
     queryFn: () => fetchMerchants(1, 100),
+    enabled: !isMerchant,
   })
 
-  const queryFields = useMemo(() => [
-    { key: 'name', label: '号码池名称', type: 'text' as const, placeholder: '请输入名称搜索' },
-    {
-      key: 'gatewayId',
-      label: '呼叫网关',
-      type: 'select' as const,
-      options: gatewaysData?.records.map((g: any) => ({
-        value: String(g.id),
-        label: g.name,
-      })) ?? [],
-    },
-    {
-      key: 'merchantId',
-      label: '所属商户',
-      type: 'select' as const,
-      options: merchantsData?.records.map((m: any) => ({
-        value: String(m.id),
-        label: m.name,
-      })) ?? [],
-    },
-    {
+  const queryFields = useMemo(() => {
+    const fields: QueryField[] = [
+      { key: 'name', label: '号码池名称', type: 'text', placeholder: '请输入名称搜索' },
+    ]
+    if (!isMerchant) {
+      fields.push(
+        {
+          key: 'merchantId',
+          label: '所属商户',
+          type: 'select' as const,
+          options: merchantsData?.records.map((m: any) => ({
+            value: String(m.id),
+            label: m.name,
+          })) ?? [],
+        }
+      )
+    }
+    fields.push({
       key: 'enable',
       label: '启用状态',
       type: 'select' as const,
@@ -74,34 +67,37 @@ export function PoolPage() {
         { value: true, label: '启用' },
         { value: false, label: '停用' },
       ],
-    },
-  ], [gatewaysData, merchantsData])
+    })
+    return fields
+  }, [isMerchant, merchantsData])
 
   const deleteMutation = useMutation({
     mutationFn: async (ids: number[]) => deletePools(ids),
     onSuccess: async () => {
       message.success('号码池已删除')
-      await queryClient.invalidateQueries({ queryKey: ['operate', 'pool'] })
+      await queryClient.invalidateQueries({ queryKey: [isMerchant ? 'merchant' : 'operate', 'pool'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '删除失败'),
   })
   const saveMutation = useMutation({
-    mutationFn: async (values: PoolFormValues) =>
-      savePool({
+    mutationFn: async (values: PoolFormValues) => {
+      const record = editingId ? data?.records.find((item) => item.id === editingId) : null
+      return savePool({
         id: editingId ?? undefined,
         merchantId: values.merchantId ? Number(values.merchantId) : undefined,
         name: values.name,
         remark: values.remark,
         type: values.type,
-        gatewayId: values.gatewayId ? Number(values.gatewayId) : 0,
+        gatewayId: record?.gatewayId ?? 0,
         enable: values.enable,
-      }),
+      })
+    },
     onSuccess: async () => {
       message.success(editingId ? '号码池已更新' : '号码池已创建')
       setOpen(false)
       setEditingId(null)
       form.resetFields()
-      await queryClient.invalidateQueries({ queryKey: ['operate', 'pool'] })
+      await queryClient.invalidateQueries({ queryKey: [isMerchant ? 'merchant' : 'operate', 'pool'] })
     },
     onError: (error) => message.error(error instanceof Error ? error.message : '保存失败'),
   })
@@ -126,28 +122,78 @@ export function PoolPage() {
         remark: record?.remark ?? '',
         merchantId: record?.merchantId ? record.merchantId : undefined,
         type: record?.typeId ?? 1,
-        gatewayId: record?.gatewayId ? record.gatewayId : undefined,
         enable: Boolean(record?.enable),
       })
     }, 0)
   }
 
-  function getGatewayName(gId: number) {
-    if (!gId) return '未绑定网关'
-    const found = gatewaysData?.records.find((g: any) => g.id === gId)
-    return found ? found.name : `网关 ID: ${gId}`
-  }
+
+
+  const columns = useMemo(() => {
+    const baseCols: any[] = [
+      { title: '号码池 ID', dataIndex: 'id' },
+      { title: '名称', dataIndex: 'name' },
+    ]
+    if (!isMerchant) {
+      baseCols.push({
+        title: '所属商户',
+        dataIndex: 'merchantId',
+        render: (merchantId: number) => {
+          if (!merchantId) return <Tag>未分配</Tag>
+          const m = merchantsData?.records.find((x: any) => x.id === merchantId)
+          return <Tag color="blue">{m ? m.name : `商户 ID: ${merchantId}`}</Tag>
+        },
+      })
+    }
+    baseCols.push({ title: '备注', dataIndex: 'remark' })
+    baseCols.push(
+      {
+        title: '类型',
+        dataIndex: 'typeId',
+        render: (typeId: number) => {
+          if (typeId === 1) return <Tag color="orange">呼入</Tag>
+          if (typeId === 2) return <Tag color="blue">呼出</Tag>
+          return <Tag>{typeId}</Tag>
+        }
+      },
+      { title: '状态', dataIndex: 'enable', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> }
+    )
+    if (!isMerchant) {
+      baseCols.push({
+        title: '操作',
+        render: (_: any, record: any) => (
+          <Space size="small">
+            <PermissionGate permission="operate:pool:write">
+              <Button size="small" onClick={() => openEdit(record.id)}>
+                编辑
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="operate:pool:delete">
+              <Popconfirm title="确认删除这个号码池？" onConfirm={() => deleteMutation.mutate([record.id])}>
+                <Button size="small" danger>
+                  删除
+                </Button>
+              </Popconfirm>
+            </PermissionGate>
+          </Space>
+        ),
+      })
+    }
+    return baseCols
+  }, [isMerchant, merchantsData, data])
 
   return (
     <Space direction="vertical" size="large" className="w-full">
       <div className="flex justify-end mb-2">
         <Space>
-          <Button onClick={() => queryClient.invalidateQueries({ queryKey: ['operate', 'pool'] })}>刷新</Button>
-          <PermissionGate permission="operate:pool:write">
-            <Button type="primary" onClick={openCreate}>
-              新增号码池
-            </Button>
-          </PermissionGate>
+          <Button onClick={() => queryClient.invalidateQueries({ queryKey: [isMerchant ? 'merchant' : 'operate', 'pool'] })}>刷新</Button>
+          {!isMerchant && (
+            <PermissionGate permission="operate:pool:write">
+              <Button type="primary" onClick={openCreate}>
+                新增号码池
+              </Button>
+            </PermissionGate>
+          )}
         </Space>
       </div>
       <QueryBar
@@ -170,104 +216,58 @@ export function PoolPage() {
           },
           showSizeChanger: true,
         }}
-        columns={[
-          { title: '号码池 ID', dataIndex: 'id' },
-          { title: '名称', dataIndex: 'name' },
-          {
-            title: '所属商户',
-            dataIndex: 'merchantId',
-            render: (merchantId: number) => {
-              if (!merchantId) return <Tag>未分配</Tag>
-              const m = merchantsData?.records.find((x: any) => x.id === merchantId)
-              return <Tag color="blue">{m ? m.name : `商户 ID: ${merchantId}`}</Tag>
-            },
-          },
-          { title: '备注', dataIndex: 'remark' },
-          {
-            title: '关联网关',
-            dataIndex: 'gatewayId',
-            render: (gatewayId: number) => <Tag color={gatewayId ? 'cyan' : 'default'}>{getGatewayName(gatewayId)}</Tag>,
-          },
-          { title: '类型', dataIndex: 'type' },
-          { title: '状态', dataIndex: 'enable', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
-          {
-            title: '操作',
-            render: (_, record) => (
-              <Space size="small">
-                <PermissionGate permission="operate:pool:write">
-                  <Button size="small" onClick={() => openEdit(record.id)}>
-                    编辑
-                  </Button>
-                </PermissionGate>
-                <PermissionGate permission="operate:pool:delete">
-                  <Popconfirm title="确认删除这个号码池？" onConfirm={() => deleteMutation.mutate([record.id])}>
-                    <Button size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
-                </PermissionGate>
-              </Space>
-            ),
-          },
-        ]}
+        columns={columns}
       />
-      <Modal
-        open={open}
-        title={editingId ? '编辑号码池' : '新增号码池'}
-        onCancel={() => {
-          setOpen(false)
-          setEditingId(null)
-          form.resetFields()
-        }}
-        onOk={() => form.submit()}
-        confirmLoading={saveMutation.isPending}
-        destroyOnHidden
-      >
-        <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ type: 1, enable: true }}>
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
-            <Input />
-          </Form.Item>
-          
-          <Form.Item name="merchantId" label="分配商户">
-            <Select
-              placeholder="选择号码池归属的商户"
-              allowClear
-              options={merchantsData?.records.map((m: any) => ({
-                value: m.id,
-                label: m.name,
-              }))}
-            />
-          </Form.Item>
 
-          <Form.Item name="remark" label="备注">
-            <Input />
-          </Form.Item>
-          
-          <Form.Item name="gatewayId" label="关联呼叫网关">
-            <Select
-              placeholder="选择号码池绑定的呼叫网关"
-              allowClear
-              options={gatewaysData?.records.map((g: any) => ({
-                value: g.id,
-                label: g.name,
-              }))}
-            />
-          </Form.Item>
+      {!isMerchant && (
+        <Modal
+          open={open}
+          title={editingId ? '编辑号码池' : '新增号码池'}
+          onCancel={() => {
+            setOpen(false)
+            setEditingId(null)
+            form.resetFields()
+          }}
+          onOk={() => form.submit()}
+          confirmLoading={saveMutation.isPending}
+          destroyOnHidden
+        >
+          <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ type: 1, enable: true }}>
+            <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+              <Input />
+            </Form.Item>
+            
+            <Form.Item name="merchantId" label="分配商户">
+              <Select
+                placeholder="选择号码池归属的商户"
+                allowClear
+                options={merchantsData?.records.map((m: any) => ({
+                  value: m.id,
+                  label: m.name,
+                }))}
+              />
+            </Form.Item>
 
-          <Form.Item name="type" label="类型代码 (1-普通, 2-预测, 3-外呼)" rules={[{ required: true, message: '请输入类型' }]}>
-            <Select
-              options={[
-                { value: 1, label: '普通 (1)' },
-                { value: 2, label: '预测 (2)' },
-                { value: 3, label: '外呼 (3)' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item name="enable" label="启用" valuePropName="checked">
-            <Switch />
-          </Form.Item>
-        </Form>
-      </Modal>
+            <Form.Item name="remark" label="备注">
+              <Input />
+            </Form.Item>
+            
+
+
+            <Form.Item name="type" label="类型" rules={[{ required: true, message: '请选择类型' }]}>
+              <Select
+                options={[
+                  { value: 1, label: '呼入' },
+                  { value: 2, label: '呼出' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="enable" label="启用" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          </Form>
+        </Modal>
+      )}
     </Space>
   )
 }

@@ -14,9 +14,10 @@ interface QueryBarProps {
   onSearch: (values: Record<string, any>) => void
   onReset?: () => void
   loading?: boolean
+  initialValues?: Record<string, any>
 }
 
-export function QueryBar({ fields, onSearch, onReset, loading }: QueryBarProps) {
+export function QueryBar({ fields, onSearch, onReset, loading, initialValues }: QueryBarProps) {
   const [form] = Form.useForm()
 
   const handleFinish = (values: Record<string, any>) => {
@@ -47,6 +48,7 @@ export function QueryBar({ fields, onSearch, onReset, loading }: QueryBarProps) 
         layout="horizontal"
         onFinish={handleFinish}
         className="w-full"
+        initialValues={initialValues}
       >
         <Row gutter={[16, 16]} align="middle">
           {fields.map((field) => (
@@ -71,7 +73,7 @@ export function QueryBar({ fields, onSearch, onReset, loading }: QueryBarProps) 
                     allowClear
                     options={field.options}
                     className="w-full"
-                    popupClassName="dark:bg-slate-800"
+                    classNames={{ popup: "dark:bg-slate-800" } as any}
                   />
                 )}
                 {field.type === 'number' && (

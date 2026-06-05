@@ -150,7 +150,7 @@ export function MediaConfigPage() {
 
       {/* 实时健康度卡片看板 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2 animate-fade-in">
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div>
               <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">MEDIA SERVICE STATS</div>
@@ -184,7 +184,7 @@ export function MediaConfigPage() {
           </div>
         </Card>
 
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div className="w-full">
               <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">ACTIVE CAPABILITIES</div>
