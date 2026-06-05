@@ -580,6 +580,43 @@ cp configs/default.yaml configs/local.yaml
 go run ./cmd/cc-all -config configs/local.yaml
 ```
 
+### 4. Deployment Modes: Private Deployment (Single-Merchant) vs. SaaS Multi-Tenant Mode
+
+Yunshu supports both **Private Deployment (Single-Merchant Mode)** and **SaaS Multi-Tenant Mode** out of the box. You can control this behavior via the configuration file (`configs/default.yaml` or `configs/production.yaml`):
+
+```yaml
+tenant:
+  mode: "single"             # Options: "single" (Private Deployment / Single-Merchant) or "multi" (SaaS Mode)
+  defaultMerchantId: 1001    # Default merchant ID used for private context fallback
+```
+
+#### 📊 Core Differences at a Glance
+
+| Feature / Dimension | 🏢 Single-Merchant Mode (Private Deployment) | ☁️ SaaS Multi-Tenant Mode (Commercial Platform) |
+| :--- | :--- | :--- |
+| **Primary Use Case** | Internal corporate customer centers, private enterprise setups, standalone operations. | Commercial SaaS platform hosting, cloud call center provider. |
+| **Merchant Identity** | Session/API context automatically falls back to `defaultMerchantId` (`1001`). | Explicit merchant selection, authorization validation, and separate billing. |
+| **Console Boundaries** | SaaS boundaries (tenant dropdowns, merchant registration/deletion) are hidden or locked. | Full merchant CRUD, subscription lifecycle, and domain isolation panels enabled. |
+| **Data Partitioning** | Global data access within a single database instance without strict tenant separation. | Strict logical partitioning by `merchant_id` across databases, caches, and flows. |
+| **SIP Authentication** | Single SIP domain authentication. No domain-binding required for local extensions. | Multi-domain isolation (Kamailio `use_domain=1`). Extensions authenticate via `ha1b`. |
+| **Billing & Payments** | Billing can be optional (no overdraft lockouts). Mostly for traffic auditing. | Strict real-time billing, Redis Lua overdraft lockouts, and asynchronous ledger settling. |
+| **Resource Routing** | Inbound dialing pools and ACD queues automatically route to the default merchant. | Telco trunking, number pools, and agent queues must be explicitly allocated to tenants. |
+
+---
+
+#### 🏢 Single-Merchant Mode (Private Enterprise Deployment)
+Designed for internal corporate customer centers or private setups:
+*   **Automatic Identity Fallback**: Console sessions and API outbounds automatically resolve to the specified `defaultMerchantId` (defaulting to `1001`), bypassing tenant selection grids.
+*   **Hidden SaaS Boundaries**: Tenant selector dropdowns, multi-tenant workspace partitioning, and merchant management are hidden or locked in the user interface, optimizing workspace layout for internal teams.
+*   **Simplified Inbound Routing**: Dialing pools, ACD routing queues, and SIP domains automatically link to the default merchant context.
+*   **Pre-seeded Seeding**: If the default merchant configuration is missing during system initialization, database seed managers automatically generate a default merchant profile and provision dynamic AppKey/Secret pairs for developer integration.
+
+#### ☁️ SaaS Multi-Tenant Mode
+When `tenant.mode` is set to `"multi"`, the system activates multi-tenant isolation:
+*   **Strict Multi-Tenant Isolation**: distinct merchants configure independent extensions, call gateways, AI prompt workflows, and credit accounts, securely partitioning data across concurrent routing paths.
+*   **Multi-Domain SIP Registration**: Kamailio registers and authenticates terminals using **HA1b** (`MD5(username@domain:realm:password)`), allowing different merchants to use identical extension numbers (e.g., `1001`) on different SIP domains without conflict.
+*   **Commercial Ledger & Anti-Overdraft**: Real-time balance deductions, prepaid packages, and rate cards are strictly validated per merchant, failing-closed on balance exhaustion.
+
 ---
 
 ## 🗺️ 7. Development Roadmap
