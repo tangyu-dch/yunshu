@@ -28,17 +28,43 @@ func BuildAPICommand(cmd contracts.TelephonyCommand) (name string, args string, 
 	case "dtmf":
 		return "uuid_send_dtmf", fmt.Sprintf("%s %s", cmd.UUID, stringValue(cmd, "digits", "")), true
 	case "transfer":
-		return "transfer", fmt.Sprintf("%s %s %s %s", cmd.UUID, stringValue(cmd, "destination", ""), stringValue(cmd, "dialplan", "XML"), stringValue(cmd, "context", "default")), true
+		return "uuid_transfer", fmt.Sprintf("%s %s %s %s", cmd.UUID, stringValue(cmd, "destination", ""), stringValue(cmd, "dialplan", "XML"), stringValue(cmd, "context", "default")), true
 	case "playback":
 		return "uuid_broadcast", fmt.Sprintf("%s %s %s", cmd.UUID, stringValue(cmd, "file", ""), stringValue(cmd, "both", "aleg")), true
 	case "stop-playback":
 		return "uuid_break", cmd.UUID + " all", false
 	case "audio":
 		option := stringValue(cmd, "option", "start")
-		direction := stringValue(cmd, "direction", "both")
-		return "uuid_audio", fmt.Sprintf("%s %s %s", cmd.UUID, option, direction), true
+		if option == "stop" {
+			return "uuid_audio", fmt.Sprintf("%s stop", cmd.UUID), true
+		}
+		direction := stringValue(cmd, "direction", "write")
+		if direction == "both" || direction == "" {
+			direction = "write" // 规范化：FreeSWITCH 官方只支持 read/write，默认操作被叫听筒 (write) 方向
+		}
+		
+		// 检查静音或音量大小参数
+		if boolValue(cmd, "mute", false) {
+			return "uuid_audio", fmt.Sprintf("%s start %s mute", cmd.UUID, direction), true
+		}
+		level := value(cmd, "level", "")
+		if level != "" {
+			return "uuid_audio", fmt.Sprintf("%s start %s level %v", cmd.UUID, direction, level), true
+		}
+		return "uuid_audio", fmt.Sprintf("%s start %s level 0", cmd.UUID, direction), true
 	case "audio-stream":
-		return "uuid_audio_stream", fmt.Sprintf("%s %s %s", cmd.UUID, stringValue(cmd, "control", "start"), stringValue(cmd, "url", "")), true
+		control := stringValue(cmd, "control", "start")
+		url := stringValue(cmd, "url", "")
+		if control == "stop" {
+			return "uuid_audio_stream", fmt.Sprintf("%s stop", cmd.UUID), true
+		}
+		mixType := stringValue(cmd, "mixType", stringValue(cmd, "mix_type", "mono"))
+		samplingRate := stringValue(cmd, "samplingRate", stringValue(cmd, "sampling_rate", "8k"))
+		metadata := stringValue(cmd, "metadata", "")
+		if metadata != "" {
+			return "uuid_audio_stream", fmt.Sprintf("%s %s %s %s %s %s", cmd.UUID, control, url, mixType, samplingRate, metadata), true
+		}
+		return "uuid_audio_stream", fmt.Sprintf("%s %s %s %s %s", cmd.UUID, control, url, mixType, samplingRate), true
 	default:
 		return cmd.Command, strings.TrimSpace(fmt.Sprint(cmd.Payload["args"])), true
 	}
@@ -71,6 +97,9 @@ func BuildOriginateArgs(cmd contracts.TelephonyCommand) string {
 	if mode == contracts.OriginateModeAgentFirst {
 		// 如果显式要求使用 user 协议，或者分机长度为 4~6 位且未指定外置网关 IP，则优先使用 user/ 协议以支持多端同振
 		if boolValue(cmd, "useUserProtocol", false) || (len(destination) >= 4 && len(destination) <= 6 && !strings.Contains(domainOrGateway, ":") && domainOrGateway != "default") {
+			if domainOrGateway != "default" && !strings.Contains(domainOrGateway, ":") {
+				return fmt.Sprintf("{%s}user/%s@%s &park()", optionText, destination, domainOrGateway)
+			}
 			return fmt.Sprintf("{%s}user/%s &park()", optionText, destination)
 		}
 		return fmt.Sprintf("{%s}sofia/external/%s@%s &park()", optionText, destination, domainOrGateway)

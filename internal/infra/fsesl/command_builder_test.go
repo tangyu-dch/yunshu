@@ -92,7 +92,100 @@ func TestBuildOriginateArgsAgentFirstUserProtocol(t *testing.T) {
 		},
 	}
 	args2 := BuildOriginateArgs(cmd2)
-	if !strings.Contains(args2, "user/100002 &park()") {
-		t.Fatalf("expected user/100002 protocol, got: %s", args2)
+	if !strings.Contains(args2, "user/100002@my-sip-domain &park()") {
+		t.Fatalf("expected user/100002@my-sip-domain protocol, got: %s", args2)
 	}
 }
+
+func TestBuildAPICommandsOptimized(t *testing.T) {
+	t.Parallel()
+
+	// 1. 测试 transfer
+	cmdTransfer := contracts.TelephonyCommand{
+		Command: "transfer",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"destination": "10086",
+			"dialplan":    "XML",
+			"context":     "public",
+		},
+	}
+	name, args, bg := BuildAPICommand(cmdTransfer)
+	if name != "uuid_transfer" || args != "uuid-1 10086 XML public" || !bg {
+		t.Fatalf("unexpected transfer command build: %s, %s, %v", name, args, bg)
+	}
+
+	// 2. 测试 audio stop
+	cmdAudioStop := contracts.TelephonyCommand{
+		Command: "audio",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"option": "stop",
+		},
+	}
+	name, args, _ = BuildAPICommand(cmdAudioStop)
+	if name != "uuid_audio" || args != "uuid-1 stop" {
+		t.Fatalf("unexpected audio stop command build: %s, %s", name, args)
+	}
+
+	// 3. 测试 audio start level
+	cmdAudioStartLevel := contracts.TelephonyCommand{
+		Command: "audio",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"option":    "start",
+			"direction": "read",
+			"level":     "2",
+		},
+	}
+	name, args, _ = BuildAPICommand(cmdAudioStartLevel)
+	if name != "uuid_audio" || args != "uuid-1 start read level 2" {
+		t.Fatalf("unexpected audio start level command build: %s, %s", name, args)
+	}
+
+	// 4. 测试 audio start mute
+	cmdAudioStartMute := contracts.TelephonyCommand{
+		Command: "audio",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"option":    "start",
+			"direction": "write",
+			"mute":      true,
+		},
+	}
+	name, args, _ = BuildAPICommand(cmdAudioStartMute)
+	if name != "uuid_audio" || args != "uuid-1 start write mute" {
+		t.Fatalf("unexpected audio start mute command build: %s, %s", name, args)
+	}
+
+	// 5. 测试 audio-stream stop
+	cmdStreamStop := contracts.TelephonyCommand{
+		Command: "audio-stream",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"control": "stop",
+		},
+	}
+	name, args, _ = BuildAPICommand(cmdStreamStop)
+	if name != "uuid_audio_stream" || args != "uuid-1 stop" {
+		t.Fatalf("unexpected audio-stream stop command build: %s, %s", name, args)
+	}
+
+	// 6. 测试 audio-stream start
+	cmdStreamStart := contracts.TelephonyCommand{
+		Command: "audio-stream",
+		UUID:    "uuid-1",
+		Payload: map[string]any{
+			"control":      "start",
+			"url":          "ws://localhost:9002",
+			"mixType":      "mixed",
+			"samplingRate": "16k",
+			"metadata":     "my-meta",
+		},
+	}
+	name, args, _ = BuildAPICommand(cmdStreamStart)
+	if name != "uuid_audio_stream" || args != "uuid-1 start ws://localhost:9002 mixed 16k my-meta" {
+		t.Fatalf("unexpected audio-stream start command build: %s, %s", name, args)
+	}
+}
+
