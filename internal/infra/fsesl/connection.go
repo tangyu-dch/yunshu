@@ -103,7 +103,7 @@ func NewConnectionPool(ctx context.Context, nodes []NodeConfig, reconnectInterva
 
 // ConnectAll 连接所有已启用 FS 节点。
 func (p *ConnectionPool) ConnectAll(ctx context.Context) error {
-	for _, node := range p.snapshotNodes() {
+	for _, node := range p.SnapshotNodes() {
 		if _, err := p.Connect(ctx, node.Addr); err != nil {
 			if errors.Is(err, fsregistry.ErrLeaseHeld) {
 				p.logger.Warn("FreeSWITCH 事件租约已被其他实例持有，跳过该节点", "fsAddr", node.Addr)
@@ -350,7 +350,8 @@ func (p *ConnectionPool) reconnect(ctx context.Context, node NodeConfig) {
 	p.logger.Error("FreeSWITCH ESL 达到最大重连次数", "fsAddr", node.Addr, "maxAttempts", p.maxReconnect)
 }
 
-func (p *ConnectionPool) snapshotNodes() []NodeConfig {
+// SnapshotNodes 返回当前连接池中的所有节点配置快照。
+func (p *ConnectionPool) SnapshotNodes() []NodeConfig {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	nodes := make([]NodeConfig, 0, len(p.nodes))
@@ -359,6 +360,7 @@ func (p *ConnectionPool) snapshotNodes() []NodeConfig {
 	}
 	return nodes
 }
+
 
 func (p *ConnectionPool) claimLease(ctx context.Context, fsAddr string) error {
 	if p.LeaseRegistry == nil {

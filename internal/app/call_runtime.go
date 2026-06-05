@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -164,6 +165,7 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 		}
 		executor = &fsesl.ESLCommandExecutor{Pool: pool, Timeout: cfg.FreeSwitch.CommandTimeout, Logger: logger}
 		logger.Info("cc-call 已启用真实 FreeSWITCH ESL 执行器", "nodeCount", len(fsNodes))
+		go startFSNodeLeaseClaimer(ctx, pool, nodeRegistry, logger)
 	} else {
 		logger.Warn("cc-call 未配置 FreeSWITCH 节点，使用内存 ESL 执行器", "impact", "不会向真实 FreeSWITCH 发送命令")
 	}
@@ -662,6 +664,80 @@ func startOfflineExtensionUnbinder(ctx context.Context, db *gorm.DB, redisClient
 		case <-ticker.C:
 			if err := resource.ReleaseOfflineDynamicBindings(ctx, db, reader); err != nil {
 				logger.Error("定期释放离线分机绑定失败", "error", err.Error())
+			}
+		}
+	}
+}
+
+// startFSNodeLeaseClaimer 循环检测并竞争 FreeSWITCH 节点事件消费租约，支持多实例高可用与节点动态同步
+func startFSNodeLeaseClaimer(ctx context.Context, pool *fsesl.ConnectionPool, registry telephony.Registry, logger *slog.Logger) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	logger.Info("FreeSWITCH 事件租约与连接守护协程已启动")
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("FreeSWITCH 事件租约与连接守护协程已退出")
+			return
+		case <-ticker.C:
+			// 1. 获取当前注册表中启用的所有 FreeSWITCH 节点
+			nodes, err := registry.ListEnabled(ctx)
+			if err != nil {
+				logger.Error("事件租约守护协程读取节点配置失败", "error", err.Error())
+				continue
+			}
+
+			// 2. 获取连接池中的节点配置快照
+			poolNodes := pool.SnapshotNodes()
+			poolNodeMap := make(map[string]fsesl.NodeConfig)
+			for _, pn := range poolNodes {
+				poolNodeMap[pn.Addr] = pn
+			}
+
+			latestNodeMap := make(map[string]telephony.Node)
+			for _, n := range nodes {
+				latestNodeMap[n.FSAddr] = n
+			}
+
+			// 3. 级联同步新增或修改的节点
+			for _, n := range nodes {
+				pn, exists := poolNodeMap[n.FSAddr]
+				if !exists || pn.ID != n.ID || pn.Password != n.Password || pn.SetID != n.SetID || pn.Weight != n.Weight || !pn.Enabled {
+					logger.Info("事件租约守护协程同步新增或更新的节点配置", "fsAddr", n.FSAddr)
+					pool.UpsertNode(fsesl.NodeConfig{
+						ID:       n.ID,
+						Addr:     n.FSAddr,
+						Password: n.Password,
+						SetID:    n.SetID,
+						Weight:   n.Weight,
+						Enabled:  n.Enable,
+					})
+				}
+			}
+
+			// 4. 级联同步已禁用或删除的节点
+			for _, pn := range poolNodes {
+				if _, exists := latestNodeMap[pn.Addr]; !exists {
+					logger.Info("事件租约守护协程检测到节点已失效，移出连接池", "fsAddr", pn.Addr)
+					pool.RemoveNode(pn.Addr)
+				}
+			}
+
+			// 5. 扫描连接池状态，为无连接的节点抢占事件监听租约
+			statusList := pool.Status()
+			for _, status := range statusList {
+				if !status.Connected {
+					logger.Debug("事件租约守护协程尝试竞争租约并连接 FreeSWITCH", "fsAddr", status.FSAddr)
+					if _, err := pool.Connect(ctx, status.FSAddr); err != nil {
+						if errors.Is(err, operate.ErrLeaseHeld) {
+							logger.Debug("FreeSWITCH 事件租约仍被其他实例持有，跳过连接", "fsAddr", status.FSAddr)
+						} else {
+							logger.Warn("事件租约守护协程竞争连接 FreeSWITCH 失败", "fsAddr", status.FSAddr, "error", err.Error())
+						}
+					} else {
+						logger.Info("事件租约守护协程成功竞争并连通 FreeSWITCH 节点", "fsAddr", status.FSAddr)
+					}
+				}
 			}
 		}
 	}

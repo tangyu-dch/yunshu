@@ -235,6 +235,9 @@ func captureMediaPhaseHandler(profile string) workflow.Handler {
 		if value, ok := int64FromPayload(event.Payload, "broadcastTime"); ok && value > 0 {
 			instance.Variables["broadcastTime"] = value
 		}
+		if value, ok := boolFromPayload(event.Payload, "broadcastTimeFlag"); ok {
+			instance.Variables["broadcastTimeFlag"] = value
+		}
 		slog.Info("ESL 振铃/早期媒体步骤已捕获", "workflowId", instance.WorkflowID, "instanceId", instance.ID, "profile", profile, "mediaPhase", instance.Variables["mediaPhase"], "playbackFile", instance.Variables["playbackFile"])
 		return nil
 	}
