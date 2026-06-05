@@ -129,6 +129,9 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	nodes, err := nodeRegistry.ListEnabled(context.Background())
 	if err != nil {
 		logger.Error("读取 FreeSWITCH 节点配置失败", "error", err.Error())
+		if wsCancel != nil {
+			wsCancel()
+		}
 		return nil, fmt.Errorf("list FreeSWITCH nodes: %w", err)
 	}
 	fsNodes := fsNodeConfigs(nodes)
