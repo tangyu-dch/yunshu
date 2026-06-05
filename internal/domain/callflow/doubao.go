@@ -95,7 +95,10 @@ func (e *VolcanoASREngine) Transcribe(ctx context.Context, audioData []byte, for
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -103,12 +106,14 @@ func (e *VolcanoASREngine) Transcribe(ctx context.Context, audioData []byte, for
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer; "+token)
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("火山 ASR 物理转译失败：HTTP 状态码 %d", resp.StatusCode)
@@ -195,7 +200,10 @@ func (e *VolcanoTTSEngine) Synthesize(ctx context.Context, text string, config m
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +211,14 @@ func (e *VolcanoTTSEngine) Synthesize(ctx context.Context, text string, config m
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer; "+token)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("火山 TTS 物理合成失败：HTTP 状态码 %d", resp.StatusCode)
@@ -264,7 +274,10 @@ func (e *VolcanoLLMEngine) GenerateReply(ctx context.Context, systemPrompt, user
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -272,12 +285,14 @@ func (e *VolcanoLLMEngine) GenerateReply(ctx context.Context, systemPrompt, user
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("豆包 LLM 大模型物理响应错误：HTTP 状态码 %d", resp.StatusCode)

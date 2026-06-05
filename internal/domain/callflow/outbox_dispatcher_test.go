@@ -56,7 +56,7 @@ func TestOutboxDispatcherMarksFailedOnHandlerError(t *testing.T) {
 	}
 	dispatcher := &OutboxDispatcher{
 		Store:      store,
-		RetryDelay: time.Minute,
+		RetryDelay: 5 * time.Second,
 		Now:        func() time.Time { return now },
 		Handlers: map[string]OutboxHandler{
 			"projection": func(context.Context, outbox.Entry) error {

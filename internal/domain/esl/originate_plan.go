@@ -43,7 +43,7 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 		logger = slog.Default()
 	}
 	extra := parseExtra(req.Extra)
-	extension := firstNonEmpty(extensionNumber, extra["extension"], extra["extensionNumber"], extra["agentId"], strconv.Itoa(req.UserID))
+	extension := contracts.FirstNonEmpty(extensionNumber, extra["extension"], extra["extensionNumber"], extra["agentId"], strconv.Itoa(req.UserID))
 	if extension == strconv.Itoa(req.UserID) {
 		logger.Warn("API 外呼未解析到分机号，临时使用 userId 作为分机占位", "callId", callID, "userId", req.UserID, "impact", "生产环境必须配置 extension 数据库仓储")
 	}
@@ -51,7 +51,7 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 	customerUUID := newDeterministicUUID("customer", callID)
 	displayNumber := maskPhone(req.Callee)
 	supplementRing := extraBool(extra, "supplementRing", "supplement_ring")
-	supplementRingFile := firstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
+	supplementRingFile := contracts.FirstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
 	broadcastTime := extraInt64(extra, "broadcastTime", "broadcast_time")
 	broadcastTimeFlag := extraBool(extra, "broadcastTimeFlag", "broadcast_time_flag")
 	options := map[string]any{
@@ -122,9 +122,9 @@ func BuildBatchOutboundPlan(callID, version, fsAddr string, req contracts.BatchC
 		logger = slog.Default()
 	}
 	extra := parseExtra(req.Extra)
-	gateway := firstNonEmpty(extra["gatewayName"], extra["gatewayRegion"], extra["gateway"], "default")
+	gateway := contracts.FirstNonEmpty(extra["gatewayName"], extra["gatewayRegion"], extra["gateway"], "default")
 	supplementRing := extraBool(extra, "supplementRing", "supplement_ring")
-	supplementRingFile := firstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
+	supplementRingFile := contracts.FirstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
 	broadcastTime := extraInt64(extra, "broadcastTime", "broadcast_time")
 	broadcastTimeFlag := extraBool(extra, "broadcastTimeFlag", "broadcast_time_flag")
 	customerUUID := newDeterministicUUID("batch-customer", callID)
@@ -193,15 +193,6 @@ func parseExtra(raw string) map[string]string {
 		}
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func extraBool(extra map[string]string, keys ...string) bool {

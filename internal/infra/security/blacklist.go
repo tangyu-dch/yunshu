@@ -268,13 +268,9 @@ func (r *BlacklistRepository) GetChannelByCode(ctx context.Context, code int) (o
 	}, nil
 }
 
-// SaveChannel 保存或更新通道配置
+// SaveChannel 保存或更新通道配置（使用事务避免并发竞态）
 func (r *BlacklistRepository) SaveChannel(ctx context.Context, channel operate.BlacklistChannel) error {
-	var existing BlacklistChannelModel
 	now := time.Now().UTC()
-	err := r.DB.WithContext(ctx).Where("code = ?", channel.Code).First(&existing).Error
-	isCreate := errors.Is(err, gorm.ErrRecordNotFound)
-
 	model := BlacklistChannelModel{
 		Code:        channel.Code,
 		Name:        channel.Name,
@@ -283,13 +279,21 @@ func (r *BlacklistRepository) SaveChannel(ctx context.Context, channel operate.B
 		Enable:      channel.Enable,
 		UpdatedTime: now,
 	}
-	if isCreate {
-		model.CreatedTime = now
-		return r.DB.WithContext(ctx).Create(&model).Error
-	} else {
+
+	// 使用事务 + upsert 避免并发竞态
+	return r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing BlacklistChannelModel
+		err := tx.Where("code = ?", channel.Code).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			model.CreatedTime = now
+			return tx.Create(&model).Error
+		}
+		if err != nil {
+			return err
+		}
 		model.CreatedTime = existing.CreatedTime
-		return r.DB.WithContext(ctx).Save(&model).Error
-	}
+		return tx.Save(&model).Error
+	})
 }
 
 // DeleteChannel 物理删除通道配置
@@ -388,29 +392,32 @@ func (r *BlacklistRepository) PageNumbers(ctx context.Context, req operate.Black
 	}, nil
 }
 
-// SaveNumber 保存（新增或更新）具体黑名单号码。
+// SaveNumber 保存（新增或更新）具体黑名单号码（使用事务避免并发竞态）
 func (r *BlacklistRepository) SaveNumber(ctx context.Context, num operate.BlacklistNumber) (operate.BlacklistNumber, error) {
-	var existing BlacklistDataModel
 	now := time.Now().UTC()
-	err := r.DB.WithContext(ctx).Where("phone = ?", num.Phone).First(&existing).Error
-	isCreate := errors.Is(err, gorm.ErrRecordNotFound)
-
 	model := BlacklistDataModel{
 		Phone:       num.Phone,
 		BlackLevel:  num.BlackLevel,
 		Remark:      num.Remark,
 		UpdatedTime: now,
 	}
-	if isCreate {
-		model.CreatedTime = now
-		if err := r.DB.WithContext(ctx).Create(&model).Error; err != nil {
-			return operate.BlacklistNumber{}, err
+
+	// 使用事务 + upsert 避免并发竞态
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing BlacklistDataModel
+		err := tx.Where("phone = ?", num.Phone).First(&existing).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			model.CreatedTime = now
+			return tx.Create(&model).Error
 		}
-	} else {
+		if err != nil {
+			return err
+		}
 		model.CreatedTime = existing.CreatedTime
-		if err := r.DB.WithContext(ctx).Omit("created_time").Save(&model).Error; err != nil {
-			return operate.BlacklistNumber{}, err
-		}
+		return tx.Omit("created_time").Save(&model).Error
+	})
+	if err != nil {
+		return operate.BlacklistNumber{}, err
 	}
 	return operate.BlacklistNumber{
 		Phone:      model.Phone,

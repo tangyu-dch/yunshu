@@ -62,7 +62,7 @@ func TestAIVoiceEngineStartFlowAndAudioStream(t *testing.T) {
 	cmdService := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
 	store := esl.NewMemorySessionStore()
 	statusReader := mockStatusReader{status: esl.ExtensionStatusIdle, ok: true}
-	engine := NewAIVoiceEngine(cmdService, store, statusReader, nil)
+	engine := NewAIVoiceEngine(context.Background(), cmdService, store, statusReader, nil)
 
 	session := esl.CallSession{
 		CallID:  "call-start-1",
@@ -125,7 +125,7 @@ func TestAIVoiceEngineProcessASRTextRoutesCorrectly(t *testing.T) {
 	cmdService := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
 	store := esl.NewMemorySessionStore()
 	statusReader := mockStatusReader{status: esl.ExtensionStatusIdle, ok: true}
-	engine := NewAIVoiceEngine(cmdService, store, statusReader, nil)
+	engine := NewAIVoiceEngine(context.Background(), cmdService, store, statusReader, nil)
 
 	session := esl.CallSession{
 		CallID:  "call-asr-1",
@@ -175,7 +175,7 @@ func TestAIVoiceEngineProcessASRTextFallback(t *testing.T) {
 	executor := &esl.MemoryCommandExecutor{}
 	cmdService := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
 	store := esl.NewMemorySessionStore()
-	engine := NewAIVoiceEngine(cmdService, store, nil, nil)
+	engine := NewAIVoiceEngine(context.Background(), cmdService, store, nil, nil)
 
 	session := esl.CallSession{
 		CallID:  "call-asr-fallback",
@@ -229,7 +229,7 @@ func TestAIVoiceEngineACDRoutingBasedOnRedis(t *testing.T) {
 		store := esl.NewMemorySessionStore()
 		// 坐席状态为空闲
 		statusReader := mockStatusReader{status: esl.ExtensionStatusIdle, ok: true}
-		engine := NewAIVoiceEngine(cmdService, store, statusReader, nil)
+		engine := NewAIVoiceEngine(context.Background(), cmdService, store, statusReader, nil)
 
 		session := esl.CallSession{
 			CallID:  "call-acd-idle",
@@ -275,7 +275,7 @@ func TestAIVoiceEngineACDRoutingBasedOnRedis(t *testing.T) {
 		store := esl.NewMemorySessionStore()
 		// 坐席状态为忙碌
 		statusReader := mockStatusReader{status: esl.ExtensionStatusBusy, ok: true}
-		engine := NewAIVoiceEngine(cmdService, store, statusReader, nil)
+		engine := NewAIVoiceEngine(context.Background(), cmdService, store, statusReader, nil)
 
 		session := esl.CallSession{
 			CallID:  "call-acd-busy",

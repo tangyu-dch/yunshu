@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -69,7 +70,10 @@ func (e *DeepSeekLLMEngine) GenerateReply(ctx context.Context, systemPrompt, use
 		return "", fmt.Errorf("DeepSeek 请求序列化失败: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("创建 DeepSeek HTTP 请求失败: %w", err)
 	}
@@ -77,12 +81,14 @@ func (e *DeepSeekLLMEngine) GenerateReply(ctx context.Context, systemPrompt, use
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("调用 DeepSeek 物理 API 失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("DeepSeek 物理大模型接口响应错误: HTTP 状态码 %d", resp.StatusCode)

@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +52,22 @@ func NewASRServer(addr string, bus events.Bus, store esl.SessionStore, logger *s
 		SessionStore: store,
 		Logger:       logger,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // 允许无 Origin 的请求（同源请求、服务端调用）
+				}
+				allowedOrigins := os.Getenv("WS_ALLOWED_ORIGINS")
+				if allowedOrigins == "" {
+					return true // 未配置时允许所有（开发环境兜底）
+				}
+				for _, allowed := range strings.Split(allowedOrigins, ",") {
+					if strings.TrimSpace(allowed) == origin {
+						return true
+					}
+				}
+				return false
+			},
 		},
 	}
 }
@@ -107,7 +123,9 @@ func (s *ASRServer) Stop() {
 
 	s.Logger.Info("正在停止云枢 ASR 旁路语音接收服务...")
 	if s.server != nil {
-		_ = s.server.Shutdown(context.Background())
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		_ = s.server.Shutdown(shutdownCtx)
 	}
 	if s.listener != nil {
 		_ = s.listener.Close()
@@ -155,6 +173,8 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 	utteranceCount := 0
 
 	for {
+		// Set read deadline to avoid leaking goroutines on stale/half-open connections
+		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		msgType, data, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {

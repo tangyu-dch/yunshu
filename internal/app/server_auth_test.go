@@ -17,7 +17,10 @@ import (
 func TestConsoleTenantMiddlewareInjectsTenantContext(t *testing.T) {
 	t.Parallel()
 
-	server := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	server, err := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	token, err := server.console.Auth.Login(context.Background(), authdomain.LoginRequest{
 		Username:   "admin",
 		Password:   "admin123",
@@ -51,7 +54,10 @@ func TestConsoleTenantMiddlewareInjectsTenantContext(t *testing.T) {
 func TestConsoleProtectedRoutesRequireToken(t *testing.T) {
 	t.Parallel()
 
-	server := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	server, err := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/operate/gateway?pageNumber=1&pageSize=10", nil)
 	unauthorizedRec := httptest.NewRecorder()
@@ -83,7 +89,10 @@ func TestConsoleProtectedRoutesRequireToken(t *testing.T) {
 func TestConsolePermissionMiddlewareEnforcesRoutePermissions(t *testing.T) {
 	t.Parallel()
 
-	server := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	server, err := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server.console.Auth.IdentityResolver = nil
 
 	deniedToken, err := server.console.Auth.Login(context.Background(), authdomain.LoginRequest{
@@ -131,7 +140,10 @@ func TestConsolePermissionMiddlewareEnforcesRoutePermissions(t *testing.T) {
 func TestConsolePermissionLookupUsesDynamicRoutesFirst(t *testing.T) {
 	t.Parallel()
 
-	server := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	server, err := NewServerWithConfig(contracts.ServiceConsole, config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	server.console.RoutePermissions = fakeRoutePermissionResolver{permission: contracts.PermissionOperateGatewaySync}
 	permission, found, err := server.requiredConsolePermission(context.Background(), "/operate/gateway/sync/7", http.MethodPost)
 	if err != nil {
@@ -147,8 +159,14 @@ func TestConsoleAuthUsesRedisSessionStoreAcrossInstances(t *testing.T) {
 
 	server := miniredis.RunT(t)
 	cfg := config.Config{Redis: config.RedisConfig{Addrs: []string{server.Addr()}}}
-	first := NewServerWithConfig(contracts.ServiceConsole, cfg)
-	second := NewServerWithConfig(contracts.ServiceConsole, cfg)
+	first, err := NewServerWithConfig(contracts.ServiceConsole, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewServerWithConfig(contracts.ServiceConsole, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ticket, err := first.console.Auth.Login(context.Background(), authdomain.LoginRequest{
 		Username:   "admin",

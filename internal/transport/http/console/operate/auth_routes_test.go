@@ -41,7 +41,8 @@ func TestAuthRoutesLoginTokenAndLogout(t *testing.T) {
 		t.Fatalf("expected token")
 	}
 
-	tokenReq := httptest.NewRequest(http.MethodGet, "/operate/auth/token?token="+loginResult.Data.Token, nil)
+	tokenReq := httptest.NewRequest(http.MethodGet, "/operate/auth/token", nil)
+	tokenReq.Header.Set("Authorization", "Bearer "+loginResult.Data.Token)
 	tokenRec := httptest.NewRecorder()
 	router.ServeHTTP(tokenRec, tokenReq)
 	if tokenRec.Code != http.StatusOK {

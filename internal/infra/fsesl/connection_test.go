@@ -1,6 +1,7 @@
 package fsesl
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -8,7 +9,7 @@ import (
 func TestConnectionPoolDynamicNodeStatus(t *testing.T) {
 	t.Parallel()
 
-	pool := NewConnectionPool(nil, 0, 0, nil)
+	pool := NewConnectionPool(context.Background(), nil, 0, 0, nil)
 	pool.UpsertNode(NodeConfig{ID: 1, Addr: "10.0.0.1:8021", SetID: 2, Weight: 80, Enabled: true})
 
 	statuses := pool.Status()
@@ -28,7 +29,7 @@ func TestConnectionPoolDynamicNodeStatus(t *testing.T) {
 func TestConnectionPoolLeaseRenewInterval(t *testing.T) {
 	t.Parallel()
 
-	pool := NewConnectionPool(nil, 0, 0, nil)
+	pool := NewConnectionPool(context.Background(), nil, 0, 0, nil)
 	pool.LeaseTTL = 30 * time.Second
 	if got := pool.leaseRenewInterval(); got != 15*time.Second {
 		t.Fatalf("unexpected renew interval: %s", got)

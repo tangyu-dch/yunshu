@@ -1,10 +1,20 @@
 package app
 
 import (
+	"testing"
 	"time"
 
 	"yunshu/internal/infra/config"
 )
+
+func newTestWorkerRuntime(t *testing.T, cfg config.Config) *WorkerRuntime {
+	t.Helper()
+	w, err := NewWorkerRuntimeWithConfig(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return w
+}
 
 func testConfig() config.Config {
 	return config.Config{

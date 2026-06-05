@@ -50,10 +50,12 @@ type NodeRuntimeStatus struct {
 // 每个 FS 地址维护独立的 eslgo.Conn 连接，支持断线重连和动态节点配置更新。
 // 连接成功后会注册事件监听器，将事件通过 OnEvent 回调通知上层。
 type ConnectionPool struct {
+	ctx               context.Context
 	mu                sync.RWMutex
 	nodes             map[string]NodeConfig
 	conns             map[string]*eslgo.Conn
 	leaseCancels      map[string]context.CancelFunc
+	eventCancels      map[string]context.CancelFunc
 	logger            *slog.Logger
 	reconnectInterval time.Duration
 	maxReconnect      int
@@ -66,7 +68,10 @@ type ConnectionPool struct {
 }
 
 // NewConnectionPool 创建 ESL 连接池。
-func NewConnectionPool(nodes []NodeConfig, reconnectInterval time.Duration, maxReconnect int, logger *slog.Logger) *ConnectionPool {
+func NewConnectionPool(ctx context.Context, nodes []NodeConfig, reconnectInterval time.Duration, maxReconnect int, logger *slog.Logger) *ConnectionPool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -77,9 +82,11 @@ func NewConnectionPool(nodes []NodeConfig, reconnectInterval time.Duration, maxR
 		maxReconnect = 30
 	}
 	pool := &ConnectionPool{
+		ctx:               ctx,
 		nodes:             map[string]NodeConfig{},
 		conns:             map[string]*eslgo.Conn{},
 		leaseCancels:      map[string]context.CancelFunc{},
+		eventCancels:      map[string]context.CancelFunc{},
 		logger:            logger,
 		reconnectInterval: reconnectInterval,
 		maxReconnect:      maxReconnect,
@@ -122,6 +129,10 @@ func (p *ConnectionPool) UpsertNode(node NodeConfig) {
 		conn := p.conns[node.Addr]
 		delete(p.conns, node.Addr)
 		p.stopLeaseRenewalLocked(node.Addr)
+		if cancel := p.eventCancels[node.Addr]; cancel != nil {
+			cancel()
+			delete(p.eventCancels, node.Addr)
+		}
 		p.mu.Unlock()
 		p.releaseLease(node.Addr)
 		if conn != nil {
@@ -143,6 +154,10 @@ func (p *ConnectionPool) RemoveNode(fsAddr string) {
 	conn := p.conns[fsAddr]
 	delete(p.conns, fsAddr)
 	p.stopLeaseRenewalLocked(fsAddr)
+	if cancel := p.eventCancels[fsAddr]; cancel != nil {
+		cancel()
+		delete(p.eventCancels, fsAddr)
+	}
 	p.mu.Unlock()
 	p.releaseLease(fsAddr)
 	if conn != nil {
@@ -170,26 +185,44 @@ func (p *ConnectionPool) Status() []NodeRuntimeStatus {
 }
 
 // Connect 建立或复用指定 FS 地址的 ESL 连接。
+// 使用 double-check locking 避免并发 Connect 同时建立连接的竞态条件。
 func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Conn, error) {
+	// 快速路径：已有连接时直接返回
 	p.mu.RLock()
 	if conn := p.conns[fsAddr]; conn != nil {
 		p.mu.RUnlock()
 		return conn, nil
 	}
-	node, ok := p.nodes[fsAddr]
 	p.mu.RUnlock()
+
+	// 获取写锁，double-check 后建立连接
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Double-check: 可能在等锁期间被其他 goroutine 建立
+	if conn := p.conns[fsAddr]; conn != nil {
+		return conn, nil
+	}
+
+	node, ok := p.nodes[fsAddr]
 	if !ok {
 		return nil, ErrFSNodeNotConfigured
 	}
+
 	disconnect := func() {
 		p.mu.Lock()
 		delete(p.conns, fsAddr)
+		if cancel := p.eventCancels[fsAddr]; cancel != nil {
+			cancel()
+			delete(p.eventCancels, fsAddr)
+		}
 		p.stopLeaseRenewalLocked(fsAddr)
 		p.mu.Unlock()
 		p.releaseLease(fsAddr)
 		p.logger.Warn("FreeSWITCH ESL 连接断开，准备重连", "fsAddr", fsAddr)
-		go p.reconnect(ctx, node)
+		go p.reconnect(p.ctx, node)
 	}
+
 	conn, err := p.dial(node.Addr, node.Password, disconnect)
 	if err != nil {
 		return nil, err
@@ -202,6 +235,14 @@ func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Con
 		conn.Close()
 		return nil, err
 	}
+
+	// 事件监听使用独立的 context，不受 Connect 调用方 context 生命周期影响
+	eventCtx, eventCancel := context.WithCancel(context.Background())
+	if existing := p.eventCancels[fsAddr]; existing != nil {
+		existing()
+	}
+	p.eventCancels[fsAddr] = eventCancel
+
 	conn.RegisterEventListener(eslgo.EventListenAll, func(event *eslgo.Event) {
 		eventName := event.Headers.Get("Event-Name")
 		if eventName == "CUSTOM" {
@@ -214,7 +255,7 @@ func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Con
 				if ext != "" {
 					p.logger.Info("收到 FreeSWITCH Sofia 注册事件", "fsAddr", fsAddr, "subclass", subclass, "extension", ext)
 					if p.OnSofiaEvent != nil {
-						p.OnSofiaEvent(ctx, subclass, ext)
+						p.OnSofiaEvent(eventCtx, subclass, ext)
 					}
 				}
 			}
@@ -224,15 +265,13 @@ func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Con
 		if domainEvent.CallID != "" {
 			p.logger.Info("收到 FreeSWITCH 事件", "eventId", domainEvent.EventID, "eventName", domainEvent.EventName, "callId", domainEvent.CallID, "uuid", domainEvent.UUID, "fsAddr", domainEvent.FSAddr, "legRole", domainEvent.LegRole)
 			if p.OnEvent != nil {
-				p.OnEvent(ctx, domainEvent)
+				p.OnEvent(eventCtx, domainEvent)
 			}
 		}
 	})
-	p.mu.Lock()
 	p.conns[fsAddr] = conn
-	p.mu.Unlock()
 	p.startLeaseRenewal(fsAddr)
-	p.logger.Info("FreeSWITCH ESL 连接成功并已启用事件", "fsAddr", fsAddr)
+	p.logger.Info("FreeSWITCH ESL 连接已成功并启用事件", "fsAddr", fsAddr)
 	return conn, nil
 }
 
@@ -276,6 +315,10 @@ func (p *ConnectionPool) CloseAll() {
 		conns[fsAddr] = conn
 		delete(p.conns, fsAddr)
 		p.stopLeaseRenewalLocked(fsAddr)
+		if cancel := p.eventCancels[fsAddr]; cancel != nil {
+			cancel()
+			delete(p.eventCancels, fsAddr)
+		}
 	}
 	p.mu.Unlock()
 	for fsAddr, conn := range conns {
@@ -373,6 +416,10 @@ func (p *ConnectionPool) closeForLeaseFailure(fsAddr string) {
 	conn := p.conns[fsAddr]
 	delete(p.conns, fsAddr)
 	p.stopLeaseRenewalLocked(fsAddr)
+	if cancel := p.eventCancels[fsAddr]; cancel != nil {
+		cancel()
+		delete(p.eventCancels, fsAddr)
+	}
 	p.mu.Unlock()
 	if conn != nil {
 		conn.ExitAndClose()

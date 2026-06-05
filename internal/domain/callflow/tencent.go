@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -86,7 +87,10 @@ func (e *TencentASREngine) Transcribe(ctx context.Context, audioData []byte, for
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 8*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -101,12 +105,14 @@ func (e *TencentASREngine) Transcribe(ctx context.Context, audioData []byte, for
 	// 本地仿真凭证组装保护
 	req.Header.Set("Authorization", fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/...", secretId))
 
-	client := &http.Client{Timeout: 8 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("腾讯云 ASR 物理调用失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("腾讯云 ASR 接口返回状态码: %d", resp.StatusCode)
@@ -195,7 +201,10 @@ func (e *TencentTTSEngine) Synthesize(ctx context.Context, text string, config m
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +216,14 @@ func (e *TencentTTSEngine) Synthesize(ctx context.Context, text string, config m
 	req.Header.Set("X-TC-Timestamp", fmt.Sprintf("%d", time.Now().Unix()))
 	req.Header.Set("Authorization", fmt.Sprintf("TC3-HMAC-SHA256 Credential=%s/...", secretId))
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("腾讯云 TTS 物理请求失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("腾讯云 TTS 物理合成状态码错误: %d", resp.StatusCode)
@@ -303,7 +314,10 @@ func (e *TencentLLMEngine) GenerateReply(ctx context.Context, systemPrompt, user
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", err
 	}
@@ -311,12 +325,14 @@ func (e *TencentLLMEngine) GenerateReply(ctx context.Context, systemPrompt, user
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+token)
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := GlobalHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("腾讯混元物理 API 失败: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("腾讯混元物理大模型报错，状态码: %d", resp.StatusCode)

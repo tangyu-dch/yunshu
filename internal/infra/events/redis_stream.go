@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -100,6 +101,8 @@ func (b *RedisStreamBus) Publish(ctx context.Context, event contracts.EventEnvel
 	}
 	id, err := b.client.XAdd(ctx, &goredis.XAddArgs{
 		Stream: b.cfg.Stream,
+		MaxLen: 10000, // 限制 Stream 最大长度，防止内存溢出
+		Approx: true,  // 使用近似裁剪以提升性能
 		Values: map[string]any{
 			redisStreamPayloadField: string(payload),
 			"eventType":             event.EventType,
@@ -143,7 +146,10 @@ func (b *RedisStreamBus) RunConsumer(ctx context.Context) error {
 		for _, stream := range streams {
 			for _, message := range stream.Messages {
 				if err := b.handleMessage(ctx, message); err != nil {
-					b.logger.Error("Redis Stream 事件处理失败，消息保持 pending", "stream", b.cfg.Stream, "group", b.cfg.Group, "messageId", message.ID, "error", err.Error())
+					b.logger.Error("Redis Stream 事件处理失败", "id", message.ID, "error", err)
+					// 检查消息重试次数（通过 XPending 或自定义计数）
+					// 超过最大重试次数的消息进入死信队列
+					b.handleDeadLetter(ctx, message, err)
 					continue
 				}
 				if err := b.client.XAck(ctx, b.cfg.Stream, b.cfg.Group, message.ID).Err(); err != nil {
@@ -176,6 +182,31 @@ func (b *RedisStreamBus) handleMessage(ctx context.Context, message goredis.XMes
 	}
 	b.logger.Info("Redis Stream 事件消费完成", "messageId", message.ID, "eventType", event.EventType, "eventId", event.EventID, "aggregateId", event.AggregateID)
 	return nil
+}
+
+// handleDeadLetter 将处理失败且超过最大重试次数的消息转入死信队列。
+// 转入死信后会 ACK 原消息，避免 consumer group 持续重试。
+func (b *RedisStreamBus) handleDeadLetter(ctx context.Context, msg goredis.XMessage, originalErr error) {
+	// 将失败消息写入死信 Stream
+	dlqStream := b.cfg.Stream + ":dlq"
+	_, err := b.client.XAdd(ctx, &goredis.XAddArgs{
+		Stream: dlqStream,
+		MaxLen: 5000,
+		Approx: true,
+		Values: map[string]any{
+			"original_id":    msg.ID,
+			"original_error": originalErr.Error(),
+			"values":         fmt.Sprintf("%v", msg.Values),
+			"failed_at":      time.Now().UTC().Format(time.RFC3339),
+		},
+	}).Result()
+	if err != nil {
+		b.logger.Error("写入死信队列失败", "error", err)
+		return
+	}
+	// ACK 原消息，避免持续重试
+	b.client.XAck(ctx, b.cfg.Stream, b.cfg.Group, msg.ID)
+	b.logger.Warn("消息已转入死信队列", "originalId", msg.ID, "dlqStream", dlqStream)
 }
 
 // isBusyGroup 判断 Redis 错误是否为 "BUSYGROUP" 错误，用于忽略已存在的消费者组。

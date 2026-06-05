@@ -28,7 +28,7 @@ func TestConsumersAdvanceAPIOutboundWorkflows(t *testing.T) {
 	}
 	ctiRunner := workflow.NewRunner(ctiEngine, workflow.NewMemoryInstanceStore(), nil)
 	eslRunner := workflow.NewRunner(eslEngine, workflow.NewMemoryInstanceStore(), nil)
-	RegisterConsumers(bus, ctiRunner, eslRunner, nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	if err := bus.Publish(ctx, contracts.NewEventEnvelope("evt-1", contracts.EventAPICallRequested, "idem-1", "call", "call-1", contracts.ServiceCall, map[string]any{"callId": "call-1"})); err != nil {
@@ -74,7 +74,7 @@ func TestConsumersAdvanceBatchOutboundWorkflows(t *testing.T) {
 	}
 	ctiRunner := workflow.NewRunner(ctiEngine, workflow.NewMemoryInstanceStore(), nil)
 	eslRunner := workflow.NewRunner(eslEngine, workflow.NewMemoryInstanceStore(), nil)
-	RegisterConsumers(bus, ctiRunner, eslRunner, nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	if err := bus.Publish(ctx, contracts.NewEventEnvelope("evt-batch-1", contracts.EventBatchCallRequested, "idem-batch-1", "call", "batch-call-1", contracts.ServiceCall, map[string]any{"callId": "batch-call-1", "batchTaskId": 10, "batchCallTelId": 20})); err != nil {
@@ -199,7 +199,7 @@ func TestAPIOutboundBridgesOnlyAfterCustomer183OrAnswer(t *testing.T) {
 		WhitelistHit:  true,
 	}}}
 	runtimeSelector := &cti.RuntimeSelector{Allocator: apiOutboundRuntimeAllocator{}}
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	if err := originate.StartAPIOutbound(ctx, esl.OriginateRequest{
@@ -408,7 +408,7 @@ func TestAPIOutboundPlaysSupplementaryRingOnCustomerProgress(t *testing.T) {
 		SupplementRingFile: "/tmp/ring.wav",
 	}}}
 	runtimeSelector := &cti.RuntimeSelector{Allocator: apiOutboundRuntimeAllocator{}}
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	// Start API Outbound (Agent first)
@@ -524,7 +524,7 @@ func TestBatchOutboundSymmetricFlow(t *testing.T) {
 		SessionService: session,
 		Events:         bus,
 	}
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	// Start Batch Outbound (Customer first)
@@ -643,7 +643,7 @@ func TestCTIPostCallWorkflowTransitions(t *testing.T) {
 	}
 	ctiRunner := workflow.NewRunner(ctiEngine, workflow.NewMemoryInstanceStore(), nil)
 
-	RegisterConsumers(bus, ctiRunner, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -838,7 +838,7 @@ func TestDialpadDirectCallSymmetricFlow(t *testing.T) {
 	}}}
 	runtimeSelector := &cti.RuntimeSelector{Allocator: apiOutboundRuntimeAllocator{}}
 
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -1004,7 +1004,7 @@ func TestCustomerInboundCallSymmetricFlow(t *testing.T) {
 		Events:         bus,
 	}
 
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil)
 
 	ctx := context.Background()
 
@@ -1171,7 +1171,7 @@ func TestAPIOutboundHangupAgentOnNumberSelectionFailure(t *testing.T) {
 	// 没有提供任何可用外呼号码 candidates
 	candidateSource := apiOutboundTestCandidateSource{candidates: []cti.NumberCandidate{}}
 	runtimeSelector := &cti.RuntimeSelector{Allocator: apiOutboundRuntimeAllocator{}}
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
 
 	ctx := context.Background()
 	// 启动 API 外呼 (A-leg 坐席发起起呼)
@@ -1254,7 +1254,7 @@ func TestDialpadDirectHangupAgentOnNumberSelectionFailure(t *testing.T) {
 	candidateSource := apiOutboundTestCandidateSource{candidates: []cti.NumberCandidate{}}
 	runtimeSelector := &cti.RuntimeSelector{Allocator: apiOutboundRuntimeAllocator{}}
 
-	RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, nil, nil, nil, nil)
 
 	ctx := context.Background()
 

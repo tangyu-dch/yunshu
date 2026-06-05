@@ -20,6 +20,7 @@ import (
 	"yunshu/internal/domain/cti"
 	"yunshu/internal/infra/fsesl"
 	"yunshu/internal/infra/resource"
+	"yunshu/internal/transport/http/middleware"
 )
 
 // WebSocketHub 是 CTI WebSocket 推送节点的最小 transport 端口。
@@ -44,7 +45,7 @@ func RegisterRoutes(
 	// Selector 根据呼叫上下文和选号规则从候选号码中选择最优号码。
 	// 选号逻辑考虑号码可用性、并发限制、风险等级等因素。
 	selector := cti.Selector{}
-	r.POST("/cti/callTask/call", checkAppCredentials(gormDB), func(c *gin.Context) {
+	r.POST("/cti/callTask/call", checkAppCredentials(gormDB), middleware.RateLimitMiddleware(10, 2.0), func(c *gin.Context) {
 		var req contracts.ApiCallReq
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))

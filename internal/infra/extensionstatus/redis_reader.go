@@ -47,6 +47,10 @@ func (r *RedisReader) GetExtensionStatus(ctx context.Context, extension string) 
 }
 
 // SetExtensionStatus 写入分机状态。
+//
+// TODO: 当前实现未设置 TTL。如果分机下线时未能更新此 Hash（如进程崩溃、网络中断），
+// 对应的 field 将永久保留在 Redis 中，导致后续查询误认为该分机仍在线。
+// 建议后续增加 HSET + EXPIRE 组合，或在写入侧定期清理过期分机状态。
 func (r *RedisReader) SetExtensionStatus(ctx context.Context, extension string, status esl.ExtensionStatus) error {
 	return r.Client.HSet(ctx, redisExtensionStatusKey, extension, int(status)).Err()
 }

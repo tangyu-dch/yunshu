@@ -185,12 +185,12 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 		BatchCallTelID: tel.ID,
 		Phone:          tel.Tel,
 		MerchantID:     firstNonZero(tel.MerchantID, task.MerchantID),
-		UserName:       firstNonEmpty(tel.CustomerName, task.UserName),
-		Extension:      firstNonEmpty(assignedExtension, task.ExtensionNumber),
+		UserName:       contracts.FirstNonEmpty(tel.CustomerName, task.UserName),
+		Extension:      contracts.FirstNonEmpty(assignedExtension, task.ExtensionNumber),
 		ExtensionID:    task.ExtensionID,
 		AIFlag:         task.AIFlag,
 		Push:           true,
-		Extra:          firstNonEmpty(tel.Extra, task.Extra),
+		Extra:          contracts.FirstNonEmpty(tel.Extra, task.Extra),
 		CallMode:       task.CallMode,
 		CallRatio:      task.CallRatio,
 		QueueEnable:    task.QueueEnable,
@@ -367,15 +367,6 @@ func firstNonZero(values ...int) int {
 		}
 	}
 	return 0
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func intFromPayload(payload map[string]any, key string) int {

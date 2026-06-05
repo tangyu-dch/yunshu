@@ -4,14 +4,12 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
-
-	goredis "github.com/redis/go-redis/v9"
 
 	"yunshu/internal/contracts"
 )
@@ -52,6 +50,7 @@ type LoginIdentityResolver interface {
 }
 
 // LoginAccount 表示一个可用于默认登录或内存兜底的管理账号。
+// 仅用于本地开发环境兜底，生产环境应通过数据库维护账号并禁用默认账号。
 type LoginAccount struct {
 	Username   string
 	Password   string
@@ -64,11 +63,16 @@ type LoginAccount struct {
 
 // DefaultLoginAccounts 返回默认管理账号。
 // 这些账号既用于本地开发兜底，也用于数据库种子初始化。
+// 仅在开发环境启用；生产环境通过环境变量 DISABLE_DEFAULT_ACCOUNTS=true 关闭。
 func DefaultLoginAccounts() []LoginAccount {
+	// 仅在开发环境启用默认账号，生产环境通过环境变量 DISABLE_DEFAULT_ACCOUNTS=true 关闭
+	if os.Getenv("DISABLE_DEFAULT_ACCOUNTS") == "true" {
+		return nil
+	}
 	return []LoginAccount{
-		{Username: "admin", Password: "admin123", UserID: "9999", RoleID: "super_admin", Internal: true},
-		{Username: "operator", Password: "operator123", UserID: "1000", RoleID: "operate_lead", DataScope: "global"},
-		{Username: "merchant", Password: "merchant123", MerchantID: "1001", UserID: "2001", RoleID: "merchant_admin", DataScope: "merchant"},
+		{Username: "admin", Password: "$2a$10$FE5nh0zJtomekwjO0JCXtOcG/X4qq5XebginTE8sDfAJMY24hgZiK", UserID: "9999", RoleID: "super_admin", Internal: true},
+		{Username: "operator", Password: "$2a$10$8J16PjloeT2TWtso73rdlugL071u1QytlgNNRs05O3QS1r9PKf/N.", UserID: "1000", RoleID: "operate_lead", DataScope: "global"},
+		{Username: "merchant", Password: "$2a$10$VVi8ExcLVxUeeEsd7J05peoAfGKJD/UTdxsepOnARtZv5nZv0xw6S", MerchantID: "1001", UserID: "2001", RoleID: "merchant_admin", DataScope: "merchant"},
 	}
 }
 
@@ -152,7 +156,13 @@ func (s *AuthService) Login(ctx context.Context, req LoginRequest) (AuthTicket, 
 		logger.Error("管理端登录签发 token 失败", "username", req.Username, "error", err.Error())
 		return AuthTicket{}, err
 	}
-	logger.Info("管理端登录成功", "username", req.Username, "token", ticket.Token, "expiresAt", ticket.ExpiresAt)
+	tokenPrefix := ""
+	if len(ticket.Token) > 8 {
+		tokenPrefix = ticket.Token[:8] + "..."
+	} else {
+		tokenPrefix = "***"
+	}
+	logger.Info("管理端登录成功", "username", req.Username, "tokenPrefix", tokenPrefix, "expiresAt", ticket.ExpiresAt)
 	return ticket, nil
 }
 
@@ -168,11 +178,17 @@ func (s *AuthService) Logout(ctx context.Context, token string) error {
 	if token == "" {
 		return ErrInvalidLogin
 	}
+	tokenPrefix := ""
+	if len(token) > 8 {
+		tokenPrefix = token[:8] + "..."
+	} else {
+		tokenPrefix = "***"
+	}
 	if err := s.Store.Revoke(ctx, token); err != nil {
-		logger.Warn("管理端注销 token 失败", "token", token, "error", err.Error())
+		logger.Warn("管理端注销 token 失败", "tokenPrefix", tokenPrefix, "error", err.Error())
 		return err
 	}
-	logger.Info("管理端注销成功", "token", token)
+	logger.Info("管理端注销成功", "tokenPrefix", tokenPrefix)
 	return nil
 }
 
@@ -391,96 +407,3 @@ func randomToken() (string, error) {
 }
 
 const redisAuthSessionKeyPrefix = contracts.KeyConsoleAuthSessionPrefix
-
-// RedisSessionStore 是管理端多实例共享的 Redis 会话存储。
-// 会话数据会按 TTL 自动过期，注销则直接删除对应 token 键。
-type RedisSessionStore struct {
-	Client *goredis.Client
-	Prefix string
-	Now    func() time.Time
-}
-
-// NewRedisSessionStore 创建 Redis 会话存储。
-func NewRedisSessionStore(client *goredis.Client, prefix string) *RedisSessionStore {
-	if prefix == "" {
-		prefix = redisAuthSessionKeyPrefix
-	}
-	return &RedisSessionStore{Client: client, Prefix: prefix, Now: time.Now}
-}
-
-// Issue 生成 token 并写入 Redis，保证多实例共享登录态。
-func (s *RedisSessionStore) Issue(ctx context.Context, tenant contracts.TenantContext, ttl time.Duration) (AuthTicket, error) {
-	if s == nil || s.Client == nil {
-		return AuthTicket{}, ErrSessionStoreUnavailable
-	}
-	token, err := randomToken()
-	if err != nil {
-		return AuthTicket{}, err
-	}
-	ticket := AuthTicket{
-		Token:     token,
-		Tenant:    tenant,
-		ExpiresAt: s.now().UTC().Add(ttl),
-	}
-	raw, err := json.Marshal(ticket)
-	if err != nil {
-		return AuthTicket{}, err
-	}
-	if err := s.Client.Set(ctx, s.key(token), raw, ttl).Err(); err != nil {
-		return AuthTicket{}, err
-	}
-	return ticket, nil
-}
-
-// Get 从 Redis 读取 token 对应的会话票据。
-func (s *RedisSessionStore) Get(ctx context.Context, token string) (AuthTicket, bool) {
-	if s == nil || s.Client == nil {
-		return AuthTicket{}, false
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return AuthTicket{}, false
-	}
-	raw, err := s.Client.Get(ctx, s.key(token)).Result()
-	if err == goredis.Nil {
-		return AuthTicket{}, false
-	}
-	if err != nil {
-		return AuthTicket{}, false
-	}
-	var ticket AuthTicket
-	if err := json.Unmarshal([]byte(raw), &ticket); err != nil {
-		return AuthTicket{}, false
-	}
-	if ticket.Token == "" {
-		ticket.Token = token
-	}
-	if !ticket.ExpiresAt.IsZero() && !ticket.ExpiresAt.After(s.now().UTC()) {
-		_ = s.Client.Del(ctx, s.key(token)).Err()
-		return AuthTicket{}, false
-	}
-	return ticket, true
-}
-
-// Revoke 删除 Redis 中的 token。
-func (s *RedisSessionStore) Revoke(ctx context.Context, token string) error {
-	if s == nil || s.Client == nil {
-		return ErrSessionStoreUnavailable
-	}
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return nil
-	}
-	return s.Client.Del(ctx, s.key(token)).Err()
-}
-
-func (s *RedisSessionStore) now() time.Time {
-	if s != nil && s.Now != nil {
-		return s.Now()
-	}
-	return time.Now()
-}
-
-func (s *RedisSessionStore) key(token string) string {
-	return s.Prefix + token
-}

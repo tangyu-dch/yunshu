@@ -4,10 +4,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -50,24 +52,44 @@ func main() {
 		cfg = loaded
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	slog.Info("[cc-all] ===========================================================")
 	slog.Info("[cc-all] ★★★ 正在单进程中并发拉起 Yunshu CallCenter 4 大服务... ★★★")
 	slog.Info("[cc-all] ===========================================================")
 
+	var servers []*app.Server
+	var serversMu sync.Mutex
+
 	// 1. 启动 cc-edge 边缘网关服务
 	go func() {
 		slog.Info("[cc-all] 正在拉起 cc-edge 边缘网关服务...", "addr", *edgeAddr)
-		server := app.NewServerWithConfig(contracts.ServiceEdge, cfg)
-		if err := server.ListenAndServe(*edgeAddr); err != nil {
+		server, err := app.NewServerWithConfig(contracts.ServiceEdge, cfg)
+		if err != nil {
+			slog.Error("[cc-all] cc-edge 服务初始化失败", "error", err)
+			return
+		}
+		serversMu.Lock()
+		servers = append(servers, server)
+		serversMu.Unlock()
+		if err := server.ListenAndServe(ctx, *edgeAddr); err != nil {
 			slog.Error("[cc-all] cc-edge 服务异常停止", "error", err)
 		}
 	}()
 
-	// 2. 启动 cc-console 管理控制台与引导器
+	// 2. 启动 cc-console 运营后台服务
 	go func() {
 		slog.Info("[cc-all] 正在拉起 cc-console 运营后台服务...", "addr", *consoleAddr)
-		server := app.NewServerWithConfig(contracts.ServiceConsole, cfg)
-		if err := server.ListenAndServe(*consoleAddr); err != nil {
+		server, err := app.NewServerWithConfig(contracts.ServiceConsole, cfg)
+		if err != nil {
+			slog.Error("[cc-all] cc-console 服务初始化失败", "error", err)
+			return
+		}
+		serversMu.Lock()
+		servers = append(servers, server)
+		serversMu.Unlock()
+		if err := server.ListenAndServe(ctx, *consoleAddr); err != nil {
 			slog.Error("[cc-all] cc-console 服务异常停止", "error", err)
 		}
 	}()
@@ -75,8 +97,15 @@ func main() {
 	// 3. 启动 cc-call 呼叫核心与 ESL 调度引擎
 	go func() {
 		slog.Info("[cc-all] 正在拉起 cc-call 呼叫控制服务...", "addr", *callAddr)
-		server := app.NewServerWithConfig(contracts.ServiceCall, cfg)
-		if err := server.ListenAndServe(*callAddr); err != nil {
+		server, err := app.NewServerWithConfig(contracts.ServiceCall, cfg)
+		if err != nil {
+			slog.Error("[cc-all] cc-call 服务初始化失败", "error", err)
+			return
+		}
+		serversMu.Lock()
+		servers = append(servers, server)
+		serversMu.Unlock()
+		if err := server.ListenAndServe(ctx, *callAddr); err != nil {
 			slog.Error("[cc-all] cc-call 服务异常停止", "error", err)
 		}
 	}()
@@ -84,18 +113,35 @@ func main() {
 	// 4. 启动 cc-worker 后台异步计费与流式处理器
 	go func() {
 		slog.Info("[cc-all] 正在拉起 cc-worker 异步任务队列服务...", "addr", *workerAddr)
-		server := app.NewServerWithConfig(contracts.ServiceWorker, cfg)
-		if err := server.ListenAndServe(*workerAddr); err != nil {
+		server, err := app.NewServerWithConfig(contracts.ServiceWorker, cfg)
+		if err != nil {
+			slog.Error("[cc-all] cc-worker 服务初始化失败", "error", err)
+			return
+		}
+		serversMu.Lock()
+		servers = append(servers, server)
+		serversMu.Unlock()
+		if err := server.ListenAndServe(ctx, *workerAddr); err != nil {
 			slog.Error("[cc-all] cc-worker 服务异常停止", "error", err)
 		}
 	}()
 
-	// 监听系统退出信号，实现优雅关闭
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
+	// 监听系统退出信号，等候上下文终止
+	<-ctx.Done()
 
-	slog.Info("[cc-all] 接收到退出信号，正在优雅关闭所有服务进程...", "signal", sig.String())
+	slog.Info("[cc-all] 接收到退出信号，正在优雅关闭所有服务进程...")
+
+	// 限制优雅关闭最大等待时间为 15 秒
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancelShutdown()
+
+	serversMu.Lock()
+	for _, server := range servers {
+		server.Shutdown(shutdownCtx)
+	}
+	serversMu.Unlock()
+
+	slog.Info("[cc-all] 所有子服务资源已安全释放。")
 	time.Sleep(1 * time.Second)
 	slog.Info("[cc-all] 服务安全退场。")
 }
