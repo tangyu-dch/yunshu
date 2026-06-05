@@ -108,6 +108,11 @@
 | ![SIP 分机配置中心](docs/images/operate_extension.png) | ![动态选号规则与频次风控](docs/images/operate_risk_control.png) |
 | *SaaS 分机配置、SIP 密码分发与在线/忙碌注册表实时自省* | *高并发外呼号码源原子级分配、频次盲区过滤与黑白名单机制* |
 
+| 🛡️ 国别 IP 拦截与安全中心 |
+| :---: |
+| ![国别 IP 拦截与安全中心](docs/images/operate_ip_block.png) |
+| *基于 iptables & ipset 的国别地理围栏防火墙与拦截审计日志面板* |
+
 #### 💼 商户控制台全景画廊 (商户端 - `/merchant`)
 以下是商户端进行批量话务导入、在线 WebRTC 呼叫与通话审计的核心工作台预览：
 
@@ -130,6 +135,51 @@
 *   **严格 Fail-Closed 设计**：云枢废弃了任何以仿真模拟（MOCK）或演示性退让为代目的平滑降级机制。当商户未在 Start 节点中配置物理 `llmApiKey`，或者物理 ASR、TTS、LLM 请求接口失败时，系统将坚决拒绝仿真兜底退让，严格按 Fail-Closed 原则立刻向话务状态机返回物理凭证未配置或物理调用失败的严格错误，确保生产计费、话务与 AI 路由的安全和严谨性。
 *   **高并发计费与 CDN 录音转储**：计费默认费率完全来自配置，支持 rated 估算审计，最终结算必须拆为余额精确扣减与 settlement ledger 写入独立节点。缺少录音路径自动标记为可修复，录音上传确认后标记 `uploaded`，失败进入 outbox 自动重试。
 *   **Webhook 可靠交付**：配置 `DOWNSTREAM_CDR_URL` 后，话单下游推送必须有任务状态和确认语义，支持 HMAC-SHA256 签名校验，失败时写入 last_error 并以指数退避重试，确保话单 100% 不丢。
+
+### 🛡️ 基于 iptables & ipset 的宿主机级地理围栏防火墙 (`cc-firewall-guard`)
+*   **动态网络层物理拦截**：自研系统级网络安全守护进程 `cc-firewall-guard`，周期性同步配置并热更新内核 IP 集合，对非法扫描、境外盗打流量执行宿主机级别的秒级物理拦截（内核直接 `DROP`），保障 SIP（`5060`）和 WebSocket（`5066`）端口的高安全性。
+*   **黑白名单双模切换**：
+    - **黑名单模式**：封禁管理员选定的一个或多个高风险外部国家/地区（基于 ISO 标准二字码，如 `US`, `DE` 等）。
+    - **“仅放行国内 IP”强力白名单模式**：开启后，仅放行中国大陆（`CN`）以及内网私有网段（`127.0.0.1/8`、`10.0.0.0/8`、`172.16.0.0/12`、`192.168.0.0/16`、`169.254.0.0/16`、`224.0.0.0/4`），其他境外所有流量直接在网络层 `DROP`。该模式下仅同步 `CN` 网段，避免下载和同步多国大文件，大幅缩短内核匹配链路，极大提高防火墙过滤性能。
+*   **高平滑热更新与安全保障**：基于原子级的 `ipset swap`（交换机制），先在临时 ipset 集合中构建全量网段，再一键原子化交换到运行集，保证在规则热更新期间话务连接零丢包。白名单模式强制内置 RFC 1918 私有地址空间，杜绝因配置失误导致管理会话断连被锁（Fail-Safe 锁闭安全保护）。
+*   **无操作开发自省 (Dry-Run Mode)**：支持环境自适应检测。在 macOS 开发环境下自动进入 no-op 模拟运行模式，不修改系统防火墙规则，保持本地测试库纯净；在 Linux 生产环境下通过 `journalctl` 实时抓取包含 `SIP_BLOCK:` 前缀的内核拦截日志，反查地理位置后上报 Webhook，在管理后台的“拦截日志查询与审计”面板形成闭环审计流。
+*   **前端交互与 IP 归属可视化**：在控制台的安全中心提供独立的 IP 归属分析卡片，将国家 ISO 二字码实时转化为极富视觉质感的国家/地区指示国旗 Emoji，并能根据当前的黑/白名单开关设置，预判目标 IP 在当前系统中的通过状态（放行、封禁、私有内网放行）。
+
+#### 🛡️ 国别 IP 防火墙守护进程网络流与审计拓扑
+```mermaid
+flowchart TD
+    subgraph "控制台管理 (cc-console)"
+        UI[前端配置界面] -->|修改规则| DB[(MySQL 配置表)]
+        DB -->|启动同步| Redis[(Redis 极热缓存)]
+        UI -->|IP归属地查询| API[IP 归属查询 API]
+    end
+
+    subgraph "防火墙守护进程 (cc-firewall-guard)"
+        Sync[配置同步轮询器] -->|每10s读取开关与名单| Redis
+        Sync -->|检测配置变更| Load[加载/下载国别网段]
+        Load -->|仅放行国内| IPDenyCN[ipdeny.com 下载 cn.zone]
+        Load -->|指定黑名单地区| IPDenyList[ipdeny.com 下载 xx.zone]
+        
+        IPDenyCN -->|合并私有网段 RFC 1918| Rules[动态计算内核规则]
+        IPDenyList --> Rules
+        
+        Rules -->|ipset restore / swap| IPSet{ipset 集合}
+        Rules -->|iptables -I INPUT| IPTables{iptables 拦截规则}
+        
+        Scraper[内核拦截日志抓取器] -->|监听 journalctl 日志流| KernelLog[过滤前缀 SIP_BLOCK:]
+        KernelLog -->|提取源 IP| Lookup[本地网段缓存匹配]
+        Lookup -->|上报 Webhook| Webhook[cti/kamailio/ipblock/log]
+    end
+
+    subgraph "物理网络层"
+        Packet[外部连接 SIP 5060 / WS 5066] --> IPTables
+        IPTables -->|匹配 ipset 集合| DROP[网络丢弃 Packet & 记录 Syslog]
+    end
+
+    Webhook -->|写入记录| DB
+```
+
+---
 
 ---
 
@@ -310,33 +360,53 @@ cti:
    go build -o bin/cc-console ./cmd/cc-console
    go build -o bin/cc-call ./cmd/cc-call
    go build -o bin/cc-worker ./cmd/cc-worker
+   go build -o bin/cc-firewall-guard ./cmd/cc-firewall-guard
    ```
 2. 拷贝 `configs/default.yaml` 模板为 `configs/production.yaml`。
 3. 参考 **4.2 配置文件修改指南** 修改 `configs/production.yaml` 并填入生产物理凭证与优化参数。
 
 #### 第五步：守护进程拉起与高可用自愈
-1. 强烈推荐使用 `Systemd` 编写各微服务的守护进程配置文件。以 `cc-call` 为例，创建 `/etc/systemd/system/cc-call.service`：
-   ```ini
-   [Unit]
-   Description=Yunshu CallCenter Telephony Engine
-   After=network.target
+1. 强烈推荐使用 `Systemd` 编写各微服务的守护进程配置文件。以 `cc-call` 和 `cc-firewall-guard` 为例：
+   - 创建 `/etc/systemd/system/cc-call.service`：
+     ```ini
+     [Unit]
+     Description=Yunshu CallCenter Telephony Engine
+     After=network.target
 
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/var/yunshu
-   ExecStart=/var/yunshu/bin/cc-call -config /var/yunshu/configs/production.yaml
-   Restart=always
-   RestartSec=5
-   LimitNOFILE=65535
+     [Service]
+     Type=simple
+     User=root
+     WorkingDirectory=/var/yunshu
+     ExecStart=/var/yunshu/bin/cc-call -config /var/yunshu/configs/production.yaml
+     Restart=always
+     RestartSec=5
+     LimitNOFILE=65535
 
-   [Install]
-   WantedBy=multi-user.target
-   ```
+     [Install]
+     WantedBy=multi-user.target
+     ```
+   - 创建 `/etc/systemd/system/cc-firewall-guard.service` (防火墙守护进程必须以 root 用户运行)：
+     ```ini
+     [Unit]
+     Description=Yunshu CallCenter IP Geofencing Firewall Guard Daemon
+     After=network.target
+
+     [Service]
+     Type=simple
+     User=root
+     WorkingDirectory=/var/yunshu
+     ExecStart=/var/yunshu/bin/cc-firewall-guard -config /var/yunshu/configs/production.yaml
+     Restart=always
+     RestartSec=5
+     LimitNOFILE=65535
+
+     [Install]
+     WantedBy=multi-user.target
+     ```
 2. 执行 `systemctl daemon-reload`，启用并一键拉起各微服务守护进程：
    ```bash
-   systemctl enable cc-call cc-worker cc-console cc-edge
-   systemctl start cc-call cc-worker cc-console cc-edge
+   systemctl enable cc-call cc-worker cc-console cc-edge cc-firewall-guard
+   systemctl start cc-call cc-worker cc-console cc-edge cc-firewall-guard
    ```
 
 ---
@@ -473,6 +543,7 @@ cti:
 │   ├── cc-console/             # 运营管理及商户后台服务入口
 │   ├── cc-worker/              # 异步分布式计费与流处理器入口
 │   ├── cc-edge/                # 边缘通信鉴权网关入口
+│   ├── cc-firewall-guard/      # 物理 IP 地理围栏防火墙守护进程入口
 │   ├── cc-all/                 # All-in-One 一键合并启动入口
 │   └── update-agents/          # 系统契约自动生成工具
 ├── internal/
@@ -527,7 +598,8 @@ go run ./cmd/cc-all -config configs/local.yaml
 *   ✅ **多厂商统一适配器**：完美接入 DeepSeek、OpenAI、腾讯混元、阿里通义千问、火山引擎豆包物理大模型。
 *   ✅ **严格去仿真化（Fail-Closed 范式）**：全面移除仿真与 mock 退化兜底，保障生产账务与话务的严谨可靠。
 *   ✅ **运行时就绪自省**：设计运行时功能检测接口（如 `IsAsrImplemented`），并在前端 UI 中自动置灰禁用未实现厂商。
-*   ✅ **声明式 Schema 动态小卡片表单**：根据所选的 ASR/TTS/LLM 厂商，动态渲染其专属的 AppKey 凭证与音色下拉。
+*   ✅ **声明式 Schema 动态小卡片表单**：根据所选 of ASR/TTS/LLM 厂商，动态渲染其专属的 AppKey 凭证与音色下拉。
+*   ✅ **内核级网络安全与地理围栏防火墙守护进程 (`cc-firewall-guard`)**：物理 iptables/ipset 动态热更新拦截，支持“仅放行国内 IP”强力白名单模式，RFC 1918 私有网段自动放行安全保障与 journalctl 拦截流自动审计上报。
 
 ### 第二阶段：高并发选号策略与分布式事件租约 [进行中]
 *   ⏳ **高并发逐个试选选号系统**：基于 Redis 规则链的并发控制，在批量呼起时对候选号码进行逐个试选直至分配成功。

@@ -72,14 +72,14 @@ func TestOutboxDispatcherMarksFailedOnHandlerError(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("expected no successful dispatch, got %d", count)
 	}
-	pending, err := store.Pending(ctx, 10, now.Add(30*time.Second))
+	pending, err := store.Pending(ctx, 10, now.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pending) != 0 {
-		t.Fatalf("entry should wait for retry")
+		t.Fatalf("entry should wait for retry (5s backoff, not available at 2s)")
 	}
-	pending, err = store.Pending(ctx, 10, now.Add(2*time.Minute))
+	pending, err = store.Pending(ctx, 10, now.Add(6*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

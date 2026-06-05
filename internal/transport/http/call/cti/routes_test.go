@@ -314,6 +314,22 @@ func (testBatchRepository) CompleteBatchTaskIfDrained(context.Context, int, time
 	return false, nil
 }
 
+func (testBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int) (int, string, error) {
+	return 0, "", nil
+}
+
+func (testBatchRepository) GetOnlineAgents(context.Context, int) ([]int, error) {
+	return []int{1}, nil
+}
+
+func (testBatchRepository) GetActiveCallCount(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (testBatchRepository) GetAgentSkillGroups(context.Context, int) ([]int, error) {
+	return []int{1}, nil
+}
+
 type testCandidateSource struct{}
 
 func (testCandidateSource) CandidatesForUser(context.Context, int) ([]cti.NumberCandidate, error) {

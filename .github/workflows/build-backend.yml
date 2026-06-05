@@ -47,76 +47,123 @@ jobs:
           for service in cc-edge cc-console cc-call cc-worker cc-all; do
             GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/${service}-linux-amd64 ./cmd/${service}
             GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o bin/${service}-darwin-arm64 ./cmd/${service}
+            GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o bin/${service}-windows-amd64.exe ./cmd/${service}
           done
 
       - name: Build Frontend Dashboard
         run: cd web && npm run build
 
       - name: Archive Frontend Dist
-        run: tar -czf bin/web-dist.tar.gz -C web dist
+        run: tar -cf bin/web-dist.tar -C web dist
 
       - name: Upload Web Dist
         uses: actions/upload-artifact@v4
         with:
           name: web-dist
-          path: bin/web-dist.tar.gz
+          path: bin/web-dist.tar
+          compression-level: 0
 
       - name: Upload cc-edge-linux-amd64
         uses: actions/upload-artifact@v4
         with:
           name: cc-edge-linux-amd64
           path: bin/cc-edge-linux-amd64
+          compression-level: 0
 
       - name: Upload cc-edge-darwin-arm64
         uses: actions/upload-artifact@v4
         with:
           name: cc-edge-darwin-arm64
           path: bin/cc-edge-darwin-arm64
+          compression-level: 0
+
+      - name: Upload cc-edge-windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-edge-windows-amd64
+          path: bin/cc-edge-windows-amd64.exe
+          compression-level: 0
 
       - name: Upload cc-console-linux-amd64
         uses: actions/upload-artifact@v4
         with:
           name: cc-console-linux-amd64
           path: bin/cc-console-linux-amd64
+          compression-level: 0
 
       - name: Upload cc-console-darwin-arm64
         uses: actions/upload-artifact@v4
         with:
           name: cc-console-darwin-arm64
           path: bin/cc-console-darwin-arm64
+          compression-level: 0
+
+      - name: Upload cc-console-windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-console-windows-amd64
+          path: bin/cc-console-windows-amd64.exe
+          compression-level: 0
 
       - name: Upload cc-call-linux-amd64
         uses: actions/upload-artifact@v4
         with:
           name: cc-call-linux-amd64
           path: bin/cc-call-linux-amd64
+          compression-level: 0
 
       - name: Upload cc-call-darwin-arm64
         uses: actions/upload-artifact@v4
         with:
           name: cc-call-darwin-arm64
           path: bin/cc-call-darwin-arm64
+          compression-level: 0
+
+      - name: Upload cc-call-windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-call-windows-amd64
+          path: bin/cc-call-windows-amd64.exe
+          compression-level: 0
 
       - name: Upload cc-worker-linux-amd64
         uses: actions/upload-artifact@v4
         with:
           name: cc-worker-linux-amd64
           path: bin/cc-worker-linux-amd64
+          compression-level: 0
 
       - name: Upload cc-worker-darwin-arm64
         uses: actions/upload-artifact@v4
         with:
           name: cc-worker-darwin-arm64
           path: bin/cc-worker-darwin-arm64
+          compression-level: 0
+
+      - name: Upload cc-worker-windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-worker-windows-amd64
+          path: bin/cc-worker-windows-amd64.exe
+          compression-level: 0
 
       - name: Upload cc-all-linux-amd64
         uses: actions/upload-artifact@v4
         with:
           name: cc-all-linux-amd64
           path: bin/cc-all-linux-amd64
+          compression-level: 0
 
       - name: Upload cc-all-darwin-arm64
         uses: actions/upload-artifact@v4
         with:
           name: cc-all-darwin-arm64
           path: bin/cc-all-darwin-arm64
+          compression-level: 0
+
+      - name: Upload cc-all-windows-amd64
+        uses: actions/upload-artifact@v4
+        with:
+          name: cc-all-windows-amd64
+          path: bin/cc-all-windows-amd64.exe
+          compression-level: 0

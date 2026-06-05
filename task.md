@@ -1,44 +1,95 @@
-# 任务进度表 - 云枢多厂商 AI 引擎解耦与高可扩展架构重构
+# 私有化部署授权管理模块及并发限制任务卡
 
-- [x] 后端物理与高保真仿真驱动补齐与可扩展架构
-  - [x] 新建 `internal/domain/callflow/deepseek.go` 实现物理 DeepSeek 接入与去仿真化
-  - [x] 完善 `internal/domain/callflow/ali.go` 实现阿里云 ASR、TTS、LLM 物理接入，根据 `aliVoice` 参数（如 `xiaoyun`, `xiaoyu`, `xiaoting`）调整音色，无凭证时严格报错拒绝仿真退避
-  - [x] 完善 `internal/domain/callflow/openai.go` 实现 OpenAI Whisper、TTS、ChatGPT 物理 HTTP 接入，根据 `openaiVoice` 指定音色（`alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`），无凭证严格物理报错
-  - [x] 完善 `internal/domain/callflow/tencent.go` 实现腾讯云 ASR、TTS、混元大模型物理接入，根据 `tencentVoice`（如 `101001`, `101002`, `101016`）调整音色，完全移除仿真与 mock 退化兜底
-- [x] 话务运行时与演示沙盒端点级联优化
-  - [x] 修改 `internal/domain/callflow/ai_engine.go` 优化 LLM 发起逻辑，如果云端大模型接口请求报错或返回空内容，系统坚决拒绝仿真退避，直接严格报错；完全物理删除 `mockLLMGenerate` 方法，彻底清除仿真印记
-  - [x] 修改 `internal/transport/http/console/operate/ai_model_flow_routes.go` 中的物理演示端点 `/merchant/ai-model-flow/demo-voice`，动态解析前端传来的多厂商 asrProvider, ttsProvider, llmProvider 及各自的配置，自适应混合级联路由
-- [x] 前端动态 Schema 属性配置与 UI 面板升级 (高可扩展性设计)
-  - [x] 升级 `web/src/features/business/ai-model-flow/designer.tsx`，设计厂商专属字段与音色的声明式元数据配置表
-  - [x] 升级 Start 节点参数表单，由静态元素渲染改为由 Provider 驱动的声明式 Schema 动态表单组件，支持多厂商 Key 及特有音色下拉展示
-  - [x] 升级“快捷配置填充”的反填策略以及麦克风录音沙盒的参数传递，将所选厂商的参数动态拼装请求后端 `/demo-voice`
-- [x] 大模型配置与前端厂商类型选择终极配置化优化 (自省注册表与精细化能力联动)
-  - [x] 后端支持 `/merchant/ai-model-flow/providers` 动态自省 API，作为全站支持大模型厂商的单一真实源（Source of Truth）
-  - [x] 在 `internal/domain/callflow/ai_engine_providers.go` 中，设计 `IsAsrImplemented`、`IsTtsImplemented` 和 `IsLlmImplemented` 三大功能追踪函数，分别动态自省底层各多态 Registry 注册表的就绪状态
-  - [x] 在 [ai_model_flow_routes.go](file:///Users/tangyu/Projects/yunshu/internal/transport/http/console/operate/ai_model_flow_routes.go) 中重构接口响应，以优雅的切片遍历结合运行时自省函数，动态且非硬编码形式渲染每一个厂商在 ASR, TTS, LLM 等维度的物理就绪状态
-  - [x] 升级前端 `AiProviderItem` 接口类型并打通 React 视图端 API
-  - [x] 升级大模型全局配置表单与表格列渲染，根据 `supportLlm`（大模型决断能力）实现置灰禁用及 Tag 状态变灰联动
-  - [x] 升级流程画布 Start 节点的 **ASR Provider** (ASR 厂商)、**TTS Provider** (TTS 厂商)、**LLM Provider** (大模型服务商) 下拉框，彻底消灭写死选项，完美根据已注册能力自适应置灰禁用
-- [x] 大模型配置 Modal 表单动态自适应卡片设计 (ASR/TTS 字段完美切换)
-  - [x] 在 `page.tsx` 的“新增/编辑大模型配置”表单中引入 `shouldUpdate` 监听器，依据选定的“大模型服务商”类型自适应展现其专属的配置小卡片区
-  - [x] 当选择 **☁️ 阿里通义千问 Qwen** 时，动态显示“阿里云 ASR/TTS 语音设置 (可选)”，并渲染阿里专属“阿里语音 AppKey”、“阿里语音 Access Token”以及“阿里发音人音色”
-  - [x] 当选择 **🐧 腾讯混元 Hunyuan** 时，显示腾讯云专属“腾讯云 SecretId/SecretKey”与腾讯专属音色列表
-  - [x] 当选择 **🌋 火山引擎“豆包”大模型** 时，展示火山专属 AppId、Cluster、Token 及豆包音色
-  - [x] 当选择 **🌐 OpenAI 兼容接口** 时，展示 OpenAI TTS 明星发音人音色，并支持直接使用上方的通用 API Key 物理鉴权
-  - [x] 当选择 **🐳 DeepSeek API** 时，展示精美的“DeepSeek 厂商专属提示”块，提示操作员该厂商主要专注于大语言模型推理，ASR/TTS 可在画布中级联绑定其它语音厂商
-- [x] 【新增】彻底删除“自研仿真模拟大模型 (MOCK)”
-  - [x] 从后端 `/merchant/ai-model-flow/providers` 接口中，物理删除了 `"mock"` 服务商项，保持生产线只选用物理商用级引擎
-  - [x] 清理了前端配置管理 `page.tsx` 和连线画布 `designer.tsx` 里的 fallback 常量 `DEFAULT_PROVIDERS` 中的 mock 属性
-  - [x] 从新增大模型配置的 Form `shouldUpdate` 自适应卡片列表里彻底删除了 `provider === 'mock'` 的卡片块
-  - [x] 清理了 `designer.tsx` 中 `TTS_VOICES_BY_PROVIDER` 里的 `mock` 静态仿真音色项
-- [x] 【新增】全站文档国际化升级与 FreeSWITCH 高性能物理部署架构指导说明
-  - [x] 将根目录默认的 `README.md` 重构为全英文专业版，全面抹除 `Self-Driving Sandbox` 等仿真自驾驶表述
-  - [x] 新建 `README_zh.md` 为全新中文版说明文档，中英文 README 顶部各自提供一键式无缝互通切换锚点
-  - [x] 在中英文 README 中分别新增**高性能生产部署建议与具体工作流（Deployment Recommendations & Workflow）**，极其深刻地向架构师说明了哪些微服务需要与 FreeSWITCH 部署在同一服务器上（如 TTS 缓存物理共享、`cc-worker` 录音文件读写转储权限、ESL 控制信令的 <1ms 超低延迟内网交互，以及 `mod_audio_stream` 旁路推流 WebSocket 网关）
-- [x] 全量回归测试与格式化
-  - [x] 运行 `go test ./...` 确保后端全仓 100% 绿灯回归，重构 fallback 测试以适应物理严格报错
-  - [x] 运行 `go vet ./...` 确保后端静态语法与未定义导入完全通过
-  - [x] 运行 `npx tsc --noEmit` 确保前端流程画布全量静态编译零警告
-  - [x] 运行 `gofmt -w .` 确保 Go 后端格式化完美
-  - [x] 代码全面提交 Git 仓库
-  - [x] 交付 `walkthrough.md` 总结交付物
+- `[x]` **第 1 步：权限与路由定义对齐**
+  - `[x]` 在 [internal/contracts/permissions.go](file:///Users/tangyu/Projects/yunshu/internal/contracts/permissions.go) 中添加授权读取和写入的 PermissionCode。
+  - `[x]` 在 `PermissionRules` 映射中增加相应的接口前缀 and 方法定义，支持自动播种数据库。
+- `[x]` **第 2 步：授权服务核心逻辑实现**
+  - `[x]` 在 [internal/domain/operate/license.go](file:///Users/tangyu/Projects/yunshu/internal/domain/operate/license.go) 中编写指纹采集与确定性部署 ID 生成。
+  - `[x]` 实现基于非对称加密公钥的证书内容验证、时间有效性及防回拨（基于 `cc_sys_config` 水位线时间戳）逻辑。
+  - `[x]` 实现业务限制（并发数超限校验）工具函数。
+- `[x]` **第 3 步：控制台 API 接口与文件下载开发**
+  - `[x]` 在 [internal/transport/http/console/operate/license_routes.go](file:///Users/tangyu/Projects/yunshu/internal/transport/http/console/operate/license_routes.go) 中实现 Gin 路由处理函数。
+  - `[x]` 支持下载指纹信息 `yunshu_register_info.json`。
+  - `[x]` 支持下载当前激活证书、上传上传新激活证书以及查询授权详情。
+- `[x]` **第 4 步：服务启动集成与日志输出**
+  - `[x]` 修改 [internal/app/server.go](file:///Users/tangyu/Projects/yunshu/internal/app/server.go)，在启动时计算部署 ID，并通过高亮中文日志输出。
+  - `[x]` 装载并注册 License 管理路由。
+- `[x]` **第 5 步：单元测试编写与自动化构建验证**
+  - `[x]` 编写 [internal/domain/operate/license_test.go](file:///Users/tangyu/Projects/yunshu/internal/domain/operate/license_test.go)。
+  - `[x]` 执行 go test 与 go vet，确保障碍已完全排除，系统成功编译运行。
+- `[x]` **第 6 步：扩展会话存储，实现活动会话数统计**
+  - `[x]` 在 [internal/domain/esl/session.go](file:///Users/tangyu/Projects/yunshu/internal/domain/esl/session.go) 中为 `SessionStore` 新增 `CountActive(ctx context.Context) (int, error)` 接口。
+  - `[x]` 在 `MemorySessionStore` 中实现 `CountActive` 方法。
+- `[x]` **第 7 步：在起呼服务中增加并发限制校验**
+  - `[x]` 在 [internal/domain/esl/originate.go](file:///Users/tangyu/Projects/yunshu/internal/domain/esl/originate.go) 中定义 `ConcurrencyLimiter` 接口。
+  - `[x]` 在 `OriginateService` 中引入 `Limiter` 字段 and `checkLicenseConcurrency` 辅助函数。
+  - `[x]` 在 `StartAPIOutbound`, `StartBatchOutbound`, `StartDialpadCustomerOutbound`, `StartInboundAgentOutbound` 执行前调用并发校验，超限时拒绝起呼。
+- `[x]` **第 8 步：在运行时装配中注入授权管理服务**
+  - `[x]` 修改 [internal/app/call_runtime.go](file:///Users/tangyu/Projects/yunshu/internal/app/call_runtime.go)，在 `NewCallRuntimeWithConfig` 中初始化 `LicenseService` 并将其作为 `Limiter` 注入到 `OriginateService`。
+- `[x]` **第 9 步：自动化单元测试编写与全面构建验证**
+  - `[x]` 在 [internal/domain/esl/originate_test.go](file:///Users/tangyu/Projects/yunshu/internal/domain/esl/originate_test.go) 中编写并发限制测试用例，包含呼叫拦截与会话去重逻辑。
+  - `[x]` 运行所有测试并确保全部通过。
+- `[x]` **第 10 步：呼叫时间段网格选择器样式与交互重构**
+  - `[x]` 重构 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/business/batch-call-task/page.tsx) 中的 `TimePeriodSelector` 样式，移除卡片样式，改为极简水平 flex 布局。
+  - `[x]` 将时间刻度重写为标准的 `0:00 - 23:00`。
+  - `[x]` 编写动态连续区间提取算法，实现悬浮胶囊气泡居中显示（`00:00 - 24:00`）。
+  - `[x]` 引入 `initialGrid` 选区暂存状态，支持框选撤销与回退交互。
+  - `[x]` 将图例、小提示及快速操作项（整周全天、工作日、清空）一体化收拢。
+  - `[x]` 拓宽任务模态框宽度至 `960px` 并完成编译部署验证。
+- `[x]` **第 11 步：登录页与总览看板（Dashboard）视觉深度美化**
+  - `[x]` 重新设计 [login/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/auth/login/page.tsx)，引入多重模糊发光气泡背景与毛玻璃微棱边框。
+  - `[x]` 在登录页设计渐变拓扑图 of 3D SVG Logo，微调输入框高度与提交按钮渐变阴影。
+  - `[x]` 重构 [dashboard/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/dashboard/page.tsx) 各类统计卡片，加入顶部指示渐变色条与圆角立体卡片图标。
+  - `[x]` 升级 `ChartWrap` 卡片标题头，新增垂直渐变彩色柱状指示条，提升视觉厚重感。
+  - `[x]` 对折线、柱状、饼图进行高对比度大屏调色（线宽 3、隐藏圆点、面积图发光渐变、虚线坐标轴与深色半透明毛玻璃 Tooltip），确保美观度与易用性。
+  - `[x]` 优化流水监控 Timeline 和资源负载 board 布局，并通过 `npm run build` 全量测试验证。
+- `[x]` **第 12 步：整体框架美化、滚动条自适应及 Card 警告清理**
+  - `[x]` 修改 [AdminLayout.tsx](file:///Users/tangyu/Projects/yunshu/web/src/layout/AdminLayout.tsx)，支持侧边栏 Sider 及内置 Menu 主题颜色 and 底色在浅色/深色模式下自适应过渡。
+  - `[x]` 在 [index.css](file:///Users/tangyu/Projects/yunshu/web/src/styles/index.css) 中定义全局 Webkit 细致胶囊滚动条（`width: 6px`），支持自动感知暗黑/浅色主题。
+  - `[x]` 编写自动化脚本将全站所有 12 个 `.tsx` 页面子模块中的 `<Card bordered={false}>` 修正替换为最新的 `<Card variant="borderless">`，消除控制台 Deprecated 警告并验证构建成功。
+- `[x]` **第 13 步：下线商户端套餐自主选择与绑定功能及系统公告重置**
+  - `[x]` 移除商户端套餐计费账单页 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/merchant/billing/page.tsx) 中的“配置套餐”按钮和弹窗。
+  - `[x]` 移除后端 [permission_routes.go](file:///Users/tangyu/Projects/yunshu/internal/transport/http/console/operate/permission_routes.go) 中的 `/merchant/billing/rate/bind` 接口。
+  - `[x]` 移除或修改 [permissions.go](file:///Users/tangyu/Projects/yunshu/internal/contracts/permissions.go) 中的权限映射及 `PermissionMerchantBillingWrite`。
+  - `[x]` 移除 [permission.go](file:///Users/tangyu/Projects/yunshu/internal/infra/system/permission.go) 播种数据中的废弃权限码。
+  - `[x]` 在 [auth.ts](file:///Users/tangyu/Projects/yunshu/web/src/store/auth.ts) 中增加登录和登出时清除 `dismiss_trial_alert` 公告缓存状态的逻辑。
+  - `[x]` 运行 `go run ./cmd/update-agents` 并进行全量编译打包验证。
+- `[x]` **第 14 步：运营管理商户配置页面新增快捷充值操作**
+  - `[x]` 在 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/merchant/merchant/page.tsx) 中新增充值弹窗状态及 `rechargeMutation` 钩子。
+  - `[x]` 在商户列表的操作列中，增加“充值”快捷按钮，绑定 `operate:billing:write` 权限控制。
+  - `[x]` 新增充值 Modal，并测试前端生产打包编译无异常。
+- `[x]` **第 15 步：登录页支持暗黑与亮色切换及移除冗余的主题 Select 下拉**
+  - `[x]` 在 [login/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/auth/login/page.tsx) 中引入 `useUiStore` 进行主题状态绑定。
+  - `[x]` 为登录页增加绝对定位的主题切换按钮，支持流畅的主题切换及自适应亮/暗色背景。
+  - `[x]` 移除 [AdminLayout.tsx](file:///Users/tangyu/Projects/yunshu/web/src/layout/AdminLayout.tsx) 顶部导航栏冗余的“浅色/深色主题”文本下拉选择框，保留清爽 of Sun/Moon 图标按钮。
+  - `[x]` 执行前端 `npm run build` 打包验证。
+- `[x]` **第 16 步：行政区划数据库播种与多级级联选择器升级**
+  - `[x]` 在 [seed_areas/main.go](file:///Users/tangyu/Projects/yunshu/cmd/seed_areas/main.go) 中编写并执行数据库区域代码填充逻辑，播种 381 条全国行政区划记录，解决选择器空白的问题。
+  - `[x]` 将 [risk-control/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/security/risk-control/page.tsx) 中的扁平 Select 选择框升级为 `Cascader` 级联选择器，实现 Province -> City 的联动交互和级联检索。
+  - `[x]` 适配编辑与提交的数据绑定结构（支持从路径数组到单一编码的映射转换）。
+  - `[x]` 执行前端 `npm run build` 确保没有 TypeScript 编译错误。
+  - `[x]` 重新启动所有后台微服务（`make restart-all`）和前端开发服务（`make web-dev`）。
+- `[x]` **第 17 步：商户平台技能组与号码组表单优化，以及号码池网关显示消除**
+  - `[x]` 在 [pool/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/resource/pool/page.tsx) 中移除了号码池表格中的“关联网关”列及 Modal 表单中的网关绑定字段，并在编辑时安全地维护了已有数据。
+  - `[x]` 在 [skill-group/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/business/skill-group/page.tsx) 中隐藏了 Modal 表单中的“商户 ID”输入框并移除了表格中冗余的“商户”列，同时在绑定号码弹窗中新增了“归属号码池”信息。
+  - `[x]` 在 [phone-group/page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/business/phone-group/page.tsx) 中隐藏了“商户 ID”输入，修复了绑定号码的 API 查询参数以获取商户端号码列表，同时在表格中新增了“归属号码池”信息。
+  - `[x]` 运行前端 `npm run build` 确保完美生产打包，并运行 `go test ./...` 确保后端全部用例通过。
+- `[x]` **第 18 步：呼叫信令链路追踪底层与 API 开发**
+  - `[x]` 在 [kamailio.cfg](file:///Users/tangyu/Projects/yunshu/configs/kamailio/kamailio.cfg) 中加载并配置 `ndb_redis.so`，编写并挂载 `SIP_TRACE` 路由。
+  - `[x]` 修改 [call_record.go](file:///Users/tangyu/Projects/yunshu/internal/domain/operate/call_record.go) 引入 Redis 依赖，编写 `SipTrace` 查询与反序列化逻辑。
+  - `[x]` 修改 [server.go](file:///Users/tangyu/Projects/yunshu/internal/app/server.go) 在初始化 `callRecordService` 时注入 `redisClient`。
+  - `[x]` 修改 [call_record_routes.go](file:///Users/tangyu/Projects/yunshu/internal/transport/http/console/operate/call_record_routes.go) 注册 `/merchant/call-record/sip-trace/:callId` REST 接口。
+- `[x]` **第 19 步：前端信令时序图可视化开发**
+  - `[x]` 在 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/business/call-record/page.tsx) 中新增信令时序抽屉与时序图展示。
+  - `[x]` 编写时序图核心逻辑，使用 React + SVG 绘制生命线和信令横向箭头，并在右侧展示原始 SIP 头信息及 SDP。
+- `[x]` **第 20 步：系统构建、单元测试与流程验证**
+  - `[x]` 运行 Go 全量测试与 `npm run build` 确保前后端编译无误。
+  - `[x]` 重启全部微服务，并打包前端代码。
+- `[x]` **第 21 步：全局 SIP 追踪开关 (ON/OFF Switch) 支持**
+  - `[x]` 后端在 `ProxyConfig` 和 `ProxyConfigManagementService` 中引入 `siptrace.enable` 键与 Redis 键 `siptrace:enable` 状态同步。
+  - `[x]` 系统启动时由 Go 自动调用 `SyncToRedis` 从数据库向 Redis 同步最新开关状态。
+  - `[x]` 运营端代理网络配置页 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/system/proxy-config/page.tsx) 增加开关组件并联动修改逻辑。
+  - `[x]` Kamailio 配置 [kamailio.cfg](file:///Users/tangyu/Projects/yunshu/configs/kamailio/kamailio.cfg) 的 `SIP_TRACE` 子路由在追踪前检查 Redis 开关，达成零开销旁路控制。
+
+
+

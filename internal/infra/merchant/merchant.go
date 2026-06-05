@@ -2,6 +2,8 @@ package merchant
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"sort"
@@ -176,11 +178,17 @@ func (r *MerchantRepository) Save(ctx context.Context, merchant operate.Merchant
 					maxNum = parsed
 				}
 			}
+			sipDomain := model.SipDomain
+			if sipDomain == "" {
+				sipDomain = "127.0.0.1"
+			}
 			for i := 0; i < diff; i++ {
 				nextNum := maxNum + 1 + int64(i)
+				extNum := strconv.FormatInt(nextNum, 10)
+				randomPassword := operate.GenerateRandomPassword(8)
 				newExt := ExtensionModel{
-					ExtensionNumber: strconv.FormatInt(nextNum, 10),
-					Password:        "123456", // 默认注册密码
+					ExtensionNumber: extNum,
+					Password:        randomPassword,
 					MerchantID:      model.ID,
 					UserID:          0, // 初始未分配用户
 					Enable:          true,
@@ -188,6 +196,9 @@ func (r *MerchantRepository) Save(ctx context.Context, merchant operate.Merchant
 					DelFlag:         false,
 					CreatedTime:     now,
 					UpdatedTime:     now,
+					SipDomain:       sipDomain,
+					HA1:             calculateHA1(extNum, sipDomain, randomPassword),
+					HA1b:            calculateHA1b(extNum, sipDomain, randomPassword),
 				}
 				if err := tx.Create(&newExt).Error; err != nil {
 					r.logger().Error("自动生成分机失败", "merchantId", model.ID, "extensionNumber", newExt.ExtensionNumber, "error", err.Error())
@@ -241,6 +252,31 @@ func (r *MerchantRepository) Save(ctx context.Context, merchant operate.Merchant
 			}
 			r.logger().Info("商户坐席分机缩减成功", "merchantId", model.ID, "deletedCount", len(deleteIDs))
 		}
+
+		// 级联同步更新现存的所有分机的域名和鉴权哈希
+		var existingExts []ExtensionModel
+		if err := tx.Where("merchant_id = ? AND del_flag = ?", model.ID, false).Find(&existingExts).Error; err == nil {
+			sipDomain := model.SipDomain
+			if sipDomain == "" {
+				sipDomain = "127.0.0.1"
+			}
+			for i := range existingExts {
+				ext := &existingExts[i]
+				targetHA1 := calculateHA1(ext.ExtensionNumber, sipDomain, ext.Password)
+				targetHA1b := calculateHA1b(ext.ExtensionNumber, sipDomain, ext.Password)
+				if ext.SipDomain != sipDomain || ext.HA1 != targetHA1 || ext.HA1b != targetHA1b {
+					ext.SipDomain = sipDomain
+					ext.HA1 = targetHA1
+					ext.HA1b = targetHA1b
+					ext.UpdatedTime = now
+					if err := tx.Save(ext).Error; err != nil {
+						r.logger().Error("级联更新分机域名及哈希失败", "merchantId", model.ID, "extensionNumber", ext.ExtensionNumber, "error", err.Error())
+						return err
+					}
+				}
+			}
+		}
+
 		return nil
 	}); err != nil {
 		r.logger().Error("保存商户事务执行异常", "merchantName", merchant.Name, "error", err.Error())
@@ -250,21 +286,48 @@ func (r *MerchantRepository) Save(ctx context.Context, merchant operate.Merchant
 	return merchantFromModel(model, merchant.RateID), nil
 }
 
-// Delete 逻辑删除商户。
+// Delete 逻辑删除商户，并级联逻辑删除该商户底下的控制台账号。
 func (r *MerchantRepository) Delete(ctx context.Context, ids []int) error {
-	r.logger().Info("开始逻辑删除商户", "merchantIds", ids)
-	result := r.DB.WithContext(ctx).Model(&MerchantModel{}).
-		Where("id IN ?", ids).
-		Updates(map[string]any{"del_flag": true, "updated_time": time.Now().UTC()})
-	if result.Error != nil {
-		r.logger().Error("逻辑删除商户数据库更新异常", "merchantIds", ids, "error", result.Error.Error())
-		return result.Error
+	r.logger().Info("开始逻辑删除商户及级联删除控制台账号", "merchantIds", ids)
+	if len(ids) == 0 {
+		return nil
 	}
-	if result.RowsAffected == 0 {
-		r.logger().Warn("逻辑删除商户失败：未匹配到有效记录", "merchantIds", ids)
-		return operate.ErrMerchantNotFound
+	var merchantIDStrs []string
+	for _, id := range ids {
+		merchantIDStrs = append(merchantIDStrs, strconv.Itoa(id))
 	}
-	r.logger().Info("逻辑删除商户成功", "merchantIds", ids, "rowsAffected", result.RowsAffected)
+	now := time.Now().UTC()
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 1. 逻辑删除商户自身
+		result := tx.Model(&MerchantModel{}).
+			Where("id IN ?", ids).
+			Updates(map[string]any{"del_flag": true, "updated_time": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return operate.ErrMerchantNotFound
+		}
+
+		// 2. 级联逻辑删除商户底下的控制台账号
+		if err := tx.Table("cc_sys_account").
+			Where("merchant_id IN ? AND del_flag = ?", merchantIDStrs, false).
+			Updates(map[string]any{
+				"del_flag":     true,
+				"updated_time": now,
+				"deleted_time": &now,
+			}).Error; err != nil {
+			r.logger().Error("级联逻辑删除商户控制台账号失败", "merchantIds", ids, "error", err.Error())
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		r.logger().Error("逻辑删除商户事务执行异常", "merchantIds", ids, "error", err.Error())
+		return err
+	}
+	r.logger().Info("逻辑删除商户及级联删除控制台账号成功", "merchantIds", ids)
 	return nil
 }
 
@@ -427,4 +490,18 @@ func (r *MerchantRepository) logger() *slog.Logger {
 		return r.Logger
 	}
 	return slog.Default()
+}
+
+func calculateMD5(val string) string {
+	h := md5.New()
+	h.Write([]byte(val))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func calculateHA1(username, realm, password string) string {
+	return calculateMD5(username + ":" + realm + ":" + password)
+}
+
+func calculateHA1b(username, realm, password string) string {
+	return calculateMD5(username + "@" + realm + ":" + realm + ":" + password)
 }

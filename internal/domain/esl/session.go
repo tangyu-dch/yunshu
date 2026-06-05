@@ -38,6 +38,7 @@ type CallSession struct {
 type SessionStore interface {
 	Save(ctx context.Context, session CallSession) error
 	Get(ctx context.Context, callID string) (CallSession, error)
+	CountActive(ctx context.Context) (int, error)
 }
 
 // MemorySessionStore 是测试和本地开发使用的会话存储。
@@ -68,6 +69,19 @@ func (s *MemorySessionStore) Get(_ context.Context, callID string) (CallSession,
 		return CallSession{}, ErrSessionNotFound
 	}
 	return session, nil
+}
+
+// CountActive 统计当前处于活动状态的会话数。
+func (s *MemorySessionStore) CountActive(_ context.Context) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, sess := range s.sessions {
+		if sess.CompletedAt.IsZero() && sess.State != CallComplete {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // SessionSniffer 用于在物理起呼事件中识别分机与 DID。
@@ -274,10 +288,9 @@ func (s *SessionService) ApplyEvent(ctx context.Context, event contracts.Telepho
 	s.Logger.Info("FS 事件处理完成", append(attrs, slog.String("state", string(session.State)))...)
 	return session, nil
 }
-
 func sessionMetadata(cmd contracts.TelephonyCommand) map[string]any {
 	metadata := map[string]any{}
-	for _, key := range []string{"batchTaskId", "batchCallTelId", "userId", "merchantId", "callee", "routeVersion", "agentUuid", "customerUuid", "extension"} {
+	for _, key := range []string{"batchTaskId", "batchCallTelId", "userId", "merchantId", "callee", "routeVersion", "agentUuid", "customerUuid", "extension", "callMode", "callRatio", "queueEnable"} {
 		if value, ok := cmd.Payload[key]; ok {
 			metadata[key] = value
 		}
@@ -313,7 +326,9 @@ func (s *SessionService) appendCDRTask(ctx context.Context, session CallSession,
 		EventID:      event.EventID,
 		EventVersion: 1,
 	}
-	if cause, ok := event.Headers["hangupCause"].(string); ok {
+	if customCause, ok := event.Headers["customHangupCause"].(string); ok && customCause != "" {
+		task.HangupCause = customCause
+	} else if cause, ok := event.Headers["hangupCause"].(string); ok {
 		task.HangupCause = cause
 	}
 	payload := map[string]any{
@@ -333,6 +348,7 @@ func (s *SessionService) appendCDRTask(ctx context.Context, session CallSession,
 	for _, key := range []string{
 		"recordFilePath", "callerNumber", "calleeNumber", "callerDestination",
 		"duration", "billsec", "variable_duration", "variable_billsec",
+		"sipHangupDisposition",
 	} {
 		if value, ok := event.Headers[key]; ok {
 			payload[key] = value

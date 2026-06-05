@@ -16,17 +16,23 @@ var (
 // PhoneAttribution 描述号段前7位（如1380013）与被叫省市行政区划的映射关系，
 // 用于盲区风控策略判断和外呼路径的选择过滤。
 type PhoneAttribution struct {
-	AreaCode string `json:"areaCode"` // 号码前7位号段，主键 (例如 "1380013")
-	ProvCode string `json:"provCode"` // 省份行政区划代码 (例如 "440000")
-	CityCode string `json:"cityCode"` // 城市行政区划代码 (例如 "440300")
+	AreaCode        string `json:"areaCode"`        // 号码前7位号段，主键 (例如 "1380013")
+	Province        string `json:"province"`        // 省份名称 (例如 "广东")
+	City            string `json:"city"`            // 城市名称 (例如 "深圳")
+	ProvCode        string `json:"provCode"`        // 省份行政区划代码 (例如 "440000")
+	CityCode        string `json:"cityCode"`        // 城市行政区划代码 (例如 "440300")
+	ServiceProvider string `json:"serviceProvider"` // 运营商 (例如 "中国联通")
 }
 
 type PhoneAttributionPageRequest struct {
-	PageNumber int    `json:"pageNumber"`
-	PageSize   int    `json:"pageSize"`
-	AreaCode   string `json:"areaCode,omitempty"`
-	ProvCode   string `json:"provCode,omitempty"`
-	CityCode   string `json:"cityCode,omitempty"`
+	PageNumber      int    `json:"pageNumber"`
+	PageSize        int    `json:"pageSize"`
+	AreaCode        string `json:"areaCode,omitempty"`
+	Province        string `json:"province,omitempty"`
+	City            string `json:"city,omitempty"`
+	ProvCode        string `json:"provCode,omitempty"`
+	CityCode        string `json:"cityCode,omitempty"`
+	ServiceProvider string `json:"serviceProvider,omitempty"`
 }
 
 type PhoneAttributionPageResult struct {
@@ -57,8 +63,11 @@ func (s *PhoneAttributionManagementService) Page(ctx context.Context, req PhoneA
 		req.PageSize = 20
 	}
 	req.AreaCode = strings.TrimSpace(req.AreaCode)
+	req.Province = strings.TrimSpace(req.Province)
+	req.City = strings.TrimSpace(req.City)
 	req.ProvCode = strings.TrimSpace(req.ProvCode)
 	req.CityCode = strings.TrimSpace(req.CityCode)
+	req.ServiceProvider = strings.TrimSpace(req.ServiceProvider)
 
 	logger.Info("开始分页查询号码归属地数据", "pageNumber", req.PageNumber, "pageSize", req.PageSize, "areaCode", req.AreaCode)
 	page, err := s.Repository.Page(ctx, req)

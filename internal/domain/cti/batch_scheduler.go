@@ -29,6 +29,11 @@ type BatchTaskSnapshot struct {
 	ExtensionID     int
 	ExtensionNumber string
 	UserName        string
+	SkillGroupID    int
+	DepartmentID    int
+	CallMode        int
+	CallRatio       float64
+	QueueEnable     bool
 }
 
 // BatchTelSnapshot 是单个待拨号码的领域快照。
@@ -67,6 +72,25 @@ type BatchTaskRepository interface {
 	CompleteBatchTel(ctx context.Context, taskID, telID int, connected bool, now time.Time) error
 	ReleaseBatchTel(ctx context.Context, taskID, telID int, now time.Time) error
 	CompleteBatchTaskIfDrained(ctx context.Context, taskID int, now time.Time) (bool, error)
+	GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error)
+	GetOnlineAgents(ctx context.Context, skillGroupID int) ([]int, error)
+	GetActiveCallCount(ctx context.Context, taskID int) (int, error)
+	GetAgentSkillGroups(ctx context.Context, userID int) ([]int, error)
+}
+
+// CallQueue 定义排队功能需要的队列操作端口。
+// 所有方法均携带 merchantID 以实现多租户 Redis Key 前缀隔离，
+// 确保不同商户的排队数据完全独立，避免跨商户互相污染。
+type CallQueue interface {
+	// Push 将呼叫 ID 推入对应商户与技能组的排队队列。
+	Push(ctx context.Context, merchantID, skillGroupID int, callID string) error
+	// Pop 从队列中弹出一个等待呼叫 ID（FIFO 语义，空队列返回空字符串）。
+	Pop(ctx context.Context, merchantID, skillGroupID int) (string, error)
+	// Len 获取当前队列的排队人数。
+	Len(ctx context.Context, merchantID, skillGroupID int) (int, error)
+	// Remove 原子地从队列中移除指定呼叫 ID（用于超时退出和客户主动挂机清理）。
+	// 返回实际被移除的数量（0 表示已被坐席接听或已挂断，>0 表示成功清理）。
+	Remove(ctx context.Context, merchantID, skillGroupID int, callID string) (int64, error)
 }
 
 // BatchESLClient 是批量调度调用 ESL 起呼能力的端口。
@@ -83,6 +107,7 @@ type BatchCallIDFactory func(task BatchTaskSnapshot, tel BatchTelSnapshot) strin
 // 定时器或 HTTP 管理接口触发，但业务逻辑统一留在这里，避免散落 if/else。
 type BatchSchedulerService struct {
 	Repository BatchTaskRepository
+	Queue      CallQueue
 	ESL        BatchESLClient
 	Events     events.Bus
 	Now        func() time.Time
@@ -104,6 +129,49 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 		logger.Error("读取可运行批量任务失败", "taskId", taskID, "error", err.Error())
 		return contracts.BatchCallReq{}, "", err
 	}
+
+	var assignedUserID int
+	var assignedExtension string
+	if task.SkillGroupID > 0 && !task.AIFlag {
+		if task.CallMode == 1 { // 预测模式
+			onlineAgents, err := s.Repository.GetOnlineAgents(ctx, task.SkillGroupID)
+			if err != nil {
+				logger.Error("获取技能组在线坐席失败", "taskId", taskID, "skillGroupId", task.SkillGroupID, "error", err.Error())
+				return contracts.BatchCallReq{}, "", err
+			}
+			if len(onlineAgents) == 0 {
+				logger.Warn("当前技能组内无在线坐席，本次调度跳过号码起呼", "taskId", taskID, "skillGroupId", task.SkillGroupID)
+				return contracts.BatchCallReq{}, "", fmt.Errorf("no online agent available in skill group %d", task.SkillGroupID)
+			}
+
+			activeCalls, err := s.Repository.GetActiveCallCount(ctx, taskID)
+			if err != nil {
+				logger.Error("获取活动呼叫数量失败", "taskId", taskID, "error", err.Error())
+				return contracts.BatchCallReq{}, "", err
+			}
+			ratio := task.CallRatio
+			if ratio <= 0 {
+				ratio = 1.0
+			}
+			maxConcurrentCalls := float64(len(onlineAgents)) * ratio
+			if float64(activeCalls) >= maxConcurrentCalls {
+				logger.Info("批量外呼并发数达到比例上限，暂不起呼", "taskId", taskID, "activeCalls", activeCalls, "maxConcurrent", maxConcurrentCalls, "onlineCount", len(onlineAgents), "ratio", ratio)
+				return contracts.BatchCallReq{}, "", fmt.Errorf("concurrency limit reached (active: %d, max: %.2f)", activeCalls, maxConcurrentCalls)
+			}
+		} else { // 协同模式
+			var getAgentErr error
+			assignedUserID, assignedExtension, getAgentErr = s.Repository.GetIdleAgentFromSkillGroup(ctx, task.SkillGroupID)
+			if getAgentErr != nil {
+				logger.Error("获取技能组空闲坐席失败", "taskId", taskID, "skillGroupId", task.SkillGroupID, "error", getAgentErr.Error())
+				return contracts.BatchCallReq{}, "", getAgentErr
+			}
+			if assignedUserID == 0 || assignedExtension == "" {
+				logger.Warn("当前技能组内无可用空闲坐席，本次调度跳过号码起呼", "taskId", taskID, "skillGroupId", task.SkillGroupID)
+				return contracts.BatchCallReq{}, "", fmt.Errorf("no idle agent available in skill group %d", task.SkillGroupID)
+			}
+		}
+	}
+
 	tel, err := s.Repository.ClaimNextPendingBatchTel(ctx, taskID, now)
 	if err != nil {
 		logger.Warn("批量外呼未获取到可派发号码", "taskId", taskID, "error", err.Error())
@@ -111,18 +179,21 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 	}
 	callID := s.callID(task, tel)
 	req := contracts.BatchCallReq{
-		UserID:         firstNonZero(tel.UserID, task.UserID),
+		UserID:         firstNonZero(assignedUserID, tel.UserID, task.UserID),
 		BatchTaskID:    task.ID,
 		CallTaskState:  contracts.BatchTaskRunning,
 		BatchCallTelID: tel.ID,
 		Phone:          tel.Tel,
 		MerchantID:     firstNonZero(tel.MerchantID, task.MerchantID),
 		UserName:       firstNonEmpty(tel.CustomerName, task.UserName),
-		Extension:      task.ExtensionNumber,
+		Extension:      firstNonEmpty(assignedExtension, task.ExtensionNumber),
 		ExtensionID:    task.ExtensionID,
 		AIFlag:         task.AIFlag,
 		Push:           true,
 		Extra:          firstNonEmpty(tel.Extra, task.Extra),
+		CallMode:       task.CallMode,
+		CallRatio:      task.CallRatio,
+		QueueEnable:    task.QueueEnable,
 	}
 	if s.Events != nil {
 		if err := s.Events.Publish(ctx, contracts.NewEventEnvelope(

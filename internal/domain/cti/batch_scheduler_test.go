@@ -69,6 +69,22 @@ func (r *fakeBatchRepository) GetBatchTaskStats(context.Context, int) (BatchTask
 	return BatchTaskStats{TaskID: r.task.ID, MerchantID: r.task.MerchantID, UserID: r.task.UserID, TotalCount: 1, CalledCount: 1, CompletedCount: 1}, nil
 }
 
+func (r *fakeBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int) (int, string, error) {
+	return 0, "", nil
+}
+
+func (r *fakeBatchRepository) GetOnlineAgents(context.Context, int) ([]int, error) {
+	return []int{1}, nil
+}
+
+func (r *fakeBatchRepository) GetActiveCallCount(context.Context, int) (int, error) {
+	return 0, nil
+}
+
+func (r *fakeBatchRepository) GetAgentSkillGroups(context.Context, int) ([]int, error) {
+	return []int{1}, nil
+}
+
 type fakeBatchESLClient struct {
 	callID string
 	req    contracts.BatchCallReq

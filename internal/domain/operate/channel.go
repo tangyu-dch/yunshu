@@ -15,6 +15,8 @@ var (
 	ErrChannelNotFound = errors.New("channel not found")
 	// ErrChannelConflict 表示渠道名称冲突。
 	ErrChannelConflict = errors.New("channel conflict")
+	// ErrChannelReferenced 表示渠道已被网关引用，不能直接删除。
+	ErrChannelReferenced = errors.New("channel referenced")
 )
 
 // Channel 表示  兼容 `channel` 表中的渠道配置。
@@ -47,6 +49,7 @@ type ChannelRepository interface {
 	ExistsName(ctx context.Context, name string, excludeID int) (bool, error)
 	Save(ctx context.Context, channel Channel) (Channel, error)
 	Delete(ctx context.Context, ids []int) error
+	HasBindings(ctx context.Context, ids []int) (bool, error)
 }
 
 type ChannelManagementService struct {
@@ -98,6 +101,15 @@ func (s *ChannelManagementService) Delete(ctx context.Context, channels []Channe
 	ids := filterPositiveChannelIDs(channels)
 	if len(ids) == 0 {
 		return ErrInvalidChannel
+	}
+	referenced, err := s.Repository.HasBindings(ctx, ids)
+	if err != nil {
+		logger.Error("运营端删除渠道前检查引用失败", "channelCount", len(ids), "error", err.Error())
+		return err
+	}
+	if referenced {
+		logger.Warn("运营端删除渠道失败，渠道仍被网关引用", "channelCount", len(ids))
+		return ErrChannelReferenced
 	}
 	logger.Info("运营端开始删除渠道", "channelCount", len(ids))
 	if err := s.Repository.Delete(ctx, ids); err != nil {

@@ -15,18 +15,24 @@ import (
 
 // Page 返回批量任务管理分页结果。
 func (r *BatchRepository) Page(ctx context.Context, req operate.BatchTaskPageRequest) (operate.BatchTaskPageResult, error) {
-	query := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskModel{}).Where("merchant_batch_call_task.del_flag = ?", false)
+	query := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskModel{}).Where("cc_biz_task.del_flag = ?", false)
 	if req.Name != "" {
-		query = query.Where("merchant_batch_call_task.name LIKE ?", "%"+req.Name+"%")
+		query = query.Where("cc_biz_task.name LIKE ?", "%"+req.Name+"%")
 	}
 	if req.MerchantID > 0 {
-		query = query.Where("merchant_batch_call_task.merchant_id = ?", req.MerchantID)
+		query = query.Where("cc_biz_task.merchant_id = ?", req.MerchantID)
 	}
 	if req.UserID > 0 {
-		query = query.Where("merchant_batch_call_task.user_id = ?", req.UserID)
+		query = query.Where("cc_biz_task.user_id = ?", req.UserID)
 	}
 	if req.Enable != nil {
-		query = query.Where("merchant_batch_call_task.enable = ?", *req.Enable)
+		query = query.Where("cc_biz_task.enable = ?", *req.Enable)
+	}
+	if req.SkillGroupID > 0 {
+		query = query.Where("cc_biz_task.skill_group_id = ?", req.SkillGroupID)
+	}
+	if req.DepartmentID > 0 {
+		query = query.Where("cc_biz_task.department_id = ?", req.DepartmentID)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -37,8 +43,8 @@ func (r *BatchRepository) Page(ctx context.Context, req operate.BatchTaskPageReq
 		ConnectedCount int `gorm:"column:connected_count"`
 	}
 	offset := (req.PageNumber - 1) * req.PageSize
-	if err := query.Select("merchant_batch_call_task.*, (SELECT COUNT(*) FROM merchant_batch_call_task_list WHERE task_id = merchant_batch_call_task.id AND connect_status = ? AND del_flag = ?) AS connected_count", true, false).
-		Order("merchant_batch_call_task.id DESC").Offset(offset).Limit(req.PageSize).Find(&rows).Error; err != nil {
+	if err := query.Select("cc_biz_task.*, (SELECT COUNT(*) FROM cc_biz_task_list WHERE task_id = cc_biz_task.id AND connect_status = ? AND del_flag = ?) AS connected_count", true, false).
+		Order("cc_biz_task.id DESC").Offset(offset).Limit(req.PageSize).Find(&rows).Error; err != nil {
 		return operate.BatchTaskPageResult{}, err
 	}
 	records := make([]operate.BatchTask, 0, len(rows))
@@ -57,8 +63,8 @@ func (r *BatchRepository) GetByID(ctx context.Context, id int) (operate.BatchTas
 		ConnectedCount int `gorm:"column:connected_count"`
 	}
 	err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskModel{}).
-		Select("merchant_batch_call_task.*, (SELECT COUNT(*) FROM merchant_batch_call_task_list WHERE task_id = merchant_batch_call_task.id AND connect_status = ? AND del_flag = ?) AS connected_count", true, false).
-		Where("merchant_batch_call_task.id = ? AND merchant_batch_call_task.del_flag = ?", id, false).First(&row).Error
+		Select("cc_biz_task.*, (SELECT COUNT(*) FROM cc_biz_task_list WHERE task_id = cc_biz_task.id AND connect_status = ? AND del_flag = ?) AS connected_count", true, false).
+		Where("cc_biz_task.id = ? AND cc_biz_task.del_flag = ?", id, false).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return operate.BatchTask{}, operate.ErrBatchTaskNotFound
 	}
@@ -167,6 +173,12 @@ func (r *MemoryBatchTaskRepository) Page(_ context.Context, req operate.BatchTas
 		if req.Enable != nil && task.Enable != *req.Enable {
 			continue
 		}
+		if req.SkillGroupID > 0 && task.SkillGroupID != req.SkillGroupID {
+			continue
+		}
+		if req.DepartmentID > 0 && task.DepartmentID != req.DepartmentID {
+			continue
+		}
 		records = append(records, task)
 	}
 	total := int64(len(records))
@@ -270,6 +282,31 @@ func (r *MemoryBatchTaskRepository) GetDetails(_ context.Context, taskID int) ([
 	return r.details[taskID], nil
 }
 
+func (r *MemoryBatchTaskRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error) {
+	return 0, "", nil
+}
+
+func (r *MemoryBatchTaskRepository) GetOnlineAgents(ctx context.Context, skillGroupID int) ([]int, error) {
+	return []int{1}, nil
+}
+
+func (r *MemoryBatchTaskRepository) GetActiveCallCount(ctx context.Context, taskID int) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	details := r.details[taskID]
+	count := 0
+	for _, d := range details {
+		if d.CallStatus == 2 { // calling
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *MemoryBatchTaskRepository) GetAgentSkillGroups(ctx context.Context, userID int) ([]int, error) {
+	return []int{1}, nil
+}
+
 func batchTaskToModel(task operate.BatchTask) MerchantBatchCallTaskModel {
 	return MerchantBatchCallTaskModel{
 		ID:                  task.ID,
@@ -289,6 +326,11 @@ func batchTaskToModel(task operate.BatchTask) MerchantBatchCallTaskModel {
 		PausedReason:        task.PausedReason,
 		Enable:              task.Enable,
 		DelFlag:             false,
+		SkillGroupID:        task.SkillGroupID,
+		DepartmentID:        task.DepartmentID,
+		CallMode:            task.CallMode,
+		CallRatio:           task.CallRatio,
+		QueueEnable:         task.QueueEnable,
 	}
 }
 
@@ -310,5 +352,10 @@ func batchTaskFromModel(model MerchantBatchCallTaskModel) operate.BatchTask {
 		Extra:               model.Extra,
 		PausedReason:        model.PausedReason,
 		Enable:              model.Enable,
+		SkillGroupID:        model.SkillGroupID,
+		DepartmentID:        model.DepartmentID,
+		CallMode:            model.CallMode,
+		CallRatio:           model.CallRatio,
+		QueueEnable:         model.QueueEnable,
 	}
 }

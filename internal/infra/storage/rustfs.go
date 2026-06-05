@@ -118,4 +118,3 @@ func (s *RustFSStorage) Delete(ctx context.Context, filename string) error {
 	}
 	return nil
 }
-

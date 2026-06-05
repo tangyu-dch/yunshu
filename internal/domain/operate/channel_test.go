@@ -77,12 +77,13 @@ func TestChannelManagementService(t *testing.T) {
 
 // fakeChannelRepository
 type fakeChannelRepository struct {
-	channels map[int]operate.Channel
-	nextID   int
+	channels     map[int]operate.Channel
+	nextID       int
+	mockBindings bool
 }
 
 func newFakeChannelRepository() *fakeChannelRepository {
-	return &fakeChannelRepository{channels: make(map[int]operate.Channel), nextID: 1}
+	return &fakeChannelRepository{channels: make(map[int]operate.Channel), nextID: 1, mockBindings: false}
 }
 
 func (r *fakeChannelRepository) Page(_ context.Context, req operate.ChannelPageRequest) (operate.ChannelPageResult, error) {
@@ -142,4 +143,31 @@ func (r *fakeChannelRepository) Delete(_ context.Context, ids []int) error {
 		return operate.ErrChannelNotFound
 	}
 	return nil
+}
+
+func (r *fakeChannelRepository) HasBindings(_ context.Context, ids []int) (bool, error) {
+	return r.mockBindings, nil
+}
+
+func TestChannelDelete_ReferencedBlocked(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeChannelRepository()
+	service := &operate.ChannelManagementService{Repository: repo}
+
+	channel, err := service.Save(context.Background(), operate.Channel{
+		Name:   "测试被绑渠道",
+		Enable: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟已绑定网关
+	repo.mockBindings = true
+
+	err = service.Delete(context.Background(), []operate.Channel{channel})
+	if !errors.Is(err, operate.ErrChannelReferenced) {
+		t.Fatalf("expected ErrChannelReferenced, got %v", err)
+	}
 }

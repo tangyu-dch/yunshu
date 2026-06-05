@@ -1,19 +1,16 @@
 package operate
 
 import (
-	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	"yunshu/internal/contracts"
-	operatedomain "yunshu/internal/domain/operate"
 	"yunshu/internal/infra/system"
 )
 
-// RegisterPermissionRoutes 注册运营端角色权限管理接口以及商户端套餐绑定接口。
-func RegisterPermissionRoutes(r gin.IRoutes, repo *system.PermissionRepository, merchantService *operatedomain.MerchantManagementService) {
+// RegisterPermissionRoutes 注册运营端角色权限管理接口。
+func RegisterPermissionRoutes(r gin.IRoutes, repo *system.PermissionRepository) {
 	if repo == nil {
 		return
 	}
@@ -147,66 +144,6 @@ func RegisterPermissionRoutes(r gin.IRoutes, repo *system.PermissionRepository, 
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, err.Error()))
 			return
 		}
-		c.JSON(http.StatusOK, contracts.OK(nil))
-	})
-
-	// ==========================================
-	// 商户端套餐自主选择与绑定 API
-	// ==========================================
-	type MerchantRateBindReq struct {
-		RateID int `json:"rateId"`
-	}
-	r.POST("/merchant/billing/rate/bind", func(c *gin.Context) {
-		if merchantService == nil {
-			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "商户管理服务未启用"))
-			return
-		}
-		var req MerchantRateBindReq
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
-			return
-		}
-		tenant, _ := contracts.TenantFromContext(c.Request.Context())
-		if tenant.MerchantID == "" {
-			c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "仅商户租户允许绑定套餐"))
-			return
-		}
-		mID, err := strconv.Atoi(tenant.MerchantID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "无效的商户身份"))
-			return
-		}
-
-		// 获取商户实体
-		merchant, err := merchantService.Repository.GetByID(c.Request.Context(), mID)
-		if err != nil {
-			if errors.Is(err, operatedomain.ErrMerchantNotFound) {
-				c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, "商户未找到"))
-			} else {
-				c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询商户失败"))
-			}
-			return
-		}
-
-		// 检查费率是否存在
-		rateExists, err := merchantService.Repository.RateExists(c.Request.Context(), req.RateID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "验证费率状态失败"))
-			return
-		}
-		if !rateExists {
-			c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, "选择的套餐费率不存在"))
-			return
-		}
-
-		// 更新商户绑定的 rateId 并落库
-		merchant.RateID = req.RateID
-		_, err = merchantService.Repository.Save(c.Request.Context(), merchant)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "更新套餐绑定关系失败"))
-			return
-		}
-
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 }

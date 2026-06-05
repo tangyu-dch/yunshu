@@ -77,6 +77,7 @@ func (ChannelModel) TableName() string {
 // PoolModel 映射  `pool` 表中网关绑定所需字段。
 type PoolModel struct {
 	ID                int       `gorm:"column:id;primaryKey"`
+	MerchantID        int       `gorm:"column:merchant_id"`
 	Name              string    `gorm:"column:name"`
 	Remark            string    `gorm:"column:remark"`
 	Type              int       `gorm:"column:type"`
@@ -206,23 +207,33 @@ func (r *GatewayRepository) Save(ctx context.Context, gateway operate.Gateway) (
 	return gatewayFromModel(model), nil
 }
 
-// Delete 按  语义逻辑删除网关（设置 del_flag=true）。
+// Delete 按  语义逻辑删除网关（设置 del_flag=true），并级联物理删除黑名单映射。
 // 逻辑删除后不会物理清除记录，但后续查询会自动过滤已删除网关。
 func (r *GatewayRepository) Delete(ctx context.Context, ids []int) error {
 	logger := r.logger()
-	logger.Info("逻辑删除网关", "gatewayIds", ids)
-	result := r.DB.WithContext(ctx).Model(&GatewayModel{}).
-		Where("id IN ?", ids).
-		Updates(map[string]any{"del_flag": true, "updated_time": time.Now().UTC()})
-	if result.Error != nil {
-		logger.Error("逻辑删除网关失败", "gatewayIds", ids, "error", result.Error.Error())
-		return result.Error
+	logger.Info("逻辑删除网关并级联删除黑名单关联", "gatewayIds", ids)
+	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&GatewayModel{}).
+			Where("id IN ?", ids).
+			Updates(map[string]any{"del_flag": true, "updated_time": time.Now().UTC()})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return operate.ErrGatewayNotFound
+		}
+		// 级联物理删除黑名单网关映射
+		if err := tx.Exec("DELETE FROM cc_sec_blacklist_gateway WHERE gateway_id IN ?", ids).Error; err != nil {
+			logger.Error("级联物理删除黑名单网关映射失败", "gatewayIds", ids, "error", err.Error())
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Error("删除网关事务执行失败", "gatewayIds", ids, "error", err.Error())
+		return err
 	}
-	if result.RowsAffected == 0 {
-		logger.Warn("逻辑删除网关未匹配到记录", "gatewayIds", ids)
-		return operate.ErrGatewayNotFound
-	}
-	logger.Info("逻辑删除网关成功", "gatewayIds", ids, "rowsAffected", result.RowsAffected)
+	logger.Info("逻辑删除网关并级联删除黑名单关联成功", "gatewayIds", ids)
 	return nil
 }
 

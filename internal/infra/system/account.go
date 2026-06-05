@@ -223,8 +223,30 @@ func (r *ConsoleAccountRepository) Page(ctx context.Context, req operate.Account
 		return operate.AccountPageResult{}, err
 	}
 	records := make([]operate.Account, 0, len(models))
+	var userIDs []int
 	for _, model := range models {
-		records = append(records, accountFromModel(model))
+		acc := accountFromModel(model)
+		records = append(records, acc)
+		if acc.AccountType == operate.AccountTypeMerchantUser {
+			userIDs = append(userIDs, model.ID)
+		}
+	}
+	if len(userIDs) > 0 {
+		var seats []merchantUserModel
+		if err := r.DB.WithContext(ctx).Where("id IN ? AND del_flag = ?", userIDs, false).Find(&seats).Error; err == nil {
+			seatMap := make(map[int]merchantUserModel)
+			for _, seat := range seats {
+				seatMap[seat.ID] = seat
+			}
+			for i := range records {
+				if records[i].AccountType == operate.AccountTypeMerchantUser {
+					if seat, ok := seatMap[records[i].ID]; ok {
+						records[i].OrganizationID = seat.OrganizationID
+						records[i].SeatNumber = seat.SeatNumber
+					}
+				}
+			}
+		}
 	}
 	return operate.AccountPageResult{PageNumber: req.PageNumber, PageSize: req.PageSize, Total: total, Records: records}, nil
 }
@@ -236,7 +258,18 @@ func (r *ConsoleAccountRepository) GetByID(ctx context.Context, id int) (operate
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return operate.Account{}, operate.ErrAccountNotFound
 	}
-	return accountFromModel(model), err
+	if err != nil {
+		return operate.Account{}, err
+	}
+	account := accountFromModel(model)
+	if account.AccountType == operate.AccountTypeMerchantUser {
+		var seat merchantUserModel
+		if err := r.DB.WithContext(ctx).Where("id = ? AND del_flag = ?", model.ID, false).First(&seat).Error; err == nil {
+			account.OrganizationID = seat.OrganizationID
+			account.SeatNumber = seat.SeatNumber
+		}
+	}
+	return account, nil
 }
 
 // ExistsUsername 校验账号名唯一性。
@@ -303,7 +336,44 @@ func (r *ConsoleAccountRepository) Save(ctx context.Context, account operate.Acc
 			return operate.Account{}, err
 		}
 		r.logger().Info("更新控制台账号成功", "accountId", model.ID, "username", model.Username)
-		return accountFromModel(returned), nil
+
+		// 级联处理坐席表
+		if returned.AccountType == operate.AccountTypeMerchantUser {
+			mchID, _ := strconv.Atoi(returned.MerchantID)
+			var seat merchantUserModel
+			err := r.DB.WithContext(ctx).Where("id = ?", returned.ID).First(&seat).Error
+			if err == nil {
+				seat.Username = returned.Username
+				seat.Enable = returned.Enable
+				seat.OrganizationID = account.OrganizationID
+				seat.SeatNumber = account.SeatNumber
+				seat.UpdatedTime = now
+				if err := r.DB.WithContext(ctx).Save(&seat).Error; err != nil {
+					r.logger().Error("级联更新坐席用户表失败", "accountId", returned.ID, "error", err.Error())
+				}
+			} else if errors.Is(err, gorm.ErrRecordNotFound) {
+				seat = merchantUserModel{
+					ID:                  returned.ID,
+					MerchantID:          mchID,
+					OrganizationID:      account.OrganizationID,
+					Username:            returned.Username,
+					SeatNumber:          account.SeatNumber,
+					CallExtensionEnable: true,
+					Enable:              returned.Enable,
+					DelFlag:             false,
+					CreatedTime:         now,
+					UpdatedTime:         now,
+				}
+				if err := r.DB.WithContext(ctx).Create(&seat).Error; err != nil {
+					r.logger().Error("级联创建坐席用户表失败", "accountId", returned.ID, "error", err.Error())
+				}
+			}
+		}
+
+		result := accountFromModel(returned)
+		result.OrganizationID = account.OrganizationID
+		result.SeatNumber = account.SeatNumber
+		return result, nil
 	}
 	r.logger().Info("开始创建控制台账号", "username", model.Username, "roleId", model.RoleID, "operator", model.CreatedBy)
 	hash, err := hashPassword(account.Password)
@@ -319,7 +389,36 @@ func (r *ConsoleAccountRepository) Save(ctx context.Context, account operate.Acc
 		return operate.Account{}, err
 	}
 	r.logger().Info("创建控制台账号成功", "accountId", model.ID, "username", model.Username)
-	return accountFromModel(model), nil
+
+	// 级联处理坐席表
+	if model.AccountType == operate.AccountTypeMerchantUser {
+		model.UserID = strconv.Itoa(model.ID)
+		if err := r.DB.WithContext(ctx).Model(&ConsoleAccountModel{}).Where("id = ?", model.ID).Update("user_id", model.UserID).Error; err != nil {
+			r.logger().Error("更新控制台账号对应的 user_id 失败", "accountId", model.ID, "error", err.Error())
+		}
+
+		mchID, _ := strconv.Atoi(model.MerchantID)
+		seat := merchantUserModel{
+			ID:                  model.ID,
+			MerchantID:          mchID,
+			OrganizationID:      account.OrganizationID,
+			Username:            model.Username,
+			SeatNumber:          account.SeatNumber,
+			CallExtensionEnable: true,
+			Enable:              model.Enable,
+			DelFlag:             false,
+			CreatedTime:         now,
+			UpdatedTime:         now,
+		}
+		if err := r.DB.WithContext(ctx).Create(&seat).Error; err != nil {
+			r.logger().Error("级联创建坐席用户表失败", "accountId", model.ID, "error", err.Error())
+		}
+	}
+
+	result := accountFromModel(model)
+	result.OrganizationID = account.OrganizationID
+	result.SeatNumber = account.SeatNumber
+	return result, nil
 }
 
 // Delete 逻辑删除账号。
@@ -338,6 +437,13 @@ func (r *ConsoleAccountRepository) Delete(ctx context.Context, ids []int) error 
 		return operate.ErrAccountNotFound
 	}
 	r.logger().Info("逻辑删除控制台账号成功", "accountIds", ids, "rowsAffected", result.RowsAffected)
+
+	// 级联逻辑删除坐席用户记录
+	if err := r.DB.WithContext(ctx).Model(&merchantUserModel{}).
+		Where("id IN ? AND del_flag = ?", ids, false).
+		Updates(map[string]any{"del_flag": true, "enable": false, "updated_time": now}).Error; err != nil {
+		r.logger().Error("级联逻辑删除坐席用户记录失败", "accountIds", ids, "error", err.Error())
+	}
 	return nil
 }
 
@@ -356,6 +462,13 @@ func (r *ConsoleAccountRepository) SetEnable(ctx context.Context, id int, enable
 		return operate.Account{}, operate.ErrAccountNotFound
 	}
 	r.logger().Info("切换控制台账号状态成功", "accountId", id, "enable", enable)
+
+	// 级联更新坐席用户启用状态
+	if err := r.DB.WithContext(ctx).Model(&merchantUserModel{}).
+		Where("id = ? AND del_flag = ?", id, false).
+		Updates(map[string]any{"enable": enable, "updated_time": time.Now().UTC()}).Error; err != nil {
+		r.logger().Error("级联更新坐席用户启用状态失败", "accountId", id, "enable", enable, "error", err.Error())
+	}
 	return r.GetByID(ctx, id)
 }
 
@@ -675,3 +788,21 @@ var _ authdomain.LoginIdentityResolver = (*ConsoleAccountRepository)(nil)
 var _ authdomain.LoginIdentityResolver = (*MemoryAccountRepository)(nil)
 var _ operate.AccountRepository = (*ConsoleAccountRepository)(nil)
 var _ operate.AccountRepository = (*MemoryAccountRepository)(nil)
+
+// merchantUserModel 映射 `cc_res_mch_user` 表，在 system 仓储中用于级联同步
+type merchantUserModel struct {
+	ID                  int       `gorm:"column:id;primaryKey"`
+	MerchantID          int       `gorm:"column:merchant_id"`
+	OrganizationID      int       `gorm:"column:organization_id"`
+	Username            string    `gorm:"column:username"`
+	SeatNumber          string    `gorm:"column:seat_number"`
+	CallExtensionEnable bool      `gorm:"column:call_extension_enable"`
+	Enable              bool      `gorm:"column:enable"`
+	DelFlag             bool      `gorm:"column:del_flag"`
+	CreatedTime         time.Time `gorm:"column:created_time"`
+	UpdatedTime         time.Time `gorm:"column:updated_time"`
+}
+
+func (merchantUserModel) TableName() string {
+	return "cc_res_mch_user"
+}

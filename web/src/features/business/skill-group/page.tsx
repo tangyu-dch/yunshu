@@ -10,7 +10,7 @@ import {
   fetchSkillGroups,
   saveSkillGroup,
   fetchMerchantAccounts,
-  fetchPoolPhones,
+  fetchMerchantPoolPhones,
   fetchSkillGroupUsers,
   saveSkillGroupUsers,
   fetchSkillGroupPhones,
@@ -140,7 +140,6 @@ export function SkillGroupPage() {
         }}
         columns={[
           { title: '名称', dataIndex: 'name' },
-          { title: '商户', dataIndex: 'merchant' },
           { title: '描述', dataIndex: 'description' },
           { title: '状态', dataIndex: 'enable', render: (value: boolean) => <Tag color={value ? 'green' : 'default'}>{value ? '启用' : '停用'}</Tag> },
           {
@@ -179,15 +178,15 @@ export function SkillGroupPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ enable: true }}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
             <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
               <Input placeholder="例如: 智能客服一组" />
             </Form.Item>
-            <Form.Item name="merchantId" label="商户 ID" rules={[{ required: true, message: '请输入商户 ID' }]}>
-              <InputNumber className="w-full" min={1} placeholder="例如: 1001" />
+            <Form.Item name="merchantId" hidden>
+              <InputNumber />
             </Form.Item>
             <Form.Item name="description" label="描述" className="col-span-1 md:col-span-2">
               <Input placeholder="该技能组的主要话务方向" />
@@ -263,7 +262,7 @@ function UserBindingModal({ skillGroupId, open, onCancel }: UserBindingModalProp
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={accountsLoading || boundLoading}
@@ -296,8 +295,8 @@ function PhoneBindingModal({ skillGroupId, open, onCancel }: PhoneBindingModalPr
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   const { data: phonesData, isLoading: phonesLoading } = useQuery({
-    queryKey: ['operate', 'pool-phone', 'list'],
-    queryFn: () => fetchPoolPhones(1, 1000),
+    queryKey: ['merchant', 'pool-phone', 'list'],
+    queryFn: () => fetchMerchantPoolPhones(1, 1000),
     enabled: open && !!skillGroupId,
   })
 
@@ -332,7 +331,7 @@ function PhoneBindingModal({ skillGroupId, open, onCancel }: PhoneBindingModalPr
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={phonesLoading || boundLoading}
@@ -347,6 +346,13 @@ function PhoneBindingModal({ skillGroupId, open, onCancel }: PhoneBindingModalPr
         columns={[
           { title: '号码 ID', dataIndex: 'id' },
           { title: '电话号码', dataIndex: 'phone' },
+          {
+            title: '归属号码池',
+            dataIndex: 'poolId',
+            render: (poolId: number, record: any) => (
+              <Tag color={poolId ? 'blue' : 'default'}>{record.pool || '未分配'}</Tag>
+            ),
+          },
           { title: '省份', dataIndex: 'province' },
           { title: '城市', dataIndex: 'city' },
         ]}

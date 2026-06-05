@@ -44,6 +44,19 @@ func RegisterCallRecordRoutes(r gin.IRoutes, service *operatedomain.CallRecordMa
 		c.JSON(http.StatusOK, contracts.OK(record))
 	})
 
+	r.GET("/merchant/call-record/sip-trace/:callId", func(c *gin.Context) {
+		if service == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "呼叫记录查询未启用"))
+			return
+		}
+		trace, err := service.SipTrace(c.Request.Context(), c.Param("callId"))
+		if err != nil {
+			writeCallRecordError(c, err, "获取呼叫信令失败")
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(trace))
+	})
+
 	r.GET("/merchant/call-record", func(c *gin.Context) {
 		if service == nil {
 			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "呼叫记录查询未启用"))
@@ -64,6 +77,7 @@ func RegisterCallRecordRoutes(r gin.IRoutes, service *operatedomain.CallRecordMa
 			GatewayID:   c.Query("gatewayId"),
 			Profile:     c.Query("profile"),
 			Extension:   c.Query("extension"),
+			Phone:       c.Query("phone"),
 			StartTime:   c.Query("startTime"),
 			EndTime:     c.Query("endTime"),
 		})

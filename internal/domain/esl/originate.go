@@ -59,6 +59,11 @@ type ExtensionStatusReader interface {
 	GetExtensionStatus(ctx context.Context, extension string) (ExtensionStatus, bool, error)
 }
 
+// ExtensionStatusWriter 写入 Redis 中的分机在线/忙闲状态。
+type ExtensionStatusWriter interface {
+	SetExtensionStatus(ctx context.Context, extension string, status ExtensionStatus) error
+}
+
 // OutboundGuard 对齐  OutboundRequestGuard 的 API 外呼兜底校验。
 //
 // 正常路径 CTI 会先做校验；ESL 内部入口仍需要兜底，避免绕过用户、商户、余额和坐席约束。
@@ -95,6 +100,12 @@ type APIBridgeRequest struct {
 	FSAddr       string
 }
 
+// ConcurrencyLimiter 定义系统级通话并发限制与功能模块限制校验能力。
+type ConcurrencyLimiter interface {
+	CheckConcurrencyLimit(ctx context.Context, activeCount int) error
+	CheckFeatureLimit(ctx context.Context, feature string) error
+}
+
 // OriginateService 把 API/批量外呼请求转换成可追踪的 ESL originate 命令。
 type OriginateService struct {
 	CommandService *CommandService
@@ -103,7 +114,35 @@ type OriginateService struct {
 	Extensions     ExtensionResolver
 	Guard          OutboundGuard
 	Events         events.Bus
+	Limiter        ConcurrencyLimiter // 系统级别限制器
 	Logger         *slog.Logger
+}
+
+func (s *OriginateService) checkLicenseConcurrency(ctx context.Context, currentCallID string) error {
+	if s.Limiter == nil {
+		return nil
+	}
+	// 1. 校验“外呼/CTI”模块是否已被授权启用
+	if err := s.Limiter.CheckFeatureLimit(ctx, "outbound"); err != nil {
+		return err
+	}
+
+	if s.SessionService == nil || s.SessionService.Store == nil {
+		return nil
+	}
+	activeCount, err := s.SessionService.Store.CountActive(ctx)
+	if err != nil {
+		if s.Logger != nil {
+			s.Logger.Error("【云枢授权】获取活动会话数失败", "error", err.Error())
+		}
+		return err
+	}
+	if currentCallID != "" {
+		if sess, errGet := s.SessionService.Store.Get(ctx, currentCallID); errGet == nil && sess.CompletedAt.IsZero() && sess.State != CallComplete {
+			activeCount--
+		}
+	}
+	return s.Limiter.CheckConcurrencyLimit(ctx, activeCount)
 }
 
 // StartAPIOutbound 启动一次 API 外呼。
@@ -114,6 +153,10 @@ func (s *OriginateService) StartAPIOutbound(ctx context.Context, req OriginateRe
 		logger = slog.Default()
 	}
 	logger.Info("开始 ESL API 外呼起呼编排", "callId", req.CallID, "userId", req.Request.UserID, "version", req.Version)
+	if err := s.checkLicenseConcurrency(ctx, req.CallID); err != nil {
+		logger.Warn("ESL API 外呼因系统授权并发超限被拦截", "callId", req.CallID, "error", err.Error())
+		return err
+	}
 	fsAddr := "default"
 	if s.NodeSelector != nil {
 		selected, err := s.NodeSelector.SelectAPIOutbound(ctx, req)
@@ -200,6 +243,17 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 		logger = slog.Default()
 	}
 	logger.Info("开始 ESL 批量外呼起呼编排", "callId", req.CallID, "taskId", req.Request.BatchTaskID, "telId", req.Request.BatchCallTelID, "userId", req.Request.UserID, "version", req.Version)
+	if err := s.checkLicenseConcurrency(ctx, req.CallID); err != nil {
+		logger.Warn("ESL 批量外呼因系统授权限制被拦截", "callId", req.CallID, "taskId", req.Request.BatchTaskID, "error", err.Error())
+		return err
+	}
+	// 如果是 AI 自动外呼，且未被授权使用 AI 调度器模块，则进行安全拦截
+	if req.Request.AIFlag && s.Limiter != nil {
+		if err := s.Limiter.CheckFeatureLimit(ctx, "ai_scheduler"); err != nil {
+			logger.Warn("ESL 批量外呼因 AI 调度器模块未获授权被拦截", "callId", req.CallID, "taskId", req.Request.BatchTaskID, "error", err.Error())
+			return err
+		}
+	}
 	if req.Request.Extension == "" && s.Extensions != nil {
 		extension, err := s.Extensions.GetByUserID(ctx, req.Request.UserID)
 		if err != nil {
@@ -223,6 +277,13 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 		}
 		fsAddr = selected
 	}
+	profile := contracts.CallFlowBatchOutbound
+	if req.Request.CallMode == 1 {
+		profile = contracts.CallFlowBatchPredictive
+	} else if req.Request.CallMode == 2 {
+		profile = contracts.CallFlowBatchSynergy
+	}
+
 	plan := BuildBatchOutboundPlan(req.CallID, req.Version, fsAddr, req.Request, logger)
 	cmd := telephony.NewCommand(
 		"batch-originate:"+req.CallID,
@@ -231,7 +292,7 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 		plan.CustomerUUID,
 		plan.FSAddr,
 		contracts.LegRoleCustomer,
-		contracts.CallFlowBatchOutbound,
+		profile,
 		map[string]any{
 			"originateMode":   plan.OriginateMode,
 			"agentId":         plan.AgentID,
@@ -249,6 +310,9 @@ func (s *OriginateService) StartBatchOutbound(ctx context.Context, req BatchOrig
 			"extra":           req.Request.Extra,
 			"userId":          req.Request.UserID,
 			"merchantId":      req.Request.MerchantID,
+			"callMode":        req.Request.CallMode,
+			"callRatio":       req.Request.CallRatio,
+			"queueEnable":     req.Request.QueueEnable,
 		},
 	)
 	if err := s.CommandService.Execute(ctx, cmd); err != nil {
@@ -575,6 +639,10 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if err := s.checkLicenseConcurrency(ctx, req.CallID); err != nil {
+		logger.Warn("拨号盘直呼因系统授权并发超限被拦截", "callId", req.CallID, "error", err.Error())
+		return err
+	}
 	if s.SessionService == nil {
 		return ErrInvalidCommand
 	}
@@ -726,6 +794,10 @@ func (s *OriginateService) StartInboundAgentOutbound(ctx context.Context, req Ba
 		logger = slog.Default()
 	}
 	logger.Info("客户呼入已接听，开始为坐席腿发起 originate", "callId", req.CallID, "extension", req.Extension)
+	if err := s.checkLicenseConcurrency(ctx, req.CallID); err != nil {
+		logger.Warn("客户呼入坐席腿起呼因系统授权并发超限被拦截", "callId", req.CallID, "extension", req.Extension, "error", err.Error())
+		return err
+	}
 
 	options := map[string]any{
 		"Call-ID":                req.CallID,

@@ -147,17 +147,56 @@ func NewCallRuntimeWithConfig(cfg config.Config, bus events.Bus, logger *slog.Lo
 		logger.Warn("cc-call 未配置 FreeSWITCH 节点，使用内存 ESL 执行器", "impact", "不会向真实 FreeSWITCH 发送命令")
 	}
 	command := esl.NewCommandService(idempotency.NewMemoryStore(), executor, logger)
-	runtimeSelector := &cti.RuntimeSelector{RuleSelector: cti.Selector{}, Allocator: selectioninfra.NewRedisAllocator(redisClient, 30*time.Minute), Logger: logger}
 	candidateSource := buildCandidateSource(gormDB, redisClient, logger)
 	candidateMarker := buildCandidateMarker(gormDB, logger)
+	runtimeSelector := &cti.RuntimeSelector{
+		RuleSelector: cti.Selector{},
+		Allocator:    selectioninfra.NewRedisAllocator(redisClient, 30*time.Minute),
+		Marker:       candidateMarker,
+		Logger:       logger,
+	}
 	gatewayRepository := buildGatewayRepository(gormDB, logger)
 	gatewaySync := &esl.GatewayConfigService{Gateways: gatewayRepository, Nodes: registryGatewaySyncNodeLister{registry: nodeRegistry}, Executor: &fsesl.GatewayHTTPExecutor{Timeout: cfg.FreeSwitch.CommandTimeout, Logger: logger}, Logger: logger}
-	originate := &esl.OriginateService{CommandService: command, SessionService: session, NodeSelector: registryNodeSelector{registry: nodeRegistry}, Extensions: extensionResolver, Guard: outboundGuard, Events: bus, Logger: logger}
+	var licenseService *operate.LicenseService
+	if gormDB != nil {
+		proxyConfigRepo := system.NewProxyConfigRepository(gormDB, logger)
+		licenseService = operate.NewLicenseService(proxyConfigRepo, cfg.Console.LicensePath, logger)
+		_, _ = licenseService.LoadAndVerify(context.Background())
+	} else {
+		licenseService = operate.NewLicenseService(nil, cfg.Console.LicensePath, logger)
+		_, _ = licenseService.LoadAndVerify(context.Background())
+	}
+
+	originate := &esl.OriginateService{
+		CommandService: command,
+		SessionService: session,
+		NodeSelector:   registryNodeSelector{registry: nodeRegistry},
+		Extensions:     extensionResolver,
+		Guard:          outboundGuard,
+		Events:         bus,
+		Limiter:        licenseService,
+		Logger:         logger,
+	}
 	apiCall := &cti.APICallService{ESL: inProcessESLClient{originate: originate}, Events: bus, Logger: logger}
-	callflow.RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), logger)
+	var batchRepo cti.BatchTaskRepository
+	if gormDB != nil {
+		batchRepo = business.NewBatchRepository(gormDB, extensionstatus.NewRedisReader(redisClient), logger)
+	}
+	var callQueue cti.CallQueue
+	if redisClient != nil {
+		callQueue = selectioninfra.NewRedisCallQueue(redisClient)
+	}
+
+	callflow.RegisterConsumers(bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, logger)
 	var batchScheduler *cti.BatchSchedulerService
 	if gormDB != nil {
-		batchScheduler = &cti.BatchSchedulerService{Repository: business.NewBatchRepository(gormDB, logger), ESL: inProcessESLClient{originate: originate}, Events: bus, Logger: logger}
+		batchScheduler = &cti.BatchSchedulerService{
+			Repository: batchRepo,
+			Queue:      callQueue,
+			ESL:        inProcessESLClient{originate: originate},
+			Events:     bus,
+			Logger:     logger,
+		}
 		callflow.RegisterBatchConsumers(bus, ctiRunner, batchScheduler, logger)
 		logger.Info("批量外呼调度器已启用", "tables", "merchant_batch_call_task,merchant_batch_call_task_list")
 	} else {
@@ -243,6 +282,7 @@ func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
 		&security.RiskControlModel{},
 		&security.RiskControlMerchantModel{},
 		&system.AreaCodeModel{},
+		&system.PhoneAttributionModel{},
 		&telephony.FreeswitchModel{},
 		&telephony.FreeswitchEventLeaseModel{},
 		&business.RecordModel{},
@@ -252,6 +292,8 @@ func openRuntimeDB(cfg config.Config, logger *slog.Logger) *gorm.DB {
 		&business.SettlementJobModel{},
 		&business.MessageOutboxModel{},
 		&resource.DialpadVersionModel{},
+		&resource.DepartmentModel{},
+		&system.IPBlockLogModel{},
 	); errMig != nil {
 		logger.Error("MySQL 数据库自动迁移失败", "error", errMig.Error())
 	} else {

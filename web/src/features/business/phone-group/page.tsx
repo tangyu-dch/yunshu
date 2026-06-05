@@ -167,14 +167,14 @@ export function PhoneGroupPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical" onFinish={(values) => saveMutation.mutate(values)} initialValues={{ merchantId, enable: true }}>
           <Form.Item name="name" label="组名称" rules={[{ required: true, message: '请输入号码组名称' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="merchantId" label="商户 ID" rules={[{ required: true, message: '请输入商户 ID' }]}>
-            <InputNumber className="w-full" min={1} />
+          <Form.Item name="merchantId" hidden>
+            <InputNumber />
           </Form.Item>
           <Form.Item name="remark" label="备注">
             <Input />
@@ -219,8 +219,8 @@ function PhoneBindingModal({ phoneGroupId, merchantId, open, onCancel }: PhoneBi
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
 
   const { data: phonesData, isLoading: phonesLoading } = useQuery({
-    queryKey: ['operate', 'pool-phone', 'list'],
-    queryFn: () => fetchPoolPhones(1, 1000),
+    queryKey: ['merchant', 'pool-phone', 'list'],
+    queryFn: () => fetchPoolPhones(1, 1000, true),
     enabled: open && !!phoneGroupId,
   })
 
@@ -255,7 +255,7 @@ function PhoneBindingModal({ phoneGroupId, merchantId, open, onCancel }: PhoneBi
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={phonesLoading || boundLoading}
@@ -270,6 +270,13 @@ function PhoneBindingModal({ phoneGroupId, merchantId, open, onCancel }: PhoneBi
         columns={[
           { title: '号码 ID', dataIndex: 'id' },
           { title: '电话号码', dataIndex: 'phone' },
+          {
+            title: '归属号码池',
+            dataIndex: 'poolId',
+            render: (poolId: number, record: any) => (
+              <Tag color={poolId ? 'blue' : 'default'}>{record.pool || '未分配'}</Tag>
+            ),
+          },
           { title: '省份', dataIndex: 'province' },
           { title: '城市', dataIndex: 'city' },
         ]}
@@ -326,7 +333,7 @@ function SkillGroupBindingModal({ phoneGroupId, merchantId, open, onCancel }: Sk
       onOk={() => mutation.mutate(selectedRowKeys as number[])}
       confirmLoading={mutation.isPending}
       width={600}
-      destroyOnClose
+      destroyOnHidden
     >
       <Table
         loading={skillGroupsLoading || boundLoading}

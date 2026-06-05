@@ -11,15 +11,15 @@ WEB_HOST ?= 0.0.0.0
 WEB_PORT ?= 5173
 CONFIG ?= configs/default.yaml
 
-SERVICES := cc-edge cc-console cc-call cc-worker cc-all
+SERVICES := cc-edge cc-console cc-call cc-worker cc-all cc-firewall-guard
 
 .PHONY: help fmt fmt-go test test-go vet build build-go build-web web-build clean deps \
 	web-install web-dev web-preview update-contracts \
-	run-edge run-console run-call run-worker run-all \
-	start-edge start-console start-call start-worker \
-	stop-edge stop-console stop-call stop-worker \
-	restart-edge restart-console restart-call restart-worker \
-	status-edge status-console status-call status-worker \
+	run-edge run-console run-call run-worker run-all run-firewall-guard \
+	start-edge start-console start-call start-worker start-firewall-guard \
+	stop-edge stop-console stop-call stop-worker stop-firewall-guard \
+	restart-edge restart-console restart-call restart-worker restart-firewall-guard \
+	status-edge status-console status-call status-worker status-firewall-guard \
 	start-all stop-all restart-all status-all
 
 help:
@@ -33,6 +33,7 @@ help:
 	@printf "  make run-call        - 启动 cc-call\n"
 	@printf "  make run-edge        - 启动 cc-edge\n"
 	@printf "  make run-worker      - 启动 cc-worker\n"
+	@printf "  make run-firewall-guard - 启动 cc-firewall-guard\n"
 	@printf "  make run-all         - 一键启动 All-in-One 多合一单进程服务\n"
 	@printf "  make start-console   - 后台启动 cc-console\n"
 	@printf "  make stop-console    - 停止 cc-console\n"
@@ -178,6 +179,9 @@ run-call:
 run-worker:
 	$(call run_service,cc-worker,:8083)
 
+run-firewall-guard:
+	$(call run_service,cc-firewall-guard,)
+
 run-all:
 	@if [ -n "$(CONFIG)" ]; then \
 		$(GO) run ./cmd/cc-all -config $(CONFIG); \
@@ -197,6 +201,9 @@ start-call: build-go
 start-worker: build-go
 	$(call start_service,cc-worker,:8083)
 
+start-firewall-guard: build-go
+	$(call start_service,cc-firewall-guard,)
+
 start-cc-all: build-go
 	$(call start_service,cc-all,)
 
@@ -212,6 +219,9 @@ stop-call:
 stop-worker:
 	$(call stop_service,cc-worker)
 
+stop-firewall-guard:
+	$(call stop_service,cc-firewall-guard)
+
 stop-cc-all:
 	$(call stop_service,cc-all)
 
@@ -222,6 +232,8 @@ restart-console: stop-console start-console
 restart-call: stop-call start-call
 
 restart-worker: stop-worker start-worker
+
+restart-firewall-guard: stop-firewall-guard start-firewall-guard
 
 restart-cc-all: stop-cc-all start-cc-all
 
@@ -237,6 +249,9 @@ status-call:
 status-worker:
 	$(call status_service,cc-worker)
 
+status-firewall-guard:
+	$(call status_service,cc-firewall-guard)
+
 status-cc-all:
 	$(call status_service,cc-all)
 
@@ -245,8 +260,10 @@ start-all: build-go
 	$(call start_console_service,cc-console,:8080)
 	$(call start_service,cc-call,:8082)
 	$(call start_service,cc-worker,:8083)
+	$(call start_service,cc-firewall-guard,)
 
 stop-all:
+	$(call stop_service,cc-firewall-guard)
 	$(call stop_service,cc-worker)
 	$(call stop_service,cc-call)
 	$(call stop_service,cc-console)
@@ -259,3 +276,4 @@ status-all:
 	$(call status_service,cc-console)
 	$(call status_service,cc-call)
 	$(call status_service,cc-worker)
+	$(call status_service,cc-firewall-guard)

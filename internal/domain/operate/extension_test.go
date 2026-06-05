@@ -197,3 +197,43 @@ func (f *fakeAuthCacheInvalidator) InvalidateAuthCache(_ context.Context) error 
 	return nil
 }
 
+func TestExtensionSave_AutoGeneratePassword(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeExtensionRepository()
+	cache := &fakeAuthCacheInvalidator{}
+	merchantRepo := newFakeMerchantRepository()
+	_, _ = merchantRepo.Save(context.Background(), operate.Merchant{ID: 1002, SipDomain: "sip.test.com"})
+	service := &operate.ExtensionManagementService{Repository: repo, MerchantRepo: merchantRepo, Cache: cache}
+
+	// 保存分机，但密码为空
+	ext, err := service.Save(context.Background(), operate.Extension{
+		ExtensionNumber: "8002",
+		Password:        "", // 空密码
+		MerchantID:      1002,
+		UserID:          2002,
+		Enable:          true,
+		BindType:        operate.BindTypeManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 验证密码是否生成为8位
+	if len(ext.Password) != 8 {
+		t.Errorf("expected generated password to have length 8, got %q (len=%d)", ext.Password, len(ext.Password))
+	}
+
+	// 验证生成的密码符合字母/数字规则
+	const charset = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"
+	for _, char := range ext.Password {
+		if !strings.ContainsRune(charset, char) {
+			t.Errorf("password contains invalid character: %c", char)
+		}
+	}
+
+	// 验证 HA1 和 HA1b 不为空且被正确计算
+	if ext.HA1 == "" || ext.HA1b == "" {
+		t.Errorf("expected HA1 and HA1b to be non-empty")
+	}
+}

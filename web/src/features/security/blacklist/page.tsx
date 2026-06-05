@@ -677,7 +677,7 @@ export function BlacklistPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}
@@ -722,7 +722,7 @@ export function BlacklistPage() {
         }}
         onOk={() => numForm.submit()}
         confirmLoading={saveNumMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={numForm} layout="vertical" onFinish={(values) => saveNumMutation.mutate(values)}>
           <Form.Item
@@ -764,7 +764,7 @@ export function BlacklistPage() {
           channelForm.resetFields()
         }}
         onOk={() => channelForm.submit()}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={channelForm}

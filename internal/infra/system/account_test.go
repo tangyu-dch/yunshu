@@ -199,7 +199,7 @@ func openConsoleAccountTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&ConsoleAccountModel{}, &MerchantModel{}); err != nil {
+	if err := db.AutoMigrate(&ConsoleAccountModel{}, &MerchantModel{}, &merchantUserModel{}); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -207,4 +207,106 @@ func openConsoleAccountTestDB(t *testing.T) *gorm.DB {
 
 func ptrTime(t time.Time) *time.Time {
 	return &t
+}
+
+func TestConsoleAccountRepositoryMerchantUserCascades(t *testing.T) {
+	t.Parallel()
+
+	db := openConsoleAccountTestDB(t)
+	repo := NewConsoleAccountRepository(db, nil)
+
+	// 1. 测试级联创建
+	acc, err := repo.Save(context.Background(), operate.Account{
+		Username:       "agent-001",
+		Password:       "agent123",
+		MerchantID:     "1001",
+		RoleID:         "merchant_user",
+		AccountType:    operate.AccountTypeMerchantUser,
+		DataScope:      operate.DataScopeMerchant,
+		Enable:         true,
+		OrganizationID: 88,
+		SeatNumber:     "8008",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if acc.ID == 0 || acc.UserID == "" {
+		t.Fatalf("expected account ID and UserID to be populated, got ID: %d, UserID: %s", acc.ID, acc.UserID)
+	}
+
+	// 验证 cc_res_mch_user 级联写入
+	var seat merchantUserModel
+	if err := db.Where("id = ?", acc.ID).First(&seat).Error; err != nil {
+		t.Fatal("expected cascading merchant_user record to be created:", err)
+	}
+	if seat.OrganizationID != 88 || seat.SeatNumber != "8008" || seat.Username != "agent-001" || !seat.Enable {
+		t.Fatalf("unexpected cascading record values: %+v", seat)
+	}
+
+	// 2. 测试通过 GetByID 加载回填
+	loaded, err := repo.GetByID(context.Background(), acc.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OrganizationID != 88 || loaded.SeatNumber != "8008" {
+		t.Fatalf("expected organizationId and seatNumber to be loaded, got org: %d, seat: %s", loaded.OrganizationID, loaded.SeatNumber)
+	}
+
+	// 3. 测试通过 Page 加载回填
+	page, err := repo.Page(context.Background(), operate.AccountPageRequest{PageNumber: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, rec := range page.Records {
+		if rec.ID == acc.ID {
+			found = true
+			if rec.OrganizationID != 88 || rec.SeatNumber != "8008" {
+				t.Fatalf("expected org/seat to be loaded in Page, got org: %d, seat: %s", rec.OrganizationID, rec.SeatNumber)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected created account to be found in page results")
+	}
+
+	// 4. 测试级联修改
+	acc.OrganizationID = 99
+	acc.SeatNumber = "9009"
+	_, err = repo.Save(context.Background(), acc)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Where("id = ?", acc.ID).First(&seat).Error; err != nil {
+		t.Fatal(err)
+	}
+	if seat.OrganizationID != 99 || seat.SeatNumber != "9009" {
+		t.Fatalf("expected seat to be updated, got org: %d, seat: %s", seat.OrganizationID, seat.SeatNumber)
+	}
+
+	// 5. 测试级联启用停用状态更新
+	_, err = repo.SetEnable(context.Background(), acc.ID, false, "tester")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("id = ?", acc.ID).First(&seat).Error; err != nil {
+		t.Fatal(err)
+	}
+	if seat.Enable {
+		t.Fatal("expected seat enable state to be set to false")
+	}
+
+	// 6. 测试级联逻辑删除
+	err = repo.Delete(context.Background(), []int{acc.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("id = ?", acc.ID).First(&seat).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !seat.DelFlag || seat.Enable {
+		t.Fatal("expected seat to be logically deleted and disabled")
+	}
 }

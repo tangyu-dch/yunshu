@@ -71,11 +71,13 @@ type ConsoleRuntime struct {
 	Whitelist        *operatedomain.WhitelistManagementService
 	Billing          *operatedomain.BillingManagementService
 	BatchTask        *operatedomain.BatchTaskManagementService
+	Department       *operatedomain.DepartmentManagementService
 	CallRecord       *operatedomain.CallRecordManagementService
 	AIFlow           *operatedomain.AIModelFlowManagementService
 	AIConfig         *operatedomain.AIModelConfigManagementService
 	Gateway          *operatedomain.GatewayManagementService
 	Rtpengine        *operatedomain.RtpengineManagementService
+	Dispatcher       *operatedomain.DispatcherManagementService
 	Extension        *operatedomain.ExtensionManagementService
 	Pool             *operatedomain.PoolManagementService
 	PoolPhone        *operatedomain.PoolPhoneManagementService
@@ -85,6 +87,8 @@ type ConsoleRuntime struct {
 	PhoneAttribution *operatedomain.PhoneAttributionManagementService
 	ProxyConfig      *operatedomain.ProxyConfigManagementService
 	AreaCode         operatedomain.AreaCodeRepository
+	License          *operatedomain.LicenseService
+	IPBlock          *operatedomain.IPBlockManagementService
 }
 
 // NewServer 负责创建单个服务进程的 Gin 引擎，并注册通用探活、契约发现和领域路由。
@@ -164,13 +168,15 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		routePermissionResolver = permissionRepository
 		logger.Info("管理端权限配置将从数据库读取", "tables", "console_permission,console_role_permission,console_route_permission")
 	}
+
+	var statuses esl.ExtensionStatusReader
+	if redisClient != nil {
+		statuses = extensionstatus.NewRedisReader(redisClient)
+	}
+
 	// 初始化商户仓储，使用重构后的 merchant 包以对齐规范
 	merchantRepository := operatedomain.MerchantRepository(merchant.NewMemoryMerchantRepository())
 	if gormDB != nil {
-		var statuses esl.ExtensionStatusReader
-		if redisClient != nil {
-			statuses = extensionstatus.NewRedisReader(redisClient)
-		}
 		merchantRepository = merchant.NewMerchantRepository(gormDB, statuses, logger)
 		logger.Info("运营端商户配置将从数据库读取", "table", "merchant")
 		seedDatabaseMerchant(gormDB, logger)
@@ -182,7 +188,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	}
 	batchTaskRepository := operatedomain.BatchTaskRepository(business.NewMemoryBatchTaskRepository())
 	if gormDB != nil {
-		batchTaskRepository = business.NewBatchRepository(gormDB, logger)
+		batchTaskRepository = business.NewBatchRepository(gormDB, statuses, logger)
 		logger.Info("运营端批量外呼任务配置将从数据库读取", "table", "merchant_batch_call_task")
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端批量外呼任务管理使用本地内存兜底", "impact", "生产环境必须配置 merchant_batch_call_task 表仓储")
@@ -191,7 +197,11 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	var callRecordRepository operatedomain.CallRecordRepository
 	if gormDB != nil {
 		callRecordRepository = business.NewQueryRepository(gormDB)
-		callRecordService = &operatedomain.CallRecordManagementService{Repository: callRecordRepository, Logger: logger}
+		callRecordService = &operatedomain.CallRecordManagementService{
+			Repository:  callRecordRepository,
+			RedisClient: redisClient,
+			Logger:      logger,
+		}
 		logger.Info("运营端呼叫记录将从数据库读取", "table", "call_cdr_record")
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端呼叫记录管理未启用", "impact", "生产环境必须配置 call_cdr_record 表仓储")
@@ -257,6 +267,13 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	} else {
 		logger.Warn("未配置 MySQL DSN，商户端技能组管理使用本地内存兜底", "impact", "生产环境必须配置 skill_group 表仓储")
 	}
+	departmentRepository := operatedomain.DepartmentRepository(resource.NewMemoryDepartmentRepository())
+	if gormDB != nil {
+		departmentRepository = resource.NewDepartmentRepository(gormDB, logger)
+		logger.Info("运营端部门配置将从数据库读取", "table", "cc_res_department")
+	} else {
+		logger.Warn("未配置 MySQL DSN，运营端部门管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_department 表仓储")
+	}
 	gatewayRepository := operatedomain.GatewayRepository(telephony.NewMemoryGatewayRepository())
 	if gormDB != nil {
 		gatewayRepository = telephony.NewGatewayRepository(gormDB, logger)
@@ -312,11 +329,15 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	}
 	logger.Info("cc-console FreeSWITCH 管理能力已启用", "databaseConfigured", gormDB != nil)
 	rtpengineRepository := operatedomain.RtpengineRepository(telephony.NewMemoryRtpengineRepository())
+	dispatcherRepository := operatedomain.DispatcherRepository(telephony.NewMemoryDispatcherRepository())
 	if gormDB != nil {
 		rtpengineRepository = telephony.NewRtpengineRepository(gormDB, logger)
 		logger.Info("运营端 Kamailio rtpengine 配置将从数据库读取", "table", "cc_res_rtpengine")
+		dispatcherRepository = telephony.NewGormDispatcherRepository(gormDB, logger)
+		logger.Info("运营端 Kamailio dispatcher 配置将从数据库读取", "table", "cc_res_freeswitch")
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端 Kamailio rtpengine 管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_rtpengine 表仓储")
+		logger.Warn("未配置 MySQL DSN，运营端 Kamailio dispatcher 管理使用本地内存兜底", "impact", "生产环境必须配置 cc_res_freeswitch 表仓储")
 	}
 	riskControlRepository := operatedomain.RiskControlRepository(security.NewMemoryRiskControlRepository())
 	if gormDB != nil {
@@ -332,6 +353,7 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	} else {
 		logger.Warn("未配置 MySQL DSN，运营端号码归属地管理使用本地内存兜底", "impact", "生产环境必须配置 phone_attribution 表仓储")
 	}
+	phoneAttributionRepository = system.NewCachedPhoneAttributionRepository(phoneAttributionRepository)
 
 	var areaCodeRepository operatedomain.AreaCodeRepository
 	if gormDB != nil {
@@ -345,7 +367,12 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 	authCacheInvalidator := buildAuthCacheInvalidator(redisClient, logger)
 
 	var proxyConfigService *operatedomain.ProxyConfigManagementService
+	var dispReloader operatedomain.DispatcherReloadPort
 	rtpengineService := &operatedomain.RtpengineManagementService{Repository: rtpengineRepository, Logger: logger}
+	dispatcherService := &operatedomain.DispatcherManagementService{Repository: dispatcherRepository, Logger: logger}
+
+	licenseService := operatedomain.NewLicenseService(nil, cfg.Console.LicensePath, logger)
+	var ipBlockService *operatedomain.IPBlockManagementService
 
 	if gormDB != nil {
 		proxyConfigRepo := system.NewProxyConfigRepository(gormDB, logger)
@@ -354,11 +381,49 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		} else {
 			logger.Info("代理默认配置已完成初始化", "table", "proxy_config")
 		}
+
+		// 同步 YAML 配置中的租户隔离模式至数据库参数表，以防出现配置不一致导致前端逻辑异常
+		if cfg.Tenant.Mode != "" {
+			if err := proxyConfigRepo.Set(context.Background(), "tenant.mode", cfg.Tenant.Mode, "云枢隔离部署模式(single/multi)"); err != nil {
+				logger.Error("同步 YAML 租户模式配置至数据库失败", "error", err.Error())
+			} else {
+				logger.Info("已成功同步 YAML 租户模式配置至数据库", "mode", cfg.Tenant.Mode)
+			}
+		}
+
 		reloader := &kamailioRtpengineReloader{repo: proxyConfigRepo, logger: logger}
 		rtpengineService.Reloader = reloader
-		proxyConfigService = operatedomain.NewProxyConfigManagementService(proxyConfigRepo, reloader, logger)
+		dispReloader = telephony.NewKamailioDispatcherReloader(proxyConfigRepo, logger)
+		dispatcherService.Reloader = dispReloader
+		proxyConfigService = operatedomain.NewProxyConfigManagementService(proxyConfigRepo, reloader, redisClient, logger)
+		if err := proxyConfigService.SyncToRedis(context.Background()); err != nil {
+			logger.Error("系统启动同步代理配置至 Redis 失败", "error", err.Error())
+		}
+
+		// 绑定真正的数据库仓储
+		licenseService = operatedomain.NewLicenseService(proxyConfigRepo, cfg.Console.LicensePath, logger)
+		// 1. 自动计算唯一部署 ID 并输出醒目的中文启动日志
+		depID, err := licenseService.GetDeploymentID()
+		if err == nil {
+			logger.Info("【云枢授权】系统启动成功", "部署唯一标识(Deployment ID)", depID, "运行状态", "正常运行")
+		} else {
+			logger.Error("【云枢授权】计算部署唯一标识失败", "error", err.Error())
+		}
+		// 2. 自动执行首次 License 验证，若发现已失效（超出宽限期），在日志中打印中文警告
+		_, err = licenseService.LoadAndVerify(context.Background())
+		if err != nil {
+			logger.Warn("【云枢授权】未激活可用的私有化授权或授权已失效", "error", err.Error())
+		}
+
+		// 初始化 IP 拦截服务
+		ipBlockLogRepo := system.NewGormIPBlockLogRepository(gormDB, logger)
+		ipBlockService = operatedomain.NewIPBlockManagementService(ipBlockLogRepo, proxyConfigRepo, redisClient, logger)
+		if err := ipBlockService.SyncToRedis(context.Background()); err != nil {
+			logger.Error("系统启动同步 IP 拦截配置至 Redis 失败", "error", err.Error())
+		}
 	} else {
-		logger.Warn("未配置 MySQL DSN，系统参数配置与 RTPEngine 热刷新未启用")
+		logger.Warn("未配置 MySQL DSN，系统参数配置与 RTPEngine/Dispatcher 热刷新未启用")
+		ipBlockService = operatedomain.NewIPBlockManagementService(system.NewMemoryIPBlockLogRepository(), nil, redisClient, logger)
 	}
 
 	return &ConsoleRuntime{
@@ -368,18 +433,20 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		Account:          &operatedomain.AccountManagementService{Repository: accountRepository, Logger: logger},
 		Channel:          &operatedomain.ChannelManagementService{Repository: channelRepository, Logger: logger},
 		Blacklist:        &operatedomain.BlacklistManagementService{Repository: blacklistRepository, Logger: logger},
-		FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Logger: logger},
-		Merchant:         &operatedomain.MerchantManagementService{Repository: merchantRepository, Logger: logger},
+		FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Reloader: dispReloader, Logger: logger},
+		Merchant:         &operatedomain.MerchantManagementService{Repository: merchantRepository, ExtensionRepo: extensionRepository, Cache: authCacheInvalidator, Logger: logger},
 		Rate:             &operatedomain.RateManagementService{Repository: rateRepository, Logger: logger},
 		Whitelist:        &operatedomain.WhitelistManagementService{Repository: whitelistRepository, Logger: logger},
 		Billing:          &operatedomain.BillingManagementService{Repository: billingRepository, Logger: logger},
 		BatchTask:        &operatedomain.BatchTaskManagementService{Repository: batchTaskRepository, Logger: logger},
+		Department:       &operatedomain.DepartmentManagementService{Repository: departmentRepository, Logger: logger},
 		CallRecord:       callRecordService,
 		AIFlow:           aiFlowService,
 		AIConfig:         aiConfigService,
 		Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
 		Rtpengine:        rtpengineService,
-		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, Logger: logger},
+		Dispatcher:       dispatcherService,
+		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, License: licenseService, Logger: logger},
 		Pool:             &operatedomain.PoolManagementService{Repository: poolRepository, Logger: logger},
 		PoolPhone:        &operatedomain.PoolPhoneManagementService{Repository: phoneRepository, Logger: logger},
 		PhoneGroup:       &operatedomain.PhoneGroupManagementService{Repository: phoneGroupRepository, Logger: logger},
@@ -388,6 +455,8 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) *Consol
 		PhoneAttribution: &operatedomain.PhoneAttributionManagementService{Repository: phoneAttributionRepository, Logger: logger},
 		ProxyConfig:      proxyConfigService,
 		AreaCode:         areaCodeRepository,
+		License:          licenseService,
+		IPBlock:          ipBlockService,
 	}
 }
 
@@ -475,7 +544,7 @@ func (s *Server) routes() {
 	case contracts.ServiceConsole:
 		httpoperate.RegisterAuthRoutes(s.gin, s.console.Auth)
 		httpoperate.RegisterDialpadCompatRoutes(s.gin, s.console.Auth, s.console.CallRecord, s.console.Extension, openRuntimeDB(s.cfg, slog.Default()), s.cfg.Console.Dialpad)
-		httpoperate.RegisterPermissionRoutes(s.gin, s.console.Permissions, s.console.Merchant)
+		httpoperate.RegisterPermissionRoutes(s.gin, s.console.Permissions)
 		httpoperate.RegisterAccountRoutes(s.gin, s.console.Account)
 		httpoperate.RegisterFreeSwitchRoutes(s.gin, s.console.FreeSwitch)
 		httpoperate.RegisterChannelRoutes(s.gin, s.console.Channel)
@@ -484,11 +553,12 @@ func (s *Server) routes() {
 		httpoperate.RegisterBillingRoutes(s.gin, s.console.Billing)
 		httpoperate.RegisterExtensionRoutes(s.gin, s.console.Extension)
 		httpoperate.RegisterPoolRoutes(s.gin, s.console.Pool)
-		httpoperate.RegisterPoolPhoneRoutes(s.gin, s.console.PoolPhone)
+		httpoperate.RegisterPoolPhoneRoutes(s.gin, s.console.PoolPhone, s.console.Pool)
 		httpoperate.RegisterMerchantRoutes(s.gin, s.console.Merchant)
 		httpoperate.RegisterRateRoutes(s.gin, s.console.Rate)
 		httpoperate.RegisterBatchTaskRoutes(s.gin, s.console.BatchTask)
 		httpoperate.RegisterBatchDialpadRoutes(s.gin, s.console.BatchTask)
+		httpoperate.RegisterDepartmentRoutes(s.gin, s.console.Department)
 		httpoperate.RegisterCallRecordRoutes(s.gin, s.console.CallRecord)
 		httpoperate.RegisterAIModelFlowRoutes(s.gin, s.console.AIFlow)
 		httpoperate.RegisterAIModelConfigRoutes(s.gin, s.console.AIConfig)
@@ -496,12 +566,15 @@ func (s *Server) routes() {
 		httpoperate.RegisterSkillGroupRoutes(s.gin, s.console.SkillGroup)
 		httpoperate.RegisterGatewayRoutes(s.gin, s.console.Gateway)
 		httpoperate.RegisterRtpengineRoutes(s.gin, s.console.Rtpengine)
+		httpoperate.RegisterDispatcherRoutes(s.gin, s.console.Dispatcher)
 		httpoperate.RegisterRiskControlRoutes(s.gin, s.console.RiskControl)
 		httpoperate.RegisterPhoneAttributionRoutes(s.gin, s.console.PhoneAttribution)
 		httpoperate.RegisterProxyConfigRoutes(s.gin, s.console.ProxyConfig)
 		httpoperate.RegisterAreaCodeRoutes(s.gin, s.console.AreaCode)
 		httpoperate.RegisterInstallerRoutes(s.gin, s.installer)
-		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
+		httpoperate.RegisterLicenseRoutes(s.gin, s.console.License)
+		httpoperate.RegisterIPBlockRoutes(s.gin, s.console.IPBlock)
+		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/kamailio/dispatcher", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/operate/license", "/operate/ip-block", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
 	default:
 		s.registerCompatibilityRoutes()
 	}
@@ -545,6 +618,50 @@ func (s *Server) consoleAccessMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+
+		// 联动实时校验账号的数据库状态（启用和删除状态）
+		if s.console.Account != nil {
+			accID, _ := strconv.Atoi(ticket.Tenant.UserID)
+			if accID > 0 {
+				acc, err := s.console.Account.Repository.GetByID(c.Request.Context(), accID)
+				if err != nil || !acc.Enable {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "账号已被停用或删除"))
+					c.Abort()
+					return
+				}
+			}
+		}
+
+		// 联动实时校验所属商户的数据库状态（启用、删除以及服务时限）
+		if s.console.Merchant != nil && ticket.Tenant.MerchantID != "" {
+			mchID, err := strconv.Atoi(strings.TrimSpace(ticket.Tenant.MerchantID))
+			if err == nil && mchID > 0 {
+				mch, err := s.console.Merchant.Repository.GetByID(c.Request.Context(), mchID)
+				if err != nil || !mch.Enable {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户主体已被停用或删除"))
+					c.Abort()
+					return
+				}
+				if mch.ExpiredTime != nil && mch.ExpiredTime.Before(time.Now().UTC()) {
+					c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户服务已过期"))
+					c.Abort()
+					return
+				}
+			}
+		}
+		// 特殊豁免：授权指纹获取、状态拉取和证书上传替换在离线锁定下只要登录即可执行（不校验具体操作权限）
+		// 但 tenant-mode 切换依然强绑定运营端内部管理员身份
+		if strings.HasPrefix(path, "/operate/license") {
+			if path == "/operate/license/tenant-mode" && !ticket.Tenant.Internal {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "没有权限修改系统架构模式"))
+				c.Abort()
+				return
+			}
+			c.Request = c.Request.WithContext(contracts.WithTenant(c.Request.Context(), ticket.Tenant))
+			c.Next()
+			return
+		}
+
 		required, found, err := s.requiredConsolePermission(c.Request.Context(), path, c.Request.Method)
 		if err != nil {
 			slog.Error("读取管理端路由权限失败", "path", path, "method", c.Request.Method, "error", err.Error())
@@ -727,7 +844,9 @@ func seedMemoryAccounts(repo *system.MemoryAccountRepository, logger *slog.Logge
 			accountType = operatedomain.AccountTypeMerchantUser
 			dataScope = operatedomain.DataScopeMerchant
 		}
+		id, _ := strconv.Atoi(account.UserID)
 		if _, err := repo.Save(context.Background(), operatedomain.Account{
+			ID:          id,
 			Username:    account.Username,
 			Password:    account.Password,
 			MerchantID:  account.MerchantID,
@@ -776,6 +895,7 @@ func seedDatabaseMerchant(gormDB *gorm.DB, logger *slog.Logger) {
 	appKey, appSecret := operatedomain.GenerateAppKeyPair()
 	sipDomain := "sip.yunshu.local"
 	maxAgents := 100
+	var expiredTime *time.Time
 	// 尝试读取已存在的凭证，避免覆盖已有配置
 	var existing resource.MerchantModel
 	if err := gormDB.Where("id = ?", 1001).First(&existing).Error; err == nil {
@@ -789,6 +909,7 @@ func seedDatabaseMerchant(gormDB *gorm.DB, logger *slog.Logger) {
 		if existing.MaxAgents > 0 {
 			maxAgents = existing.MaxAgents
 		}
+		expiredTime = existing.ExpiredTime
 	}
 	// 使用重构后的 merchant 包进行默认商户初始化
 	repo := merchant.NewMerchantRepository(gormDB, nil, logger)
@@ -802,6 +923,7 @@ func seedDatabaseMerchant(gormDB *gorm.DB, logger *slog.Logger) {
 		AppSecret:        appSecret,
 		SipDomain:        sipDomain,
 		MaxAgents:        maxAgents,
+		ExpiredTime:      expiredTime,
 	})
 	if err != nil {
 		logger.Error("数据库默认商户初始化失败", "merchantId", 1001, "error", err.Error())

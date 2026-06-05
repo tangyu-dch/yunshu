@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"gorm.io/gorm"
@@ -12,13 +13,16 @@ import (
 )
 
 type PhoneAttributionModel struct {
-	AreaCode string `gorm:"column:area_code;primaryKey"` // 号码前7位 (例如 "1380013")
-	ProvCode string `gorm:"column:prov_code"`            // 省份行政区划代码 (例如 "440000")
-	CityCode string `gorm:"column:city_code"`            // 城市行政区划代码 (例如 "440300")
+	AreaCode        string `gorm:"column:area_code;primaryKey"` // 号码前7位 (例如 "1380013")
+	Province        string `gorm:"column:province"`             // 省份名称 (例如 "北京")
+	City            string `gorm:"column:city"`                 // 城市名称 (例如 "北京")
+	ProvCode        string `gorm:"column:prov_code"`            // 省份行政区划代码 (例如 "110000")
+	CityCode        string `gorm:"column:city_code"`            // 城市行政区划代码 (例如 "110000")
+	ServiceProvider string `gorm:"column:isp"`                  // 运营商 (例如 "中国联通")
 }
 
 func (PhoneAttributionModel) TableName() string {
-	return "cc_sys_attribution"
+	return "cc_sys_phone_attribution"
 }
 
 type PhoneAttributionGormRepository struct {
@@ -41,6 +45,15 @@ func (r *PhoneAttributionGormRepository) Page(ctx context.Context, req operate.P
 	if req.CityCode != "" {
 		query = query.Where("city_code = ?", req.CityCode)
 	}
+	if req.Province != "" {
+		query = query.Where("province LIKE ?", "%"+req.Province+"%")
+	}
+	if req.City != "" {
+		query = query.Where("city LIKE ?", "%"+req.City+"%")
+	}
+	if req.ServiceProvider != "" {
+		query = query.Where("isp LIKE ?", "%"+req.ServiceProvider+"%")
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -56,9 +69,12 @@ func (r *PhoneAttributionGormRepository) Page(ctx context.Context, req operate.P
 	records := make([]operate.PhoneAttribution, 0, len(models))
 	for _, m := range models {
 		records = append(records, operate.PhoneAttribution{
-			AreaCode: m.AreaCode,
-			ProvCode: m.ProvCode,
-			CityCode: m.CityCode,
+			AreaCode:        m.AreaCode,
+			Province:        m.Province,
+			City:            m.City,
+			ProvCode:        m.ProvCode,
+			CityCode:        m.CityCode,
+			ServiceProvider: m.ServiceProvider,
 		})
 	}
 
@@ -80,17 +96,23 @@ func (r *PhoneAttributionGormRepository) GetByAreaCode(ctx context.Context, area
 		return operate.PhoneAttribution{}, false, err
 	}
 	return operate.PhoneAttribution{
-		AreaCode: m.AreaCode,
-		ProvCode: m.ProvCode,
-		CityCode: m.CityCode,
+		AreaCode:        m.AreaCode,
+		Province:        m.Province,
+		City:            m.City,
+		ProvCode:        m.ProvCode,
+		CityCode:        m.CityCode,
+		ServiceProvider: m.ServiceProvider,
 	}, true, nil
 }
 
 func (r *PhoneAttributionGormRepository) Save(ctx context.Context, attr operate.PhoneAttribution) (operate.PhoneAttribution, error) {
 	model := PhoneAttributionModel{
-		AreaCode: attr.AreaCode,
-		ProvCode: attr.ProvCode,
-		CityCode: attr.CityCode,
+		AreaCode:        attr.AreaCode,
+		Province:        attr.Province,
+		City:            attr.City,
+		ProvCode:        attr.ProvCode,
+		CityCode:        attr.CityCode,
+		ServiceProvider: attr.ServiceProvider,
 	}
 	if err := r.DB.WithContext(ctx).Save(&model).Error; err != nil {
 		return operate.PhoneAttribution{}, err
@@ -130,6 +152,15 @@ func (r *MemoryPhoneAttributionRepository) Page(_ context.Context, req operate.P
 			continue
 		}
 		if req.CityCode != "" && a.CityCode != req.CityCode {
+			continue
+		}
+		if req.Province != "" && !strings.Contains(a.Province, req.Province) {
+			continue
+		}
+		if req.City != "" && !strings.Contains(a.City, req.City) {
+			continue
+		}
+		if req.ServiceProvider != "" && !strings.Contains(a.ServiceProvider, req.ServiceProvider) {
 			continue
 		}
 		matched = append(matched, a)
@@ -174,6 +205,65 @@ func (r *MemoryPhoneAttributionRepository) Delete(_ context.Context, areaCodes [
 	defer r.mu.Unlock()
 	for _, code := range areaCodes {
 		delete(r.attributions, code)
+	}
+	return nil
+}
+
+// CachedPhoneAttributionRepository 包装另一个 PhoneAttributionRepository 并加上本地缓存
+type CachedPhoneAttributionRepository struct {
+	underlying operate.PhoneAttributionRepository
+	cache      sync.Map // key: areaCode (string) -> value: any
+}
+
+func NewCachedPhoneAttributionRepository(underlying operate.PhoneAttributionRepository) *CachedPhoneAttributionRepository {
+	return &CachedPhoneAttributionRepository{
+		underlying: underlying,
+	}
+}
+
+func (r *CachedPhoneAttributionRepository) Page(ctx context.Context, req operate.PhoneAttributionPageRequest) (operate.PhoneAttributionPageResult, error) {
+	return r.underlying.Page(ctx, req)
+}
+
+func (r *CachedPhoneAttributionRepository) GetByAreaCode(ctx context.Context, areaCode string) (operate.PhoneAttribution, bool, error) {
+	if val, ok := r.cache.Load(areaCode); ok {
+		if attr, ok := val.(operate.PhoneAttribution); ok {
+			return attr, true, nil
+		}
+		// Negative cache hit (value is false or not operate.PhoneAttribution)
+		return operate.PhoneAttribution{}, false, nil
+	}
+
+	attr, found, err := r.underlying.GetByAreaCode(ctx, areaCode)
+	if err != nil {
+		return operate.PhoneAttribution{}, false, err
+	}
+
+	if found {
+		r.cache.Store(areaCode, attr)
+	} else {
+		// Cache negative result to prevent cache penetration
+		r.cache.Store(areaCode, false)
+	}
+
+	return attr, found, nil
+}
+
+func (r *CachedPhoneAttributionRepository) Save(ctx context.Context, attr operate.PhoneAttribution) (operate.PhoneAttribution, error) {
+	saved, err := r.underlying.Save(ctx, attr)
+	if err != nil {
+		return operate.PhoneAttribution{}, err
+	}
+	r.cache.Store(attr.AreaCode, saved)
+	return saved, nil
+}
+
+func (r *CachedPhoneAttributionRepository) Delete(ctx context.Context, areaCodes []string) error {
+	if err := r.underlying.Delete(ctx, areaCodes); err != nil {
+		return err
+	}
+	for _, code := range areaCodes {
+		r.cache.Delete(code)
 	}
 	return nil
 }

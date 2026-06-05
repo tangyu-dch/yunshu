@@ -2,7 +2,9 @@ package esl_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"yunshu/internal/contracts"
 	"yunshu/internal/domain/esl"
@@ -175,5 +177,155 @@ func TestBuildBatchOutboundPlanInjectsRingbackMetadata(t *testing.T) {
 	}
 	if plan.Options["ringback"] != "/tmp/ring.wav" || plan.Options["variable_yunshu_ringback_file"] != "/tmp/ring.wav" {
 		t.Fatalf("expected ringback options, got %+v", plan.Options)
+	}
+}
+
+type fakeConcurrencyLimiter struct {
+	maxCalls int
+}
+
+func (l *fakeConcurrencyLimiter) CheckConcurrencyLimit(ctx context.Context, activeCount int) error {
+	if activeCount >= l.maxCalls {
+		return fmt.Errorf("concurrency limit exceeded: max %d, active %d", l.maxCalls, activeCount)
+	}
+	return nil
+}
+
+func (l *fakeConcurrencyLimiter) CheckFeatureLimit(ctx context.Context, feature string) error {
+	return nil
+}
+
+func TestOriginateServiceConcurrencyLimiter(t *testing.T) {
+	t.Parallel()
+
+	// 1. Setup limiter with max 2 concurrent calls
+	limiter := &fakeConcurrencyLimiter{maxCalls: 2}
+
+	executor := &esl.MemoryCommandExecutor{}
+	command := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
+	sessionStore := esl.NewMemorySessionStore()
+	session := esl.NewSessionService(sessionStore, business.NewOutboxMemoryStore(), nil)
+
+	service := &esl.OriginateService{
+		CommandService: command,
+		SessionService: session,
+		Limiter:        limiter,
+		Extensions: fakeExtensionResolver{extension: esl.Extension{
+			ID:              11,
+			UserID:          7,
+			MerchantID:      88,
+			ExtensionNumber: "2002",
+		}},
+	}
+
+	// 2. Add 2 active call sessions to the store
+	err := sessionStore.Save(context.Background(), esl.CallSession{
+		CallID: "active-call-1",
+		State:  esl.CallAnswered,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = sessionStore.Save(context.Background(), esl.CallSession{
+		CallID: "active-call-2",
+		State:  esl.CallBridged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Active count is now 2. Starting a new call should be rejected since max is 2.
+	err = service.StartAPIOutbound(context.Background(), esl.OriginateRequest{
+		Version: "v1",
+		CallID:  "new-call-3",
+		Request: contracts.ApiCallReq{UserID: 7, Callee: "13800138000"},
+	})
+	if err == nil {
+		t.Fatal("expected error due to concurrency limit, got nil")
+	}
+
+	// 3. Mark one call completed. Active count becomes 1.
+	err = sessionStore.Save(context.Background(), esl.CallSession{
+		CallID:      "active-call-1",
+		State:       esl.CallComplete,
+		CompletedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Starting a new call should now succeed.
+	err = service.StartAPIOutbound(context.Background(), esl.OriginateRequest{
+		Version: "v1",
+		CallID:  "new-call-3",
+		Request: contracts.ApiCallReq{UserID: 7, Callee: "13800138000"},
+	})
+	if err != nil {
+		t.Fatalf("expected success, got err: %v", err)
+	}
+}
+
+func TestOriginateServiceConcurrencyLimiterDiscountSelf(t *testing.T) {
+	t.Parallel()
+
+	// Concurrency limit = 2.
+	limiter := &fakeConcurrencyLimiter{maxCalls: 2}
+
+	executor := &esl.MemoryCommandExecutor{}
+	command := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
+	sessionStore := esl.NewMemorySessionStore()
+	session := esl.NewSessionService(sessionStore, business.NewOutboxMemoryStore(), nil)
+
+	service := &esl.OriginateService{
+		CommandService: command,
+		SessionService: session,
+		Limiter:        limiter,
+	}
+
+	// Add 1 unrelated active call
+	err := sessionStore.Save(context.Background(), esl.CallSession{
+		CallID: "active-call-unrelated",
+		State:  esl.CallAnswered,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add current call session as active (e.g., dialpad agent answered)
+	err = sessionStore.Save(context.Background(), esl.CallSession{
+		CallID: "current-call",
+		State:  esl.CallAnswered,
+		Metadata: map[string]any{
+			"agentUuid":    "agent-uuid",
+			"customerUuid": "customer-uuid",
+			"callee":       "13800138000",
+			"userId":       7,
+			"merchantId":   88,
+			"extension":    "1001",
+		},
+		FSAddr: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Total active calls in store = 2 (unrelated + current-call).
+	// But since "current-call" is the call we are originating the customer leg for,
+	// it should be discounted by 1.
+	// Thus, verified active count = 1 < 2, so it should succeed.
+	err = service.StartDialpadCustomerOutbound(context.Background(), esl.APICustomerOriginateRequest{
+		Version: "v1",
+		CallID:  "current-call",
+		Selection: contracts.SelectPhoneResp{
+			Phone:         "13800000000",
+			GatewayID:     1,
+			GatewayName:   "gw-1",
+			GatewayRegion: "sh",
+			Model:         1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected success with self-discount, got err: %v", err)
 	}
 }

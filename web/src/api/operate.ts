@@ -1,5 +1,5 @@
 import { http } from '@/api/http'
-import type { AiFlowItem, BatchTaskItem, CallRecordItem, DispatcherItem, GatewayItem, NodeItem, PoolItem, PoolPhoneItem, SkillGroupItem, StatItem } from '@/types'
+import type { AiFlowItem, BatchTaskItem, CallRecordItem, DispatcherItem, GatewayItem, NodeItem, PoolItem, PoolPhoneItem, SkillGroupItem, StatItem, CallSipTraceResult, IPBlockLog, IPBlockLogQuery, IPBlockConfig } from '@/types'
 
 type PageResult<T> = {
   pageNumber: number
@@ -37,6 +37,7 @@ type MerchantResp = {
 
 type PoolResp = {
   id: number
+  merchantId?: number
   name?: string
   remark?: string
   type?: number
@@ -126,6 +127,7 @@ type CallRecordResp = {
   gatewayName?: string
   extension?: string
   profile?: string
+  sipHangupDisposition?: string
 }
 
 type AiFlowResp = {
@@ -206,14 +208,16 @@ export async function fetchMerchants(pageNumber = 1, pageSize = 20) {
   }
 }
 
-export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name?: string; gatewayId?: number; enable?: boolean }) {
-  const { data } = await http.get<PageResult<PoolResp>>('/operate/pool', {
-    params: { pageNumber, pageSize, name: filters?.name || undefined, gatewayId: filters?.gatewayId || undefined, enable: filters?.enable },
+export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name?: string; gatewayId?: number; enable?: boolean; merchantId?: number }, isMerchant = false) {
+  const url = isMerchant ? '/merchant/pool' : '/operate/pool'
+  const { data } = await http.get<PageResult<PoolResp>>(url, {
+    params: { pageNumber, pageSize, name: filters?.name || undefined, gatewayId: filters?.gatewayId || undefined, enable: filters?.enable, merchantId: filters?.merchantId || undefined },
   })
   return {
     ...data,
     records: data.records.map<PoolItem>((item) => ({
       id: item.id,
+      merchantId: item.merchantId,
       name: item.name || `号码池 ${item.id}`,
       remark: item.remark || '-',
       gateway: item.gatewayId ? `网关 ${item.gatewayId}` : '未绑定',
@@ -226,8 +230,29 @@ export async function fetchPools(pageNumber = 1, pageSize = 20, filters?: { name
   }
 }
 
-export async function fetchPoolPhones(pageNumber = 1, pageSize = 20) {
-  const { data } = await http.get<PageResult<PoolPhoneResp>>('/operate/pool-phone', {
+export async function fetchPoolPhones(pageNumber = 1, pageSize = 20, isMerchant = false) {
+  const url = isMerchant ? '/merchant/pool-phone' : '/operate/pool-phone'
+  const { data } = await http.get<PageResult<PoolPhoneResp>>(url, {
+    params: { pageNumber, pageSize },
+  })
+  return {
+    ...data,
+    records: data.records.map<PoolPhoneItem>((item) => ({
+      id: item.id,
+      phone: item.phone || '-',
+      pool: item.poolId ? `号码池 ${item.poolId}` : '未分配',
+      poolId: item.poolId ?? 0,
+      province: item.province || '-',
+      city: item.city || '-',
+      concurrency: item.concurrency ?? 0,
+      callLimit: item.callLimit ?? 0,
+      enable: Boolean(item.enable),
+    })),
+  }
+}
+
+export async function fetchMerchantPoolPhones(pageNumber = 1, pageSize = 1000) {
+  const { data } = await http.get<PageResult<PoolPhoneResp>>('/merchant/pool-phone', {
     params: { pageNumber, pageSize },
   })
   return {
@@ -331,7 +356,7 @@ export async function deleteDispatchers(ids: number[]) {
   return data
 }
 
-export async function savePool(payload: { id?: number; name: string; remark?: string; type: number; gatewayId?: number; enable: boolean; selectionStrategy?: string }) {
+export async function savePool(payload: { id?: number; merchantId?: number; name: string; remark?: string; type: number; gatewayId?: number; enable: boolean; selectionStrategy?: string }) {
   const path = payload.id ? '/operate/pool/update' : '/operate/pool/add'
   const { data } = await http.request({
     method: payload.id ? 'POST' : 'PUT',
@@ -460,6 +485,11 @@ export async function fetchBatchTasks(pageNumber = 1, pageSize = 50) {
         unconnectedInterval: (item as any).unconnectedInterval,
         callTimePeriod: (item as any).callTimePeriod,
         aiFlag: (item as any).aiFlag,
+        skillGroupId: (item as any).skillGroupId,
+        departmentId: (item as any).departmentId,
+        callMode: (item as any).callMode,
+        callRatio: (item as any).callRatio,
+        queueEnable: (item as any).queueEnable,
       }
     }),
   }
@@ -474,9 +504,11 @@ export async function fetchCallRecords(
     gatewayId?: string
     profile?: string
     extension?: string
+    phone?: string
     startTime?: string
     endTime?: string
     merchantId?: number
+    userId?: number
   } = {}
 ) {
   const { data } = await http.get<PageResult<CallRecordResp>>('/merchant/call-record', {
@@ -491,7 +523,8 @@ export async function fetchCallRecords(
       callee: item.callee || '-',
       caller: item.caller || '-',
       fsAddr: item.fsAddr || '',
-      state: item.finalState || item.hangupCause || 'unknown',
+      state: item.finalState || 'unknown',
+      hangupCause: item.hangupCause || '',
       duration: item.durationSec !== undefined ? `${item.durationSec} 秒` : '-',
       finishedAt: item.completedAt || '',
       // 高级通话统计与分析报表字段映射
@@ -503,6 +536,7 @@ export async function fetchCallRecords(
       userId: item.userId ?? 0,
       profile: item.profile || '',
       recordFilePath: item.recordFilePath,
+      sipHangupDisposition: item.sipHangupDisposition || '',
     })),
   }
 }
@@ -581,11 +615,9 @@ function normalizeFsStatus(status?: string): NodeItem['status'] {
 function typeLabel(type?: number) {
   switch (type) {
     case 1:
-      return '普通'
+      return '呼入'
     case 2:
-      return '预测'
-    case 3:
-      return '外呼'
+      return '呼出'
     default:
       return type ? `类型 ${type}` : '-'
   }
@@ -733,12 +765,22 @@ export async function fetchBillingOverview(pageNumber = 1, pageSize = 20, mercha
 }
 
 export async function saveBillingOverview(payload: { id?: number; merchantId: string; paymentMode: number; creditLimit: number }) {
-  const { data } = await http.post('/operate/billing/overview/save', payload)
+  const formattedPayload = {
+    merchantId: parseInt(payload.merchantId, 10),
+    paymentModeCode: payload.paymentMode,
+    creditLimit: payload.creditLimit,
+  };
+  const { data } = await http.post('/operate/billing/overview/save', formattedPayload)
   return data
 }
 
 export async function rechargeMerchant(payload: { merchantId: string; amount: number; remark?: string }) {
-  const { data } = await http.post('/operate/billing/recharge', payload)
+  const formattedPayload = {
+    merchantId: parseInt(payload.merchantId, 10),
+    amount: payload.amount,
+    remark: payload.remark,
+  };
+  const { data } = await http.post('/operate/billing/recharge', formattedPayload)
   return data
 }
 
@@ -769,26 +811,49 @@ export async function deleteChannels(ids: number[]) {
   return data
 }
 
-export async function fetchPhoneAttributions(pageNumber = 1, pageSize = 20, areaCode = '', provCode = '', cityCode = '') {
+export async function fetchPhoneAttributions(
+  pageNumber = 1,
+  pageSize = 20,
+  areaCode = '',
+  provCode = '',
+  cityCode = '',
+  province = '',
+  city = '',
+  serviceProvider = ''
+) {
   const { data } = await http.post<PageResult<any>>('/operate/phone-attribution/page', {
     pageNumber,
     pageSize,
     areaCode,
     provCode,
     cityCode,
+    province,
+    city,
+    serviceProvider,
   })
   return data
 }
 
-export async function savePhoneAttribution(payload: { areaCode: string; provCode: string; cityCode: string; isEdit?: boolean }) {
+export async function savePhoneAttribution(payload: {
+  areaCode: string
+  province: string
+  city: string
+  provCode: string
+  cityCode: string
+  serviceProvider: string
+  isEdit?: boolean
+}) {
   const path = payload.isEdit ? '/operate/phone-attribution/update' : '/operate/phone-attribution/add'
   const { data } = await http.request({
     method: payload.isEdit ? 'POST' : 'PUT',
     url: path,
     data: {
       areaCode: payload.areaCode,
+      province: payload.province,
+      city: payload.city,
       provCode: payload.provCode,
       cityCode: payload.cityCode,
+      serviceProvider: payload.serviceProvider,
     },
   })
   return data
@@ -799,7 +864,14 @@ export async function deletePhoneAttributions(areaCodes: string[]) {
   return data
 }
 
-export async function lookupPhoneAttribution(phone: string): Promise<{ areaCode: string; provCode: string; cityCode: string }> {
+export async function lookupPhoneAttribution(phone: string): Promise<{
+  areaCode: string
+  province: string
+  city: string
+  provCode: string
+  cityCode: string
+  serviceProvider: string
+}> {
   const { data } = await http.get('/operate/phone-attribution/lookup', {
     params: { phone },
   })
@@ -986,15 +1058,6 @@ export async function saveRolePermissions(roleCode: string, permissionCodes: str
   return data
 }
 
-export async function bindMerchantRate(rateId: number) {
-  const { data } = await http.post('/merchant/billing/rate/bind', { rateId })
-  return data
-}
-
-export async function fetchActiveRates() {
-  const { data } = await http.get<any[]>('/operate/rate/list-active')
-  return data
-}
 
 export async function saveBatchTask(payload: any) {
   const path = payload.id ? '/merchant/batch-call-task/update' : '/merchant/batch-call-task/add'
@@ -1063,6 +1126,17 @@ export async function publishAiFlow(id: number) {
 
 export async function importBatchTaskTels(id: number, merchantId: number, userId: number, tels: string[]) {
   const { data } = await http.post(`/merchant/batch-call-task/import/${id}`, { merchantId, userId, tels })
+  return data
+}
+
+export async function importBatchTaskFile(id: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await http.post(`/merchant/batch-call-task/import/file/${id}`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
   return data
 }
 
@@ -1318,5 +1392,136 @@ export async function deleteDialpadVersion(id: number) {
   return data
 }
 
+// ----------------------------------------------------
+// 部门管理 API 接口
+// ----------------------------------------------------
+
+export interface Department {
+  id?: number
+  merchantId: number
+  name: string
+  description?: string
+  enable: boolean
+}
+
+export interface DepartmentPageRequest {
+  pageNumber: number
+  pageSize: number
+  name?: string
+  merchantId?: number
+  enable?: boolean
+}
+
+export interface DepartmentPageResult {
+  pageNumber: number
+  pageSize: number
+  total: number
+  records: Department[]
+}
+
+export async function fetchDepartments(pageNumber: number, pageSize: number, query?: { name?: string, merchantId?: number, enable?: boolean }) {
+  const { data } = await http.post<DepartmentPageResult>('/merchant/department/page', {
+    pageNumber,
+    pageSize,
+    ...query
+  })
+  return data
+}
+
+export async function fetchDepartmentsList(merchantId?: number) {
+  const { data } = await http.get<Department[]>('/merchant/department/list', {
+    params: { merchantId }
+  })
+  return data
+}
+
+export async function saveDepartment(payload: Department) {
+  const { data } = await http.post<Department>('/merchant/department/save', payload)
+  return data
+}
+
+export async function deleteDepartments(ids: number[]) {
+  const { data } = await http.post('/merchant/department/delete', ids.map(id => ({ id })))
+  return data
+}
+
+// ----------------------------------------------------
+// 私有化部署授权管理 (License) API 接口
+// ----------------------------------------------------
+
+export interface LicenseStatus {
+  licenseId?: string
+  customerName?: string
+  deploymentId: string
+  licenseType?: 'initial' | 'renewal' | 'migration' | 'trial'
+  previousDeploymentId?: string
+  notBefore?: string
+  notAfter?: string
+  remainingDays?: number
+  maxConcurrentCalls?: number
+  maxExtensions?: number
+  features?: string[]
+  status: 'normal' | 'grace_period' | 'expired' | 'time_rollback_locked' | 'unlicensed'
+  statusMsg: string
+  tenantMode: 'single' | 'multi'
+}
+
+export interface LicenseFingerprint {
+  deploymentId: string
+  uuid: string
+  macs: string[]
+  diskSerial: string
+  hostname: string
+}
+
+export async function fetchLicenseStatus() {
+  const { data } = await http.get<LicenseStatus>('/operate/license/status')
+  return data
+}
+
+export async function fetchLicenseFingerprint() {
+  const { data } = await http.get<LicenseFingerprint>('/operate/license/fingerprint')
+  return data
+}
+
+export async function uploadLicenseFile(file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  const { data } = await http.post('/operate/license/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  })
+  return data
+}
+
+export async function setTenantMode(mode: 'single' | 'multi') {
+  const { data } = await http.post('/operate/license/tenant-mode', { mode })
+  return data
+}
+export async function fetchCallSipTrace(callId: string) {
+  const { data } = await http.get<CallSipTraceResult>(`/merchant/call-record/sip-trace/${callId}`)
+  return data
+}
+
+export async function fetchIPBlockConfig() {
+  const { data } = await http.get<IPBlockConfig>('/operate/ip-block/config')
+  return data
+}
+
+export async function saveIPBlockConfig(payload: { countries: string; onlyAllowCn: boolean }) {
+  const { data } = await http.post('/operate/ip-block/config', payload)
+  return data
+}
+
+export async function fetchIPBlockLogs(params: IPBlockLogQuery) {
+  const { data } = await http.get<PageResult<IPBlockLog>>('/operate/ip-block/logs', { params })
+  return data
+}
+
+export async function lookupIPAddress(ip: string) {
+  const { data } = await http.get<{ ip: string; countryCode: string }>('/operate/ip-block/lookup', { params: { ip } })
+  return data
+}
 
 

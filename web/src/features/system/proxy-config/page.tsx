@@ -12,7 +12,8 @@ import {
   Alert,
   Spin,
   Tag,
-  Modal
+  Modal,
+  Switch
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -37,6 +38,7 @@ type ProxyConfigValues = {
   kamailioWsPort: number
   kamailioExternalIp: string
   kamailioStatus?: 'online' | 'offline'
+  sipTraceEnable?: boolean
 }
 
 export function ProxyConfigPage() {
@@ -186,7 +188,7 @@ export function ProxyConfigPage() {
 
       {/* 实时健康度卡片看板 */}
       <div className="grid grid-cols-1 gap-4 mb-2 animate-fade-in">
-        <Card bordered={false} className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
+        <Card variant="borderless" className="shadow-sm rounded-xl bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-zinc-900/60 dark:to-zinc-950/40 border border-slate-100 dark:border-zinc-850 p-4 transition-all duration-300">
           <div className="flex justify-between items-start">
             <div>
               <div className="text-[10px] font-bold text-slate-400 dark:text-zinc-500 uppercase font-mono tracking-wider">SIP SIGNAL PROXY SERVICE</div>
@@ -197,6 +199,7 @@ export function ProxyConfigPage() {
               <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-2 font-mono space-y-0.5">
                 <div>SIP 监听端口: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.kamailioSipPort ?? 5060}</span></div>
                 <div>WS 监听端口: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.kamailioWsPort ?? 5066}</span></div>
+                <div>SIP 信令追踪: <span className="font-semibold text-slate-700 dark:text-zinc-200">{data?.sipTraceEnable ? '已开启 (ON)' : '已关闭 (OFF)'}</span></div>
               </div>
             </div>
             {data?.kamailioStatus === 'online' ? (
@@ -270,7 +273,7 @@ export function ProxyConfigPage() {
         title="配置 Kamailio 信令代理核心参数"
         onCancel={() => setOpenEditModal(false)}
         width={650}
-        destroyOnClose
+        destroyOnHidden
         footer={[
           <Button key="cancel" onClick={() => setOpenEditModal(false)}>
             取消
@@ -364,6 +367,14 @@ export function ProxyConfigPage() {
             rules={[{ required: true, message: '请输入外部公网 IP' }]}
           >
             <Input placeholder="例如: 203.0.113.5 (如无公网映射可填 127.0.0.1 或内网IP)" />
+          </Form.Item>
+          <Form.Item
+            name="sipTraceEnable"
+            label="开启 SIP 信令双时追踪 (SipTrace)"
+            valuePropName="checked"
+            extra="开启后，呼叫的 SIP 握手信令将实时捕获并记录至 Redis 缓存（仅保留 2 小时），方便在通话记录中渲染交互时序图与 SDP 调试详情。"
+          >
+            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
           </Form.Item>
         </Form>
       </Modal>

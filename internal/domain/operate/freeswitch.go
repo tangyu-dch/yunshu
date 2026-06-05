@@ -27,6 +27,7 @@ var (
 // cc-call 的 reload 接口完成，避免管理进程直接持有呼叫进程内部连接池。
 type FreeSwitchManagementService struct {
 	Registry Registry
+	Reloader DispatcherReloadPort
 	Logger   *slog.Logger
 }
 
@@ -76,6 +77,13 @@ func (s *FreeSwitchManagementService) Save(ctx context.Context, node Node) (Node
 		logger.Error("运营端保存 FreeSWITCH 节点失败", "id", normalized.ID, "fsAddr", normalized.FSAddr, "error", err.Error())
 		return Node{}, err
 	}
+	if s.Reloader != nil {
+		if err := s.Reloader.ReloadDispatcher(ctx); err != nil {
+			logger.Warn("保存 FreeSWITCH 节点后热刷新 Kamailio Dispatcher 失败", "error", err.Error())
+		} else {
+			logger.Info("保存 FreeSWITCH 节点后热刷新 Kamailio Dispatcher 成功")
+		}
+	}
 	if normalized.ID > 0 {
 		saved, err := s.Registry.GetByID(ctx, normalized.ID)
 		if err == nil {
@@ -121,6 +129,13 @@ func (s *FreeSwitchManagementService) Delete(ctx context.Context, id int) error 
 	if err := s.Registry.Delete(ctx, id); err != nil {
 		logger.Warn("运营端删除 FreeSWITCH 节点失败", "id", id, "error", err.Error())
 		return err
+	}
+	if s.Reloader != nil {
+		if err := s.Reloader.ReloadDispatcher(ctx); err != nil {
+			logger.Warn("删除 FreeSWITCH 节点后热刷新 Kamailio Dispatcher 失败", "id", id, "error", err.Error())
+		} else {
+			logger.Info("删除 FreeSWITCH 节点后热刷新 Kamailio Dispatcher 成功", "id", id)
+		}
 	}
 	logger.Info("运营端删除 FreeSWITCH 节点完成", "id", id, "refreshRequired", true)
 	return nil
@@ -186,6 +201,12 @@ func pingFreeswitch(address string, eslPort int) NodeStatus {
 	if eslPort <= 0 {
 		eslPort = 8021
 	}
+
+	// 本地开发与宿主机运行适配：若在宿主机（非容器）环境下检测，将 freeswitch 域名映射回 127.0.0.1
+	if (address == "freeswitch" || address == "cc-freeswitch") && !isRunningInDocker() {
+		address = "127.0.0.1"
+	}
+
 	addr := net.JoinHostPort(address, strconv.Itoa(eslPort))
 
 	// 设置超短的 150ms 拨号超时

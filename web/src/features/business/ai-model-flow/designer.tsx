@@ -2249,7 +2249,7 @@ export function AiModelFlowDesigner() {
         confirmLoading={saveMutation.isPending}
         okText="确认保存并上线"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Form
           form={form}

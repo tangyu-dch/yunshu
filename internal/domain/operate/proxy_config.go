@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,6 +28,7 @@ const (
 	KeyRtpengineSdpIp      = "rtpengine.sdp_ip"
 	KeyRtpengineStartPort  = "rtpengine.rtp_start_port"
 	KeyRtpengineEndPort    = "rtpengine.rtp_end_port"
+	KeySipTraceEnable      = "siptrace.enable"
 )
 
 // ErrConfigNotFound 表示配置项不存在。
@@ -44,6 +46,8 @@ type ProxyConfig struct {
 	RtpengineStartPort  int    `json:"rtpengineStartPort"`
 	RtpengineEndPort    int    `json:"rtpengineEndPort"`
 	KamailioStatus      string `json:"kamailioStatus,omitempty"` // 内存中存储的实时物理在线状态: "online" | "offline"
+	NearbyCities        string `json:"nearbyCities,omitempty"`   // 邻近城市配置 (JSON格式地区编码列表)
+	SipTraceEnable      bool   `json:"sipTraceEnable"`           // 是否开启 SIP 信令链路追踪
 }
 
 // ProxyConfigItem 表示数据库存储的单条代理配置项。
@@ -66,6 +70,7 @@ type ProxyConfigRepository interface {
 type ProxyConfigManagementService struct {
 	Repo           ProxyConfigRepository
 	RtpReloader    RtpengineReloadPort
+	RedisClient    *goredis.Client
 	Logger         *slog.Logger
 	ConfigFilePath string
 	ComposePath    string
@@ -73,13 +78,14 @@ type ProxyConfigManagementService struct {
 }
 
 // NewProxyConfigManagementService 创建代理配置管理服务。
-func NewProxyConfigManagementService(repo ProxyConfigRepository, reloader RtpengineReloadPort, logger *slog.Logger) *ProxyConfigManagementService {
+func NewProxyConfigManagementService(repo ProxyConfigRepository, reloader RtpengineReloadPort, redisClient *goredis.Client, logger *slog.Logger) *ProxyConfigManagementService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ProxyConfigManagementService{
 		Repo:           repo,
 		RtpReloader:    reloader,
+		RedisClient:    redisClient,
 		Logger:         logger,
 		ConfigFilePath: "configs/default.yaml",
 		ComposePath:    "docker-compose.yml",
@@ -108,6 +114,8 @@ func (s *ProxyConfigManagementService) GetConfig(ctx context.Context) (ProxyConf
 	// 极速物理在线检测
 	kamailioStatus := pingKamailio(sipPort, wsPort)
 
+	sipTraceEnable := getStrVal(configMap, KeySipTraceEnable, "0") == "1"
+
 	return ProxyConfig{
 		KamailioUdpIp:       getStrVal(configMap, KeyKamailioUdpIp, "0.0.0.0"),
 		KamailioTcpIp:       getStrVal(configMap, KeyKamailioTcpIp, "0.0.0.0"),
@@ -119,6 +127,8 @@ func (s *ProxyConfigManagementService) GetConfig(ctx context.Context) (ProxyConf
 		RtpengineStartPort:  getIntVal(configMap, KeyRtpengineStartPort, 30000),
 		RtpengineEndPort:    getIntVal(configMap, KeyRtpengineEndPort, 30100),
 		KamailioStatus:      kamailioStatus,
+		NearbyCities:        getStrVal(configMap, "system.nearby_cities", `{"510100":["511300","510600","510700"],"440100":["440600","441900","440300"]}`),
+		SipTraceEnable:      sipTraceEnable,
 	}, nil
 }
 
@@ -136,6 +146,11 @@ func (s *ProxyConfigManagementService) SaveConfig(ctx context.Context, config Pr
 		return errors.New("Kamailio 端口号无效")
 	}
 
+	sipTraceVal := "0"
+	if config.SipTraceEnable {
+		sipTraceVal = "1"
+	}
+
 	configs := []struct {
 		key, val, desc string
 	}{
@@ -148,6 +163,8 @@ func (s *ProxyConfigManagementService) SaveConfig(ctx context.Context, config Pr
 		{KeyRtpengineSdpIp, config.RtpengineSdpIp, "RTPEngine 在 SDP 中宣告的公网 IP"},
 		{KeyRtpengineStartPort, strconv.Itoa(config.RtpengineStartPort), "RTPEngine 媒体端口范围起始"},
 		{KeyRtpengineEndPort, strconv.Itoa(config.RtpengineEndPort), "RTPEngine 媒体端口范围结束"},
+		{"system.nearby_cities", config.NearbyCities, "号码选择相邻/邻近城市匹配配置(JSON)"},
+		{KeySipTraceEnable, sipTraceVal, "是否开启 SIP 信令链路追踪 (1-开启, 0-关闭)"},
 	}
 
 	for _, cfg := range configs {
@@ -157,7 +174,44 @@ func (s *ProxyConfigManagementService) SaveConfig(ctx context.Context, config Pr
 		}
 	}
 
+	if s.RedisClient != nil {
+		if err := s.RedisClient.Set(ctx, "siptrace:enable", sipTraceVal, 0).Err(); err != nil {
+			s.Logger.Error("同步 SIP 追踪开关至 Redis 失败", "error", err.Error())
+		} else {
+			s.Logger.Info("同步 SIP 追踪开关至 Redis 成功", "value", sipTraceVal)
+		}
+	}
+
 	s.Logger.Info("运营端成功保存代理网络配置至数据库")
+	return nil
+}
+
+// SyncToRedis 将配置项从数据库同步至 Redis，用于启动时或热加载时的自适应配置。
+func (s *ProxyConfigManagementService) SyncToRedis(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.RedisClient == nil {
+		return nil
+	}
+
+	item, err := s.Repo.Get(ctx, KeySipTraceEnable)
+	val := "0"
+	if err == nil {
+		if item.Value == "1" || strings.ToLower(item.Value) == "true" {
+			val = "1"
+		}
+	} else if errors.Is(err, ErrConfigNotFound) {
+		val = "0"
+	} else {
+		return err
+	}
+
+	if err := s.RedisClient.Set(ctx, "siptrace:enable", val, 0).Err(); err != nil {
+		s.Logger.Error("同步 SIP 追踪开关至 Redis 失败", "error", err.Error())
+		return err
+	}
+	s.Logger.Info("同步 SIP 追踪开关至 Redis 成功", "value", val)
 	return nil
 }
 

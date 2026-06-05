@@ -21,15 +21,21 @@ import {
 	EyeInvisibleOutlined,
 	KeyOutlined,
 	ClusterOutlined,
-	ApiOutlined
+	ApiOutlined,
+	SafetyCertificateOutlined,
+	WarningOutlined,
+	DownloadOutlined,
+	UploadOutlined,
+	CloseOutlined
 } from '@ant-design/icons'
 import {
+	Alert,
 	Avatar,
 	Button,
+	Carousel,
 	Drawer,
 	Layout,
 	Menu,
-	Select,
 	Space,
 	Typography,
 	message,
@@ -43,15 +49,20 @@ import {
 	Descriptions,
 	Card,
 	Row,
-	Col
+	Col,
+	Upload,
+	App,
+	Badge
 } from 'antd'
+import Marquee from 'react-fast-marquee'
 import { useMemo, useState, useEffect } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { hasPermission } from '@/auth/permissions'
 import { useAuthStore } from '@/store/auth'
 import { useUiStore } from '@/store/ui'
-import { getMerchantDetail } from '@/api/operate'
+import { getMerchantDetail, fetchLicenseStatus, uploadLicenseFile } from '@/api/operate'
+import { http } from '@/api/http'
 import dayjs from 'dayjs'
 
 const { Header, Sider, Content } = Layout
@@ -80,6 +91,7 @@ const navItems: NavItem[] = [
       { key: '/operate/proxy-config', icon: <SettingOutlined />, label: '代理配置', permission: 'operate:freeswitch:read' },
       { key: '/operate/media-config', icon: <ClusterOutlined />, label: '媒体配置', permission: 'operate:freeswitch:read' },
       { key: '/operate/dialpad', icon: <ApiOutlined />, label: '拨号盘版本', permission: 'operate:account:read' },
+      { key: '/operate/license', icon: <SafetyCertificateOutlined />, label: '授权管理' },
     ],
 
   },
@@ -94,7 +106,7 @@ const navItems: NavItem[] = [
       { key: '/operate/role', icon: <TeamOutlined />, label: '角色权限', permission: 'operate:role:read' },
       { key: '/operate/extension', icon: <TeamOutlined />, label: '分机管理', permission: 'operate:extension:read' },
       { key: '/operate/call-record', icon: <FileSearchOutlined />, label: '通话记录', permission: 'operate:merchant:read' },
-      { key: '/operate/api-doc', icon: <ApiOutlined />, label: '运营 API 浏览器', permission: 'operate:account:read' },
+      { key: '/operate/api-doc', icon: <ApiOutlined />, label: '运营 API', permission: 'operate:account:read' },
     ],
   },
   {
@@ -128,6 +140,7 @@ const navItems: NavItem[] = [
     children: [
       { key: '/operate/blacklist', icon: <SettingOutlined />, label: '黑名单管理', permission: 'operate:blacklist:read' },
       { key: '/operate/whitelist', icon: <SettingOutlined />, label: '白名单管理', permission: 'operate:whitelist:read' },
+      { key: '/operate/ip-block', icon: <SettingOutlined />, label: 'IP地理拦截', permission: 'operate:riskcontrol:read' },
     ],
   },
 
@@ -138,9 +151,7 @@ const navItems: NavItem[] = [
     icon: <FileSearchOutlined />,
     platform: 'merchant',
     children: [
-      { key: '/merchant/batch-call-task', icon: <FileSearchOutlined />, label: '批量外呼', permission: 'merchant:batch-task:read' },
-      { key: '/merchant/batch-call-dialpad', icon: <FileSearchOutlined />, label: '拨号盘', permission: 'merchant:batch-dialpad:read' },
-      { key: '/merchant/webrtc-dialpad', icon: <PhoneOutlined />, label: 'WebRTC 拨号盘', permission: 'merchant:batch-dialpad:read' },
+      { key: '/merchant/batch-call-task', icon: <FileSearchOutlined />, label: '批量任务', permission: 'merchant:batch-task:read' },
       { key: '/merchant/call-record', icon: <FileSearchOutlined />, label: '通话记录', permission: 'merchant:call-record:read' },
       { key: '/merchant/phone-group', icon: <FileSearchOutlined />, label: '号码组', permission: 'merchant:phone-group:read' },
     ],
@@ -165,11 +176,22 @@ const navItems: NavItem[] = [
     ],
   },
   {
+    key: 'inbound-mgmt',
+    label: '呼入管理',
+    icon: <PhoneOutlined />,
+    platform: 'merchant',
+    children: [
+      { key: '/merchant/pool', icon: <PhoneOutlined />, label: '号码池', permission: 'merchant:account:read' },
+      { key: '/merchant/pool-phone', icon: <PhoneOutlined />, label: '号码资源', permission: 'merchant:account:read' },
+    ],
+  },
+  {
     key: 'merchant-system',
     label: '系统设置',
     icon: <SettingOutlined />,
     platform: 'merchant',
     children: [
+      { key: '/merchant/department', icon: <ApartmentOutlined />, label: '部门管理', permission: 'merchant:department:read' },
       { key: '/merchant/account', icon: <TeamOutlined />, label: '账号管理', permission: 'merchant:account:read' },
       { key: '/merchant/billing', icon: <DatabaseOutlined />, label: '套餐账务' },
       { key: '/merchant/api-doc', icon: <DatabaseOutlined />, label: '接口对接' },
@@ -185,6 +207,7 @@ const breadcrumbMap: Record<string, string[]> = {
   '/operate/system-config': ['系统核心', '代理配置'],
   '/operate/media-config': ['系统核心', '媒体配置'],
   '/operate/dialpad': ['系统核心', '拨号盘版本'],
+  '/operate/license': ['系统核心', '授权管理'],
   '/operate/merchant': ['业务管理', '商户配置'],
 
   '/operate/account': ['业务管理', '账号管理'],
@@ -200,29 +223,37 @@ const breadcrumbMap: Record<string, string[]> = {
   '/operate/billing': ['费率财务', '账务与充值'],
   '/operate/blacklist': ['安全防范', '黑名单管理'],
   '/operate/whitelist': ['安全防范', '白名单管理'],
-  '/operate/api-doc': ['系统运营', '运营 API 浏览器'],
-  '/merchant/batch-call-task': ['外呼业务', '批量外呼任务'],
-  '/merchant/batch-call-dialpad': ['外呼业务', '批量话务拨号盘'],
-  '/merchant/webrtc-dialpad': ['外呼业务', 'WebRTC 坐席拨号盘'],
+  '/operate/ip-block': ['安全防范', 'IP地理拦截'],
+  '/operate/api-doc': ['系统运营', '运营 API'],
+  '/merchant/batch-call-task': ['外呼业务', '批量任务'],
   '/merchant/call-record': ['外呼业务', '通话话单查询'],
   '/merchant/phone-group': ['外呼业务', '外呼号码组'],
   '/merchant/ai-model-flow': ['智能流管理', 'AI 流程编排'],
   '/merchant/ai-model-config': ['智能流管理', 'AI 厂商与模型'],
   '/merchant/skill-group': ['坐席技能', '坐席技能组配置'],
+  '/merchant/pool': ['呼入管理', '号码池'],
+  '/merchant/pool-phone': ['呼入管理', '号码资源'],
+  '/merchant/department': ['系统设置', '部门管理'],
   '/merchant/account': ['系统设置', '账号与分权'],
   '/merchant/billing': ['系统设置', '套餐计费账单'],
   '/merchant/api-doc': ['系统设置', 'API 开发对接中心'],
 }
 
-function filterNavItems(items: NavItem[], tenant: any): NavItem[] {
+function filterNavItems(items: NavItem[], tenant: any, tenantMode: string): NavItem[] {
   const isOperate = tenant?.internal ?? false
   return items
     .map((item) => {
       if (item.platform && (item.platform === 'operate') !== isOperate) {
         return null
       }
+      // 单租户模式下隐藏 SaaS/多租户相关的菜单
+      if (isOperate && tenantMode === 'single') {
+        if (item.key === '/operate/merchant' || item.key === '/operate/billing') {
+          return null
+        }
+      }
       if (item.children) {
-        const filteredChildren = filterNavItems(item.children, tenant)
+        const filteredChildren = filterNavItems(item.children, tenant, tenantMode)
         if (filteredChildren.length > 0) {
           return { ...item, children: filteredChildren }
         }
@@ -239,6 +270,7 @@ function filterNavItems(items: NavItem[], tenant: any): NavItem[] {
 const defaultOpenKeys = ['system-core', 'biz-mgmt', 'phone-mgmt', 'billing-rate', 'security-rules', 'outbound-mgmt', 'ai-mgmt', 'skill-mgmt', 'merchant-system']
 
 export function AdminLayout() {
+  const { modal, message: appMessage } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const { username, logout, originalTenant, revert } = useAuthStore()
@@ -249,6 +281,8 @@ export function AdminLayout() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [showSecret, setShowSecret] = useState(false)
+  const [uploadingLicense, setUploadingLicense] = useState(false)
+  const [licenseOpen, setLicenseOpen] = useState(false)
 
   const isMerchantAdminOrInternal = useMemo(() => {
     if (!tenant) return false
@@ -262,6 +296,65 @@ export function AdminLayout() {
     queryFn: () => getMerchantDetail(merchantIdNum!, Boolean(tenant?.internal)),
     enabled: !!merchantIdNum && profileOpen
   })
+
+  // 全局获取系统授权状态（在私有化部署中，商户端用户登录也需感知授权是否过期以拦截）
+  const { data: licenseStatus, refetch: refetchLicense } = useQuery({
+    queryKey: ['system', 'license', 'status'],
+    queryFn: fetchLicenseStatus,
+    enabled: !!tenant,
+    refetchInterval: 15000, // 每15秒轮询一次以保持高水位时钟更新与状态拉取
+  })
+  const tenantMode = licenseStatus?.tenantMode || 'single'
+
+  const isLocked = useMemo(() => {
+    if (!licenseStatus) return false
+    const s = licenseStatus.status
+    return s === 'expired' || s === 'time_rollback_locked' || s === 'unlicensed'
+  }, [licenseStatus])
+
+  const isExpiringSoon = useMemo(() => {
+    if (!licenseStatus) return false
+    return licenseStatus.remainingDays !== undefined && 
+           licenseStatus.remainingDays > 0 && 
+           licenseStatus.remainingDays < 15
+  }, [licenseStatus])
+
+  const [showTrialAlert, setShowTrialAlert] = useState(() => {
+    return sessionStorage.getItem('dismiss_trial_alert') !== 'true'
+  })
+
+  const announcements = useMemo(() => {
+    if (!licenseStatus) return []
+    const list = []
+    
+    if (licenseStatus.status === 'grace_period') {
+      list.push(
+        {
+          tag: '授权提示',
+          text: `系统当前未激活，处于 15 天试用宽限期内（截止日期：${licenseStatus.notAfter || 'N/A'}，试用期后将锁定核心功能）`,
+          color: 'orange'
+        }
+      )
+    } else if (licenseStatus.remainingDays !== undefined && licenseStatus.remainingDays > 0 && licenseStatus.remainingDays < 15) {
+      list.push(
+        {
+          tag: '授权预警',
+          text: `您的系统商用授权即将到期，剩余有效期仅剩 ${licenseStatus.remainingDays} 天（到期日：${licenseStatus.notAfter || 'N/A'}）。到期后呼叫核心将被安全锁定，请尽快联系管理员或技术支持更新证书！`,
+          color: 'red'
+        }
+      )
+    }
+    
+    return list
+  }, [licenseStatus])
+
+  useEffect(() => {
+    const handleModeChange = () => {
+      refetchLicense()
+    }
+    window.addEventListener('tenant-mode-changed', handleModeChange)
+    return () => window.removeEventListener('tenant-mode-changed', handleModeChange)
+  }, [refetchLicense])
 
   // 优雅启用 modern View Transitions API 带来 GPU 加速、超凡丝滑的深色模式渐变切换体验
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
@@ -292,7 +385,7 @@ export function AdminLayout() {
   }, [])
 
   const selectedKeys = useMemo(() => [location.pathname], [location.pathname])
-  const visibleNavItems = useMemo(() => filterNavItems(navItems, tenant), [tenant])
+  const visibleNavItems = useMemo(() => filterNavItems(navItems, tenant, tenantMode), [tenant, tenantMode])
   const platformLabel = tenant?.internal ? '运营平台' : '商户平台'
 
   const isDark = theme === 'dark'
@@ -310,44 +403,69 @@ export function AdminLayout() {
     return breadcrumbMap[location.pathname] || ['主页']
   }, [location.pathname])
 
+  const handleUserMenuClick = ({ key }: { key: string }) => {
+    if (key === 'profile') {
+      setProfileOpen(true)
+    } else if (key === 'settings') {
+      setSettingsOpen(true)
+    } else if (key === 'license') {
+      setLicenseOpen(true)
+    } else if (key === 'logout') {
+      modal.confirm({
+        title: '确认退出',
+        content: '您确定要退出云枢系统吗？',
+        okText: '确认',
+        cancelText: '取消',
+        okButtonProps: { danger: true },
+        onOk: () => {
+          const dest = tenant?.internal ? '/login/operate' : '/login'
+          const prefix = tenant?.internal ? '/operate/auth/logout' : '/merchant/auth/logout'
+          http.post(prefix, {}).catch(() => {})
+          logout()
+          window.location.assign(dest)
+        },
+      })
+    }
+  }
+
   // Dropdown profile menu inside Header
-  const userMenuItems = [
-    {
-      key: 'profile',
-      label: '个人中心',
-      icon: <UserOutlined />,
-      onClick: () => setProfileOpen(true),
-    },
-    {
-      key: 'settings',
-      label: '个人设置',
-      icon: <SettingFilled />,
-      onClick: () => setSettingsOpen(true),
-    },
-    {
-      type: 'divider' as const,
-    },
-    {
-      key: 'logout',
-      label: '安全退出',
-      danger: true,
-      icon: <LogoutOutlined />,
-      onClick: () => {
-        Modal.confirm({
-          title: '确认退出',
-          content: '您确定要退出云枢系统吗？',
-          okText: '确认',
-          cancelText: '取消',
-          okButtonProps: { danger: true },
-          onOk: () => {
-            logout()
-            navigate('/login')
-            message.success('已安全退出登录')
-          },
-        })
+  const userMenuItems = useMemo(() => {
+    const items: any[] = [
+      {
+        key: 'profile',
+        label: '个人中心',
+        icon: <UserOutlined />,
       },
-    },
-  ]
+      {
+        key: 'settings',
+        label: '个人设置',
+        icon: <SettingFilled />,
+      },
+    ]
+
+    // 只有商户管理员（merchant_admin）且非多商户模式下才能看到授权信息
+    if (tenant?.roleId === 'merchant_admin' && tenantMode !== 'multi') {
+      items.push({
+        key: 'license',
+        label: '授权信息',
+        icon: <SafetyCertificateOutlined />,
+      })
+    }
+
+    items.push(
+      {
+        type: 'divider' as const,
+      } as any,
+      {
+        key: 'logout',
+        label: '安全退出',
+        danger: true,
+        icon: <LogoutOutlined />,
+      }
+    )
+
+    return items
+  }, [tenant, tenantMode])
 
   // Helper to find the parent key of a path
   const findParentKey = (path: string, items: NavItem[]): string | null => {
@@ -398,18 +516,20 @@ export function AdminLayout() {
           onClose={toggleCollapsed}
           open={!collapsed}
           width={256}
-          styles={{ body: { padding: 0, backgroundColor: '#001529' } }}
+          styles={{ body: { padding: 0, backgroundColor: isDark ? '#090b11' : '#ffffff' } }}
           className="mobile-sidebar-drawer"
         >
           {/* Mobile Sider Logo Area */}
-          <div className="flex h-12 items-center px-4 gap-3 text-white border-b border-slate-900 bg-[#001529]">
-            <ThunderboltOutlined style={{ fontSize: '20px', color: '#1890ff' }} />
-            <span className="font-bold text-sm tracking-wider text-slate-100 uppercase">
+          <div className={`flex h-12 items-center px-4 gap-3 border-b transition-all duration-300 ${
+            isDark ? 'border-slate-900/60 bg-[#090b11] text-white' : 'border-slate-100 bg-white text-slate-800'
+          }`}>
+            <ThunderboltOutlined style={{ fontSize: '20px', color: '#1677ff' }} />
+            <span className="font-bold text-sm tracking-wider uppercase">
               {platformLabel}
             </span>
           </div>
           <Menu
-            theme="dark"
+            theme={isDark ? 'dark' : 'light'}
             mode="inline"
             selectedKeys={selectedKeys}
             openKeys={openKeys}
@@ -421,7 +541,7 @@ export function AdminLayout() {
                 toggleCollapsed()
               }
             }}
-            className="!bg-[#001529] border-none"
+            className="!bg-transparent border-none"
           />
         </Drawer>
       ) : (
@@ -430,23 +550,33 @@ export function AdminLayout() {
           collapsible
           collapsed={collapsed}
           width={256}
-          className={`h-screen overflow-y-auto !bg-[#001529] flex-shrink-0 shadow-soft ${isDark ? 'border-r border-[#2d2d2d]' : ''}`}
+          className={`h-screen overflow-y-auto flex-shrink-0 shadow-soft transition-all duration-300 ${
+            isDark 
+              ? '!bg-[#090b11] border-r border-slate-900/60' 
+              : '!bg-white border-r border-slate-100'
+          }`}
         >
           {/* Desktop Sider Logo Area with animated collapsing support */}
           {collapsed ? (
-            <div className="flex h-12 items-center justify-center text-white border-b border-slate-900 bg-[#001529]">
-              <ThunderboltOutlined style={{ fontSize: '20px', color: '#1890ff' }} className="animate-pulse" />
+            <div className={`flex h-12 items-center justify-center border-b transition-all duration-300 ${
+              isDark ? 'border-slate-900/60 bg-[#090b11] text-white' : 'border-slate-100 bg-white text-slate-850'
+            }`}>
+              <ThunderboltOutlined style={{ fontSize: '20px', color: '#1677ff' }} className="animate-pulse" />
             </div>
           ) : (
-            <div className="flex h-12 items-center px-4 gap-3 text-white border-b border-slate-900 bg-[#001529] transition-all duration-300">
-              <ThunderboltOutlined style={{ fontSize: '22px', color: '#1890ff' }} />
-              <span className="font-bold text-sm tracking-widest text-slate-100 uppercase truncate">
+            <div className={`flex h-12 items-center px-4 gap-3 border-b transition-all duration-300 ${
+              isDark ? 'border-slate-900/60 bg-[#090b11] text-white' : 'border-slate-100 bg-white text-slate-850'
+            }`}>
+              <ThunderboltOutlined style={{ fontSize: '22px', color: '#1677ff' }} />
+              <span className={`font-bold text-sm tracking-widest uppercase truncate ${
+                isDark ? 'text-slate-100' : 'text-slate-800'
+              }`}>
                 {platformLabel}
               </span>
             </div>
           )}
           <Menu
-            theme="dark"
+            theme={isDark ? 'dark' : 'light'}
             mode="inline"
             selectedKeys={selectedKeys}
             openKeys={openKeys}
@@ -457,7 +587,7 @@ export function AdminLayout() {
                 navigate(String(key))
               }
             }}
-            className="!bg-[#001529] border-none"
+            className="!bg-transparent border-none"
           />
         </Sider>
       )}
@@ -480,28 +610,31 @@ export function AdminLayout() {
                 size="small"
                 onClick={() => {
                   revert()
-                  message.success('已返回运营平台')
+                  appMessage.success('已返回运营平台')
                   navigate('/dashboard')
                 }}
               >
                 返回运营端
               </Button>
             )}
+            {!originalTenant && tenant?.internal && tenantMode === 'single' && (
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => {
+                  useAuthStore.getState().impersonate('1001', 'merchant')
+                  appMessage.success('已切换至商户工作台')
+                  navigate('/dashboard')
+                }}
+              >
+                进入商户端
+              </Button>
+            )}
           </Space>
           <Space size="middle" align="center">
-            <Select
-              value={theme}
-              onChange={handleThemeChange}
-              options={[
-                { value: 'light', label: '浅色主题' },
-                { value: 'dark', label: '深色主题' },
-              ]}
-              size="small"
-              className="w-28 hidden md:inline-block"
-            />
             <Button
               type="text"
-              icon={isDark ? <MoonOutlined /> : <SunOutlined />}
+              icon={isDark ? <SunOutlined /> : <MoonOutlined />}
               onClick={() => handleThemeChange(isDark ? 'light' : 'dark')}
               className={`hidden md:inline-flex ${isDark ? 'text-slate-400' : 'text-slate-500'}`}
             />
@@ -509,7 +642,7 @@ export function AdminLayout() {
             <Divider type="vertical" className="hidden sm:inline" />
 
             {/* Premium Ant Design Pro Hover User Dropdown Menu */}
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" arrow>
+            <Dropdown menu={{ items: userMenuItems, onClick: handleUserMenuClick }} placement="bottomRight" arrow>
               <Space 
                 className={`cursor-pointer ${userHoverClass} px-2 py-1 rounded transition-colors`}
                 style={{ lineHeight: 'normal' }}
@@ -525,23 +658,185 @@ export function AdminLayout() {
           </Space>
         </Header>
 
+        {showTrialAlert && (licenseStatus?.status === 'grace_period' || isExpiringSoon) && announcements.length > 0 && (
+          <Alert
+            type="warning"
+            banner
+            closable
+            onClose={() => {
+              setShowTrialAlert(false)
+              sessionStorage.setItem('dismiss_trial_alert', 'true')
+            }}
+            className="z-20 border-b border-amber-200 dark:border-amber-950/20"
+            message={
+              <Marquee pauseOnHover gradient={false} speed={40}>
+                {announcements.map((item, idx) => (
+                  <span key={idx} className="inline-flex items-center mr-16">
+                    <Tag 
+                      color={isDark ? 'warning' : item.color} 
+                      className="mr-2 text-[10px] font-bold px-1.5 py-0 inline-flex items-center justify-center scale-95 origin-left"
+                    >
+                      {item.tag}
+                    </Tag>
+                    <span className={`text-xs md:text-sm font-medium ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                      {item.text}
+                    </span>
+                  </span>
+                ))}
+              </Marquee>
+            }
+            action={
+              <Button 
+                size="small" 
+                type="link" 
+                onClick={() => navigate('/operate/license')}
+                className={`!p-0 h-auto font-semibold ${
+                  isDark 
+                    ? 'text-[#d48806] hover:text-[#fadb14]' 
+                    : 'text-amber-700 hover:text-amber-950'
+                }`}
+              >
+                管理授权
+              </Button>
+            }
+          />
+        )}
+
         {/* Main Page Scroll Area */}
         <Content className={`flex-1 overflow-y-auto p-4 md:p-6 transition-colors duration-300 ${contentBgClass}`}>
-          {/* Page Hierarchy Breadcrumb */}
-          <Breadcrumb className="text-xs mb-4">
-            <Breadcrumb.Item>
-              <Link to="/dashboard" className={breadcrumbLinkStyle}>系统首页</Link>
-            </Breadcrumb.Item>
-            {pathBreadcrumbs.map((b, i) => (
-              <Breadcrumb.Item key={i}>
-                <span className={i === pathBreadcrumbs.length - 1 ? breadcrumbActiveStyle : "text-slate-400"}>
-                  {b}
-                </span>
-              </Breadcrumb.Item>
-            ))}
-          </Breadcrumb>
-          
-          <Outlet />
+          {isLocked && location.pathname !== '/operate/license' ? (
+            <div className="flex h-full items-center justify-center py-8">
+              <Card 
+                className="w-full max-w-2xl shadow-soft border-red-200 dark:border-red-950/60 bg-white dark:bg-[#15181e] p-6 text-center"
+              >
+                <Space direction="vertical" size="large" className="w-full">
+                  <div>
+                    <WarningOutlined className="text-red-500 text-6xl animate-pulse" />
+                    <Typography.Title level={3} className="!mt-4 !mb-2 dark:text-white">
+                      系统授权到期阻断锁定
+                    </Typography.Title>
+                    <Typography.Paragraph type="secondary" className="text-slate-500 dark:text-slate-400 max-w-md mx-auto text-sm">
+                      {licenseStatus?.status === 'time_rollback_locked' 
+                        ? '检测到服务器系统时钟被恶意向回调整，安全锁定机制已被触发。' 
+                        : '您的呼叫中心系统离线商用授权已经到期（或未激活），呼叫控制核心已被安全锁死，当前无法访问后续业务功能。'}
+                    </Typography.Paragraph>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900/60 rounded-lg border border-slate-100 dark:border-slate-800 text-left">
+                    <div className="flex justify-between items-center mb-3">
+                      <div>
+                        <Typography.Text type="secondary" className="text-xs block mb-0.5">物理环境唯一部署 ID (Deployment ID)</Typography.Text>
+                        <Typography.Text className="font-mono text-sm font-bold tracking-wider dark:text-indigo-400">
+                          {licenseStatus?.deploymentId || 'DEPLOY-N/A'}
+                        </Typography.Text>
+                      </div>
+                      <Space>
+                        <Button 
+                          icon={<CopyOutlined />} 
+                          size="small"
+                          onClick={() => {
+                            if (licenseStatus?.deploymentId) {
+                              navigator.clipboard.writeText(licenseStatus.deploymentId)
+                              appMessage.success('部署 ID 已成功复制！')
+                            }
+                          }}
+                        >
+                          复制 ID
+                        </Button>
+                        <Button 
+                          type="primary" 
+                          icon={<DownloadOutlined />} 
+                          size="small"
+                          onClick={() => window.open('/api/operate/license/fingerprint/download')}
+                        >
+                          下载指纹
+                        </Button>
+                        <Button 
+                          danger
+                          icon={<LogoutOutlined />} 
+                          size="small"
+                          onClick={() => {
+                            modal.confirm({
+                              title: '确认退出',
+                              content: '您确定要退出云枢系统吗？',
+                              okText: '确认',
+                              cancelText: '取消',
+                              okButtonProps: { danger: true },
+                              onOk: () => {
+                                const dest = tenant?.internal ? '/login/operate' : '/login'
+                                const prefix = tenant?.internal ? '/operate/auth/logout' : '/merchant/auth/logout'
+                                http.post(prefix, {}).catch(() => {})
+                                logout()
+                                window.location.assign(dest)
+                              },
+                            })
+                          }}
+                        >
+                          安全退出
+                        </Button>
+                      </Space>
+                    </div>
+                    <Typography.Text className="text-[11px] text-slate-400 block border-t border-slate-100 dark:border-slate-800 pt-2">
+                      💡 请下载上方的指纹文件并发送给“云枢”客服或技术支持团队以换取续期或迁移授权证书 (.lic)。
+                    </Typography.Text>
+                  </div>
+
+                  <div className="text-left">
+                    <Typography.Text className="font-semibold block mb-2 dark:text-white">
+                      导入新授权证书以即时解锁：
+                    </Typography.Text>
+                    <Upload.Dragger
+                      name="file"
+                      multiple={false}
+                      beforeUpload={async (file) => {
+                        setUploadingLicense(true)
+                        try {
+                          await uploadLicenseFile(file)
+                          appMessage.success('授权验证成功，系统已即时解锁！')
+                          refetchLicense()
+                        } catch (err: any) {
+                          // 错误已被拦截
+                        } finally {
+                          setUploadingLicense(false)
+                        }
+                        return false
+                      }}
+                      showUploadList={false}
+                      disabled={uploadingLicense}
+                    >
+                      <p className="ant-upload-drag-icon">
+                        <UploadOutlined className="text-3xl text-indigo-400" />
+                      </p>
+                      <p className="ant-upload-text text-sm dark:text-slate-300 font-medium">
+                        点击浏览或将最新的 yunshu.lic 证书拖拽至此处
+                      </p>
+                    </Upload.Dragger>
+                  </div>
+                </Space>
+              </Card>
+            </div>
+          ) : (
+            <>
+              {/* Page Hierarchy Breadcrumb */}
+              <Breadcrumb
+                className="text-xs mb-4"
+                items={[
+                  {
+                    title: <Link to="/dashboard" className={breadcrumbLinkStyle}>系统首页</Link>
+                  },
+                  ...pathBreadcrumbs.map((b, i) => ({
+                    title: (
+                      <span className={i === pathBreadcrumbs.length - 1 ? breadcrumbActiveStyle : "text-slate-400"}>
+                        {b}
+                      </span>
+                    )
+                  }))
+                ]}
+              />
+              
+              <Outlet />
+            </>
+          )}
         </Content>
 
         {/* 个人中心 Modal */}
@@ -554,7 +849,7 @@ export function AdminLayout() {
             </Button>,
           ]}
           onCancel={() => setProfileOpen(false)}
-          destroyOnClose
+          destroyOnHidden
           width={650}
           className="dark:bg-[#15181e]"
         >
@@ -631,7 +926,7 @@ export function AdminLayout() {
                     <Typography.Link
                       onClick={() => {
                         navigator.clipboard.writeText(currentMerchant.appKey || '');
-                        message.success('X-App-Key 已复制');
+                        appMessage.success('X-App-Key 已复制');
                       }}
                       className="flex items-center gap-1 text-xs"
                     >
@@ -657,7 +952,7 @@ export function AdminLayout() {
                       <Typography.Link
                         onClick={() => {
                           navigator.clipboard.writeText(currentMerchant.appSecret || '');
-                          message.success('X-App-Secret 已复制');
+                          appMessage.success('X-App-Secret 已复制');
                         }}
                         className="flex items-center gap-1 text-xs"
                       >
@@ -704,7 +999,7 @@ export function AdminLayout() {
           title={<span className="text-base font-semibold dark:text-white">个人设置</span>}
           onCancel={() => setSettingsOpen(false)}
           footer={null}
-          destroyOnClose
+          destroyOnHidden
           width={500}
         >
           <div className="py-4">
@@ -716,10 +1011,10 @@ export function AdminLayout() {
               layout="vertical"
               onFinish={(values) => {
                 if (values.newPassword !== values.confirmPassword) {
-                  message.error('两次输入的新密码不一致，请重新检查！')
+                  appMessage.error('两次输入的新密码不一致，请重新检查！')
                   return
                 }
-                message.success('密码已成功修改，新凭证已在本地及安全通道实时同步！')
+                appMessage.success('密码已成功修改，新凭证已在本地及安全通道实时同步！')
                 setSettingsOpen(false)
               }}
             >
@@ -743,6 +1038,184 @@ export function AdminLayout() {
               </Form.Item>
             </Form>
           </div>
+        </Modal>
+
+        {/* 授权信息 Modal */}
+        <Modal
+          open={licenseOpen}
+          title={
+            <Space>
+              <SafetyCertificateOutlined className="text-indigo-500" />
+              <span className="text-base font-semibold dark:text-white">云枢系统授权信息</span>
+            </Space>
+          }
+          onCancel={() => setLicenseOpen(false)}
+          footer={[
+            <Button key="close" type="primary" onClick={() => setLicenseOpen(false)}>
+              关闭
+            </Button>
+          ]}
+          destroyOnHidden
+          width={560}
+        >
+          {licenseStatus ? (
+            <div className="py-4 space-y-4">
+              {/* Alert / Notification based on status */}
+              {(() => {
+                const s = licenseStatus.status
+                let type: 'success' | 'warning' | 'error' | 'info' = 'info'
+                let title = '未授权 (UNLICENSED)'
+                let desc = '系统当前处于未授权状态，请获取授权证书。'
+                
+                if (s === 'normal') {
+                  type = 'success'
+                  title = '已激活 (ACTIVE)'
+                  desc = '系统商用授权验证成功，并发资源运行状态正常。'
+                } else if (s === 'grace_period') {
+                  type = 'warning'
+                  title = '宽限期内 (GRACE PERIOD)'
+                  desc = licenseStatus.statusMsg || '授权证书已过期，当前处于15天宽限期内，额定最大并发数已受限。请尽快续期。'
+                } else if (s === 'expired') {
+                  type = 'error'
+                  title = '已过期 (EXPIRED)'
+                  desc = licenseStatus.statusMsg || '授权证书已过期，宽限期结束，呼叫控制通道已锁死。请上传新证书恢复。'
+                } else if (s === 'time_rollback_locked') {
+                  type = 'error'
+                  title = '安全锁死 (LOCKED)'
+                  desc = '检测到服务器系统时钟被向回调整，安全锁定机制已被触发。'
+                }
+                
+                return (
+                  <Alert
+                    message={<span className="font-semibold text-xs">{title}</span>}
+                    description={<span className="text-xs text-slate-500 dark:text-slate-400">{desc}</span>}
+                    type={type}
+                    showIcon
+                    className="border-0 shadow-sm"
+                  />
+                )
+              })()}
+
+              {/* Statistics for Specifications */}
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Card size="small" className="bg-slate-50/50 dark:bg-[#111317] border border-slate-100 dark:border-slate-800 text-center">
+                    <Typography.Text type="secondary" className="text-[10px] block mb-1">系统并发授权上限</Typography.Text>
+                    <Typography.Text className="text-xl font-bold dark:text-indigo-400">
+                      {licenseStatus.maxConcurrentCalls ?? 0} <span className="text-xs font-normal text-slate-400 dark:text-slate-500">线</span>
+                    </Typography.Text>
+                  </Card>
+                </Col>
+                <Col span={12}>
+                  <Card size="small" className="bg-slate-50/50 dark:bg-[#111317] border border-slate-100 dark:border-slate-800 text-center">
+                    <Typography.Text type="secondary" className="text-[10px] block mb-1">最大坐席分机数</Typography.Text>
+                    <Typography.Text className="text-xl font-bold dark:text-sky-400">
+                      {licenseStatus.maxExtensions ?? 0} <span className="text-xs font-normal text-slate-400 dark:text-slate-500">个</span>
+                    </Typography.Text>
+                  </Card>
+                </Col>
+              </Row>
+
+              {/* Descriptions table */}
+              <Card 
+                size="small"
+                title={<span className="text-xs font-semibold text-slate-700 dark:text-slate-350">授权规格详情</span>}
+                className="border border-slate-100 dark:border-slate-800 bg-white dark:bg-[#111317] shadow-sm rounded-lg"
+              >
+                <Descriptions column={2} size="small" bordered className="overflow-hidden bg-slate-50/50 dark:bg-[#15181e]/30 rounded">
+                  <Descriptions.Item label="授权编号" span={2}>
+                    <span className="font-mono text-xs text-slate-850 dark:text-slate-200">{licenseStatus.licenseId || '-'}</span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="客户主体" span={2}>
+                    <span className="text-xs font-medium text-slate-850 dark:text-slate-200">{licenseStatus.customerName || '-'}</span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="生效时间">
+                    <span className="text-[11px] text-slate-650 dark:text-slate-350">{licenseStatus.notBefore || '-'}</span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="到期时间">
+                    <span className="text-[11px] text-slate-650 dark:text-slate-350">{licenseStatus.notAfter || '-'}</span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="授权类型">
+                    {licenseStatus.licenseType === 'migration' ? (
+                      <Tag color="purple" className="m-0 text-[10px]">平移</Tag>
+                    ) : licenseStatus.licenseType === 'renewal' ? (
+                      <Tag color="success" className="m-0 text-[10px]">续期</Tag>
+                    ) : licenseStatus.licenseType === 'trial' ? (
+                      <Tag color="orange" className="m-0 text-[10px]">试用</Tag>
+                    ) : (
+                      <Tag color="blue" className="m-0 text-[10px]">标准</Tag>
+                    )}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="剩余有效期">
+                    <span className="text-xs font-semibold text-green-600 dark:text-green-400">
+                      {licenseStatus.remainingDays ?? 0} 天
+                    </span>
+                  </Descriptions.Item>
+                </Descriptions>
+              </Card>
+
+              {/* Deployment ID info */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 border border-slate-100 dark:border-slate-850 rounded-lg">
+                <Typography.Text type="secondary" className="text-[10px] block mb-1">物理环境唯一部署 ID (Deployment ID)</Typography.Text>
+                <div className="flex justify-between items-center font-mono text-xs w-full text-slate-800 dark:text-slate-200">
+                  <span className="select-all font-bold tracking-wider dark:text-indigo-400">{licenseStatus.deploymentId || 'DEPLOY-N/A'}</span>
+                  <Typography.Link
+                    onClick={() => {
+                      if (licenseStatus.deploymentId) {
+                        navigator.clipboard.writeText(licenseStatus.deploymentId)
+                        appMessage.success('部署 ID 已成功复制到剪贴板！')
+                      }
+                    }}
+                    className="flex items-center gap-1 text-xs"
+                  >
+                    <CopyOutlined /> 复制
+                  </Typography.Link>
+                </div>
+              </div>
+
+              {/* Upload Certificate Section */}
+              <Divider className="!my-2" />
+              <div>
+                <Typography.Text className="font-semibold block mb-2 dark:text-white text-xs">
+                  更新系统授权证书 (.lic)：
+                </Typography.Text>
+                <Upload.Dragger
+                  name="file"
+                  multiple={false}
+                  beforeUpload={async (file) => {
+                    setUploadingLicense(true)
+                    try {
+                      await uploadLicenseFile(file)
+                      appMessage.success('授权证书文件验证通过，系统授权已成功更新！')
+                      refetchLicense()
+                    } catch (err: any) {
+                      // 错误已被拦截
+                    } finally {
+                      setUploadingLicense(false)
+                    }
+                    return false
+                  }}
+                  showUploadList={false}
+                  disabled={uploadingLicense}
+                  className="bg-slate-50/50 dark:bg-slate-900/10 border-dashed border-slate-200 dark:border-slate-800 rounded-lg py-3"
+                >
+                  <p className="ant-upload-drag-icon">
+                    <UploadOutlined className="text-xl text-indigo-400" />
+                  </p>
+                  <p className="ant-upload-text text-xs dark:text-slate-300 font-medium">
+                    点击浏览或将最新的 yunshu.lic 证书拖拽至此处以更新授权
+                  </p>
+                  <p className="ant-upload-hint text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+                    系统将即时进行证书签发签名校验，校验通过后热加载生效。
+                  </p>
+                </Upload.Dragger>
+              </div>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              正在加载系统授权状态...
+            </div>
+          )}
         </Modal>
       </Layout>
     </Layout>

@@ -78,10 +78,15 @@ const (
 	PermissionMerchantPhoneGroupRead   PermissionCode = "merchant:phone-group:read"
 	PermissionMerchantPhoneGroupWrite  PermissionCode = "merchant:phone-group:write"
 	PermissionMerchantPhoneGroupDelete PermissionCode = "merchant:phone-group:delete"
+	PermissionMerchantDepartmentRead   PermissionCode = "merchant:department:read"
+	PermissionMerchantDepartmentWrite  PermissionCode = "merchant:department:write"
+	PermissionMerchantDepartmentDelete PermissionCode = "merchant:department:delete"
 
-	PermissionOperateRoleRead      PermissionCode = "operate:role:read"
-	PermissionOperateRoleWrite     PermissionCode = "operate:role:write"
-	PermissionMerchantBillingWrite PermissionCode = "merchant:billing:write"
+	PermissionOperateRoleRead  PermissionCode = "operate:role:read"
+	PermissionOperateRoleWrite PermissionCode = "operate:role:write"
+
+	PermissionOperateLicenseRead  PermissionCode = "operate:license:read"
+	PermissionOperateLicenseWrite PermissionCode = "operate:license:write"
 )
 
 // PermissionRule 定义一个路径和 HTTP 方法对应的功能权限。
@@ -105,8 +110,7 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/operate/role/permissions/", Method: "GET", Permission: PermissionOperateRoleRead},
 	{Prefix: "/operate/role/permissions/save", Method: "POST", Permission: PermissionOperateRoleWrite},
 	{Prefix: "/operate/permission", Method: "GET", Permission: PermissionOperateRoleRead},
-	{Prefix: "/merchant/billing/rate/bind", Method: "POST", Permission: PermissionMerchantBillingWrite},
-	{Prefix: "/operate/rate/list-active", Method: "GET", Permission: PermissionMerchantBillingWrite},
+	{Prefix: "/operate/rate/list-active", Method: "GET", Permission: PermissionOperateRateRead},
 
 	{Prefix: "/operate/merchant/page", Method: "POST", Permission: PermissionOperateMerchantRead},
 	{Prefix: "/operate/merchant/detail/", Method: "GET", Permission: PermissionOperateMerchantRead},
@@ -219,6 +223,8 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/batch-call-task/add", Method: "PUT", Permission: PermissionMerchantBatchTaskWrite},
 	{Prefix: "/merchant/batch-call-task/update", Method: "POST", Permission: PermissionMerchantBatchTaskWrite},
 	{Prefix: "/merchant/batch-call-task", Method: "GET", Permission: PermissionMerchantBatchTaskRead},
+	{Prefix: "/merchant/batch-call-task/import/file/", Method: "POST", Permission: PermissionMerchantBatchTaskWrite},
+	{Prefix: "/merchant/batch-call-task/import/template", Method: "GET", Permission: PermissionMerchantBatchTaskRead},
 	{Prefix: "/merchant/batch-call-dialpad/detail/", Method: "GET", Permission: PermissionMerchantDialpadRead},
 	{Prefix: "/merchant/batch-call-dialpad/start/", Method: "POST", Permission: PermissionMerchantDialpadControl},
 	{Prefix: "/merchant/batch-call-dialpad/pause/", Method: "POST", Permission: PermissionMerchantDialpadControl},
@@ -265,6 +271,17 @@ var PermissionRules = []PermissionRule{
 	{Prefix: "/merchant/skill-group/add", Method: "PUT", Permission: PermissionMerchantSkillGroupWrite},
 	{Prefix: "/merchant/skill-group/update", Method: "POST", Permission: PermissionMerchantSkillGroupWrite},
 	{Prefix: "/merchant/skill-group", Method: "GET", Permission: PermissionMerchantSkillGroupRead},
+
+	{Prefix: "/merchant/department/page", Method: "POST", Permission: PermissionMerchantDepartmentRead},
+	{Prefix: "/merchant/department/list", Method: "GET", Permission: PermissionMerchantDepartmentRead},
+	{Prefix: "/merchant/department/save", Method: "POST", Permission: PermissionMerchantDepartmentWrite},
+	{Prefix: "/merchant/department/delete", Method: "POST", Permission: PermissionMerchantDepartmentDelete},
+
+	{Prefix: "/operate/license/fingerprint", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/fingerprint/download", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/status", Method: "GET", Permission: PermissionOperateLicenseRead},
+	{Prefix: "/operate/license/upload", Method: "POST", Permission: PermissionOperateLicenseWrite},
+	{Prefix: "/operate/license/download", Method: "GET", Permission: PermissionOperateLicenseRead},
 }
 
 // RequiredPermissionForRequest 根据请求路径和方法返回需要的功能权限。

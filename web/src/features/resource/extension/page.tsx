@@ -235,7 +235,7 @@ export function ExtensionPage() {
       {/* 状态看板卡片组合 */}
       <Row gutter={[16, 16]}>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+          <Card variant="borderless" className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">配置分机总数</div>
@@ -248,7 +248,7 @@ export function ExtensionPage() {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+          <Card variant="borderless" className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">已启用分机</div>
@@ -261,7 +261,7 @@ export function ExtensionPage() {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+          <Card variant="borderless" className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">已绑定坐席</div>
@@ -274,7 +274,7 @@ export function ExtensionPage() {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card bordered={false} className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
+          <Card variant="borderless" className="rounded-xl shadow-sm overflow-hidden" styles={{ body: { padding: '20px 24px' } }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-slate-500 dark:text-slate-400 text-sm mb-1">当前在线</div>
@@ -500,7 +500,7 @@ export function ExtensionPage() {
         }}
         onOk={() => form.submit()}
         confirmLoading={saveMutation.isPending}
-        destroyOnClose
+        destroyOnHidden
         width={560}
         okText={editingId ? '保存修改' : '创建分机'}
       >

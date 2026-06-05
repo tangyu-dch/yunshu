@@ -28,7 +28,13 @@ func NewDownstreamHTTPClient(url, secret string, timeout time.Duration, logger *
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &DownstreamHTTPClient{URL: url, Secret: secret, Timeout: timeout, Logger: logger}
+	return &DownstreamHTTPClient{
+		URL:        url,
+		Secret:     secret,
+		Timeout:    timeout,
+		HTTPClient: &http.Client{Timeout: timeout},
+		Logger:     logger,
+	}
 }
 
 // Enabled 返回是否启用真实 HTTP 投递。

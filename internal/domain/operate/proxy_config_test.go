@@ -76,7 +76,7 @@ func TestProxyConfigManagementService_GetConfig(t *testing.T) {
 
 	repo := newFakeProxyConfigRepository()
 	reloader := &fakeProxyConfigRtpengineReloadPort{}
-	service := operate.NewProxyConfigManagementService(repo, reloader, nil)
+	service := operate.NewProxyConfigManagementService(repo, reloader, nil, nil)
 
 	ctx := context.Background()
 
@@ -108,7 +108,7 @@ func TestProxyConfigManagementService_SaveConfig_Validation(t *testing.T) {
 
 	repo := newFakeProxyConfigRepository()
 	reloader := &fakeProxyConfigRtpengineReloadPort{}
-	service := operate.NewProxyConfigManagementService(repo, reloader, nil)
+	service := operate.NewProxyConfigManagementService(repo, reloader, nil, nil)
 
 	ctx := context.Background()
 
@@ -219,7 +219,7 @@ mysql:
 	_ = repo.Set(ctx, operate.KeyRtpengineEndPort, "35200", "")
 
 	reloader := &fakeProxyConfigRtpengineReloadPort{}
-	service := operate.NewProxyConfigManagementService(repo, reloader, nil)
+	service := operate.NewProxyConfigManagementService(repo, reloader, nil, nil)
 	service.ConfigFilePath = mockYamlPath
 	service.ComposePath = mockComposePath
 
@@ -291,7 +291,7 @@ func TestProxyConfigManagementService_ApplyAndRestart_PermissionErr(t *testing.T
 	_ = repo.Set(ctx, operate.KeyKamailioSipPort, "5080", "")
 
 	reloader := &fakeProxyConfigRtpengineReloadPort{}
-	service := operate.NewProxyConfigManagementService(repo, reloader, nil)
+	service := operate.NewProxyConfigManagementService(repo, reloader, nil, nil)
 	service.ConfigFilePath = mockYamlPath
 	service.ComposePath = filepath.Join(tempDir, "non_existent.yml")
 

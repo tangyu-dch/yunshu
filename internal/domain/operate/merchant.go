@@ -79,8 +79,10 @@ type MerchantRepository interface {
 
 // MerchantManagementService 承载商户管理业务。
 type MerchantManagementService struct {
-	Repository MerchantRepository
-	Logger     *slog.Logger
+	Repository    MerchantRepository
+	ExtensionRepo ExtensionManagementRepository
+	Cache         AuthCacheInvalidator
+	Logger        *slog.Logger
 }
 
 // Page 返回商户分页结果。
@@ -126,6 +128,19 @@ func (s *MerchantManagementService) Save(ctx context.Context, merchant Merchant)
 		logger.Warn("运营端保存商户参数无效", "id", merchant.ID, "name", merchant.Name, "error", err.Error())
 		return MerchantMutationResult{}, err
 	}
+
+	var oldSipDomain string
+	var sipDomainChanged bool
+	if normalized.ID > 0 {
+		oldMch, err := s.Repository.GetByID(ctx, normalized.ID)
+		if err == nil {
+			oldSipDomain = oldMch.SipDomain
+			if oldSipDomain != normalized.SipDomain {
+				sipDomainChanged = true
+			}
+		}
+	}
+
 	exists, err := s.Repository.ExistsNameOrAccount(ctx, normalized.Name, normalized.Account, normalized.ID)
 	if err != nil {
 		logger.Error("运营端校验商户唯一性失败", "id", normalized.ID, "name", normalized.Name, "error", err.Error())
@@ -157,6 +172,55 @@ func (s *MerchantManagementService) Save(ctx context.Context, merchant Merchant)
 		return MerchantMutationResult{}, err
 	}
 	logger.Info("运营端保存商户完成", "id", saved.ID, "name", saved.Name, "enable", saved.Enable)
+
+	// 如果 SIP 域名发生变更，并且配置了 ExtensionRepo，我们需要级联更新该商户下所有分机的 SipDomain 以及重新计算 HA1 和 HA1b
+	if sipDomainChanged && s.ExtensionRepo != nil {
+		logger.Info("商户 SIP 域名变更，开始级联更新下属所有分机的 SipDomain 与 HA 哈希", "merchantId", saved.ID, "oldSipDomain", oldSipDomain, "newSipDomain", saved.SipDomain)
+		pageNum := 1
+		const batchSize = 100
+		updatedCount := 0
+		for {
+			page, err := s.ExtensionRepo.Page(ctx, ExtensionPageRequest{
+				PageNumber: pageNum,
+				PageSize:   batchSize,
+				MerchantID: saved.ID,
+			})
+			if err != nil {
+				logger.Error("商户 SIP 域名级联更新分机读取失败", "merchantId", saved.ID, "page", pageNum, "error", err.Error())
+				break
+			}
+			if len(page.Records) == 0 {
+				break
+			}
+
+			for _, ext := range page.Records {
+				ext.SipDomain = saved.SipDomain
+				if ext.Password != "" {
+					ext.HA1 = calculateHA1(ext.ExtensionNumber, ext.SipDomain, ext.Password)
+					ext.HA1b = calculateHA1b(ext.ExtensionNumber, ext.SipDomain, ext.Password)
+				}
+				if _, err := s.ExtensionRepo.Save(ctx, ext); err != nil {
+					logger.Error("商户 SIP 域名级联更新分机保存失败", "id", ext.ID, "extension", ext.ExtensionNumber, "error", err.Error())
+				} else {
+					updatedCount++
+				}
+			}
+
+			if int64(pageNum*batchSize) >= page.Total {
+				break
+			}
+			pageNum++
+		}
+		logger.Info("商户 SIP 域名级联更新分机完成", "merchantId", saved.ID, "updatedCount", updatedCount)
+
+		// 清理 Kamailio 鉴权缓存
+		if s.Cache != nil {
+			if err := s.Cache.InvalidateAuthCache(ctx); err != nil {
+				logger.Error("商户 SIP 域名级联更新分机清理 Kamailio auth 缓存失败", "error", err.Error())
+			}
+		}
+	}
+
 	return MerchantMutationResult{Merchant: saved}, nil
 }
 

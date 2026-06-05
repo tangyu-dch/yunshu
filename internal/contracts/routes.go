@@ -61,6 +61,8 @@ var RouteContracts = []RouteContract{
 	{Service: ServiceConsole, Module: "operate", Controller: "PhoneManageController", PathPrefix: "/operate/pool-phone", Methods: []string{"GET", "POST", "PUT", "DELETE"}, Notes: "caller number configuration"},
 	{Service: ServiceConsole, Module: "operate", Controller: "ExtensionManageController", PathPrefix: "/operate/extension", Methods: []string{"GET", "POST", "PUT", "DELETE"}, Notes: "agent extension configuration"},
 	{Service: ServiceConsole, Module: "operate", Controller: "GatewayController", PathPrefix: "/operate/gateway", Methods: []string{"GET", "POST", "PUT", "DELETE"}, Notes: "gateway management and ESL sync"},
+	{Service: ServiceConsole, Module: "operate", Controller: "RtpengineController", PathPrefix: "/operate/kamailio/rtpengine", Methods: []string{"GET", "POST", "PUT", "DELETE"}, Notes: "Kamailio RTPEngine media proxy management"},
+	{Service: ServiceConsole, Module: "operate", Controller: "DispatcherController", PathPrefix: "/operate/kamailio/dispatcher", Methods: []string{"GET", "POST", "PUT", "DELETE"}, Notes: "Kamailio Dispatcher load-balancing management"},
 	{Service: ServiceCall, Module: "cti", Controller: "CallTaskController", PathPrefix: "/cti/callTask", Methods: []string{"POST"}, Notes: "API outbound and task state"},
 	{Service: ServiceCall, Module: "cti", Controller: "CallTaskBatchController", PathPrefix: "/cti/batch-call-task", Methods: []string{"GET", "POST", "PUT"}, Notes: "batch scheduling state machine"},
 	{Service: ServiceCall, Module: "cti", Controller: "SelectNumberRuleController", PathPrefix: "/cti/select/number/rule", Methods: []string{"GET", "POST"}, Notes: "number selection rule chain"},

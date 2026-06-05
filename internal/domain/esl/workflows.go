@@ -14,11 +14,13 @@ import (
 
 // ESL 工作流标识符常量。
 const (
-	WorkflowESLAPIOutbound   = "esl_api_outbound"   // ESL API 外呼命令工作流，处理单次起呼命令
-	WorkflowESLBatchOutbound = "esl_batch_outbound" // ESL 批量外呼命令工作流，处理批量起呼命令
-	WorkflowESLDialpadDirect = "esl_dialpad_direct" // ESL 拨号盘直呼工作流
-	WorkflowESLInbound       = "esl_inbound"        // ESL 客户呼入工作流
-	stepCaptureMediaPhase    = "capture_media_phase"
+	WorkflowESLAPIOutbound     = "esl_api_outbound"     // ESL API 外呼命令工作流，处理单次起呼命令
+	WorkflowESLBatchOutbound   = "esl_batch_outbound"   // ESL 批量外呼命令工作流，处理批量起呼命令
+	WorkflowESLDialpadDirect   = "esl_dialpad_direct"   // ESL 拨号盘直呼工作流
+	WorkflowESLInbound         = "esl_inbound"          // ESL 客户呼入工作流
+	WorkflowESLBatchPredictive = "esl_batch_predictive" // ESL 预测批量外呼工作流
+	WorkflowESLBatchSynergy    = "esl_batch_synergy"    // ESL 协同批量外呼工作流
+	stepCaptureMediaPhase      = "capture_media_phase"
 )
 
 // WorkflowDefinitions 返回所有 ESL 命令执行工作流的定义。
@@ -78,6 +80,58 @@ func WorkflowDefinitions() []workflow.Definition {
 			},
 			Handlers: map[workflow.StepName]workflow.Handler{
 				stepCaptureMediaPhase: captureMediaPhaseHandler("batch"),
+			},
+		},
+		{
+			ID:      WorkflowESLBatchPredictive,
+			Initial: "command_received",
+			Transitions: []workflow.Transition{
+				{From: "command_received", On: "validate_command", To: "validated"},
+				{From: "validated", On: "execute_originate", To: "originating"},
+				{From: "originating", On: "CHANNEL_CREATE", To: "created"},
+				{From: "created", On: "CHANNEL_PROGRESS", To: "progress"},
+				{From: "created", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "progress", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "progress", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "progress", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "created", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "created", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "early_media", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "early_media", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "answered", On: "CHANNEL_PROGRESS", To: "progress"},
+				{From: "answered", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "answered", On: "CHANNEL_BRIDGE", To: "bridged"},
+				{From: "answered", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "bridged", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+			},
+			Handlers: map[workflow.StepName]workflow.Handler{
+				stepCaptureMediaPhase: captureMediaPhaseHandler("batch_predictive"),
+			},
+		},
+		{
+			ID:      WorkflowESLBatchSynergy,
+			Initial: "command_received",
+			Transitions: []workflow.Transition{
+				{From: "command_received", On: "validate_command", To: "validated"},
+				{From: "validated", On: "execute_originate", To: "originating"},
+				{From: "originating", On: "CHANNEL_CREATE", To: "created"},
+				{From: "created", On: "CHANNEL_PROGRESS", To: "progress"},
+				{From: "created", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "progress", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "progress", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "progress", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "created", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "created", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "early_media", On: "CHANNEL_ANSWER", To: "answered"},
+				{From: "early_media", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "answered", On: "CHANNEL_PROGRESS", To: "progress"},
+				{From: "answered", On: "CHANNEL_PROGRESS_MEDIA", To: "early_media", Step: stepCaptureMediaPhase},
+				{From: "answered", On: "CHANNEL_BRIDGE", To: "bridged"},
+				{From: "answered", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+				{From: "bridged", On: "CHANNEL_HANGUP_COMPLETE", To: "complete"},
+			},
+			Handlers: map[workflow.StepName]workflow.Handler{
+				stepCaptureMediaPhase: captureMediaPhaseHandler("batch_synergy"),
 			},
 		},
 		{

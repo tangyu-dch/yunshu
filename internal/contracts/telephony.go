@@ -20,10 +20,12 @@ const (
 type CallFlowProfile string
 
 const (
-	CallFlowAPIOutbound   CallFlowProfile = "api_outbound"   // API单次外呼流程
-	CallFlowBatchOutbound CallFlowProfile = "batch_outbound" // 批量外呼任务流程
-	CallFlowAPIDirect     CallFlowProfile = "api_direct"     // 拨号盘直呼流程
-	CallFlowInbound       CallFlowProfile = "inbound"        // 客户呼入流程
+	CallFlowAPIOutbound     CallFlowProfile = "api_outbound"     // API单次外呼流程
+	CallFlowBatchOutbound   CallFlowProfile = "batch_outbound"   // 批量外呼任务流程
+	CallFlowAPIDirect       CallFlowProfile = "api_direct"       // 拨号盘直呼流程
+	CallFlowInbound         CallFlowProfile = "inbound"          // 客户呼入流程
+	CallFlowBatchPredictive CallFlowProfile = "batch_predictive" // 预测批量外呼流程
+	CallFlowBatchSynergy    CallFlowProfile = "batch_synergy"    // 协同批量外呼流程
 )
 
 // OriginateMode 定义了双通道通话的起呼顺序模式。

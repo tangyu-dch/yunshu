@@ -118,6 +118,77 @@ func RegisterPoolRoutes(r gin.IRoutes, service *operatedomain.PoolManagementServ
 		}
 		c.JSON(http.StatusOK, contracts.OK(page))
 	})
+
+	r.POST("/merchant/pool/page", func(c *gin.Context) {
+		if service == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "号码池管理未启用"))
+			return
+		}
+		var req operatedomain.PoolPageRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+		tenant, ok := contracts.TenantFromContext(c.Request.Context())
+		if ok {
+			if !tenant.Internal {
+				parsedMerchantID, _ := strconv.Atoi(tenant.MerchantID)
+				req.MerchantID = parsedMerchantID
+			} else {
+				if req.MerchantID <= 0 {
+					if ctxMerchantID := c.GetHeader("X-Merchant-Id"); ctxMerchantID != "" {
+						if parsed, err := strconv.Atoi(ctxMerchantID); err == nil {
+							req.MerchantID = parsed
+						}
+					}
+				}
+			}
+		}
+		page, err := service.Page(c.Request.Context(), req)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询号码池失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(page))
+	})
+
+	r.GET("/merchant/pool", func(c *gin.Context) {
+		if service == nil {
+			c.JSON(http.StatusServiceUnavailable, contracts.Fail(contracts.CodeInternal, "号码池管理未启用"))
+			return
+		}
+		enable, enablePtr := parseEnableQuery(c.Query("enable"))
+		gatewayID, _ := strconv.Atoi(c.Query("gatewayId"))
+		var merchantID int
+		tenant, ok := contracts.TenantFromContext(c.Request.Context())
+		if ok {
+			if !tenant.Internal {
+				merchantID, _ = strconv.Atoi(tenant.MerchantID)
+			} else {
+				merchantID, _ = strconv.Atoi(c.Query("merchantId"))
+				if merchantID <= 0 {
+					if ctxMerchantID := c.GetHeader("X-Merchant-Id"); ctxMerchantID != "" {
+						if parsed, err := strconv.Atoi(ctxMerchantID); err == nil {
+							merchantID = parsed
+						}
+					}
+				}
+			}
+		}
+		page, err := service.Page(c.Request.Context(), operatedomain.PoolPageRequest{
+			PageNumber: parsePositiveInt(c.Query("pageNumber"), 1),
+			PageSize:   parsePositiveInt(c.Query("pageSize"), 20),
+			Name:       c.Query("name"),
+			GatewayID:  gatewayID,
+			MerchantID: merchantID,
+			Enable:     enablePtr(enable),
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "查询号码池失败"))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(page))
+	})
 }
 
 func savePool(service *operatedomain.PoolManagementService) gin.HandlerFunc {

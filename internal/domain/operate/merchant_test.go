@@ -137,3 +137,62 @@ func (r *fakeMerchantRepository) Delete(_ context.Context, ids []int) error {
 	}
 	return nil
 }
+
+func TestMerchantSipDomainCascade(t *testing.T) {
+	t.Parallel()
+
+	mchRepo := newFakeMerchantRepository()
+	extRepo := newFakeExtensionRepository()
+	cache := &fakeAuthCacheInvalidator{}
+	service := &operate.MerchantManagementService{
+		Repository:    mchRepo,
+		ExtensionRepo: extRepo,
+		Cache:         cache,
+	}
+
+	// 1. 创建商户，初始域名为 sip.old.com
+	mch, err := mchRepo.Save(context.Background(), operate.Merchant{
+		Name:      "测试商户",
+		Account:   "test-mch",
+		SipDomain: "sip.old.com",
+		Enable:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. 为该商户创建分机
+	ext1, err := extRepo.Save(context.Background(), operate.Extension{
+		ExtensionNumber: "1001",
+		Password:        "12345678",
+		MerchantID:      mch.ID,
+		SipDomain:       "sip.old.com",
+		HA1:             "old-ha1",
+		HA1b:            "old-ha1b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. 修改商户的 SipDomain 为 sip.new.com
+	mch.SipDomain = "sip.new.com"
+	_, err = service.Save(context.Background(), mch)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. 验证分机 SipDomain 与 HA 值是否已被更新
+	updatedExt, err := extRepo.GetByID(context.Background(), ext1.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedExt.SipDomain != "sip.new.com" {
+		t.Errorf("expected SipDomain to be sip.new.com, got %s", updatedExt.SipDomain)
+	}
+	if updatedExt.HA1 == "old-ha1" || updatedExt.HA1b == "old-ha1b" {
+		t.Errorf("expected HA values to be recalculated and changed")
+	}
+	if cache.calls != 1 {
+		t.Errorf("expected 1 auth cache invalidation, got %d", cache.calls)
+	}
+}

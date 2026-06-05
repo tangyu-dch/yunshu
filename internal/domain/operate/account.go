@@ -42,19 +42,21 @@ var (
 // 账号类型明确区分平台、运营和商户侧身份；商户侧账号必须带 merchantId，
 // 运营和超级管理员账号不能绑定到单个商户，避免数据范围在登录后漂移。
 type Account struct {
-	ID          int        `json:"id,omitempty"`
-	Username    string     `json:"username"`
-	Password    string     `json:"password,omitempty"`
-	MerchantID  string     `json:"merchantId,omitempty"`
-	UserID      string     `json:"userId,omitempty"`
-	RoleID      string     `json:"roleId"`
-	AccountType string     `json:"accountType"`
-	DataScope   string     `json:"dataScope"`
-	Enable      bool       `json:"enable"`
-	CreatedBy   string     `json:"createdBy,omitempty"`
-	UpdatedBy   string     `json:"updatedBy,omitempty"`
-	CreatedTime *time.Time `json:"createdTime,omitempty"`
-	UpdatedTime *time.Time `json:"updatedTime,omitempty"`
+	ID             int        `json:"id,omitempty"`
+	Username       string     `json:"username"`
+	Password       string     `json:"password,omitempty"`
+	MerchantID     string     `json:"merchantId,omitempty"`
+	UserID         string     `json:"userId,omitempty"`
+	RoleID         string     `json:"roleId"`
+	AccountType    string     `json:"accountType"`
+	DataScope      string     `json:"dataScope"`
+	Enable         bool       `json:"enable"`
+	OrganizationID int        `json:"organizationId,omitempty"` // 绑定部门/组织机构ID
+	SeatNumber     string     `json:"seatNumber,omitempty"`     // 坐席工号/号
+	CreatedBy      string     `json:"createdBy,omitempty"`
+	UpdatedBy      string     `json:"updatedBy,omitempty"`
+	CreatedTime    *time.Time `json:"createdTime,omitempty"`
+	UpdatedTime    *time.Time `json:"updatedTime,omitempty"`
 }
 
 // AccountPageRequest 表示账号分页查询条件。

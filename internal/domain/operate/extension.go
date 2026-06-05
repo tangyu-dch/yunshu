@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"strings"
@@ -76,6 +77,7 @@ type ExtensionManagementService struct {
 	Repository   ExtensionManagementRepository
 	MerchantRepo MerchantRepository
 	Cache        AuthCacheInvalidator
+	License      *LicenseService
 	Logger       *slog.Logger
 }
 
@@ -104,7 +106,6 @@ func (s *ExtensionManagementService) Page(ctx context.Context, req ExtensionPage
 	return page, nil
 }
 
-
 func (s *ExtensionManagementService) Save(ctx context.Context, extension Extension) (Extension, error) {
 	logger := s.logger()
 	normalized, err := normalizeExtensionForSave(extension)
@@ -122,6 +123,22 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 		return Extension{}, ErrExtensionConflict
 	}
 
+	// 校验分机配额限制（MaxExtensions）
+	if normalized.ID == 0 && s.License != nil {
+		claims, errLic := s.License.LoadAndVerify(ctx)
+		if errLic != nil {
+			logger.Warn("运营端新建分机被拦截：系统授权校验失败", "error", errLic.Error())
+			return Extension{}, fmt.Errorf("【云枢授权】系统授权校验失败，禁止新建分机: %v", errLic)
+		}
+		page, errPage := s.Repository.Page(ctx, ExtensionPageRequest{PageNumber: 1, PageSize: 1})
+		if errPage == nil {
+			if int(page.Total) >= claims.Limits.MaxExtensions {
+				logger.Warn("运营端新建分机被拦截：超出授权最大分机数配额限制", "limit", claims.Limits.MaxExtensions, "current", page.Total)
+				return Extension{}, fmt.Errorf("【云枢授权】已超出最大分机数配额限制（最大允许：%d，当前已建：%d），禁止新建", claims.Limits.MaxExtensions, page.Total)
+			}
+		}
+	}
+
 	// 动态解析租户域 (SipDomain) 并重新计算 HA1 和 HA1b 哈希密码
 	if s.MerchantRepo != nil {
 		mch, err := s.MerchantRepo.GetByID(ctx, normalized.MerchantID)
@@ -134,12 +151,15 @@ func (s *ExtensionManagementService) Save(ctx context.Context, extension Extensi
 	}
 
 	// 编辑时：如果前端未传密码（留空），从数据库保留旧密码
+	// 新增时：如果未传密码（留空），自动生成 8 位随机密码
 	// Kamailio 的 subscriber 表要求 ha1 / ha1b 始终与 password 保持一致
 	if normalized.ID > 0 && normalized.Password == "" {
 		existing, err := s.Repository.GetByID(ctx, normalized.ID)
 		if err == nil && existing.Password != "" {
 			normalized.Password = existing.Password
 		}
+	} else if normalized.ID == 0 && normalized.Password == "" {
+		normalized.Password = GenerateRandomPassword(8)
 	}
 
 	// 始终重算 HA1 / HA1b（参考 Kamailio auth_db 模块）：

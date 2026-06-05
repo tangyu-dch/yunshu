@@ -26,7 +26,24 @@ func TestHubBroadcastsProjectionFromRedis(t *testing.T) {
 
 	httpServer := httptest.NewServer(http.HandlerFunc(hub.ServeHTTP))
 	defer httpServer.Close()
-	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?merchantId=88"
+
+	// Mock valid Redis token session
+	token := "test-token-88"
+	ticket := struct {
+		Tenant struct {
+			MerchantID string `json:"merchantId"`
+			Internal   bool   `json:"internal"`
+			RoleID     string `json:"roleId"`
+		} `json:"tenant"`
+	}{}
+	ticket.Tenant.MerchantID = "88"
+	ticket.Tenant.Internal = false
+	rawTicket, _ := json.Marshal(ticket)
+	if err := client.Set(ctx, "console:auth:session:"+token, rawTicket, 10*time.Second).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	url := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "?token=" + token
 	conn, _, err := gorilla.DefaultDialer.Dial(url, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -90,12 +107,42 @@ func TestHubFiltersProjectionBySubscription(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(hub.ServeHTTP))
 	defer httpServer.Close()
 	baseURL := "ws" + strings.TrimPrefix(httpServer.URL, "http")
-	matched, _, err := gorilla.DefaultDialer.Dial(baseURL+"?merchantId=88&taskId=10", nil)
+
+	// Mock Redis token sessions for merchant 88 and 99
+	token88 := "test-token-88"
+	ticket88 := struct {
+		Tenant struct {
+			MerchantID string `json:"merchantId"`
+			Internal   bool   `json:"internal"`
+			RoleID     string `json:"roleId"`
+		} `json:"tenant"`
+	}{}
+	ticket88.Tenant.MerchantID = "88"
+	rawTicket88, _ := json.Marshal(ticket88)
+	if err := client.Set(ctx, "console:auth:session:"+token88, rawTicket88, 10*time.Second).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	token99 := "test-token-99"
+	ticket99 := struct {
+		Tenant struct {
+			MerchantID string `json:"merchantId"`
+			Internal   bool   `json:"internal"`
+			RoleID     string `json:"roleId"`
+		} `json:"tenant"`
+	}{}
+	ticket99.Tenant.MerchantID = "99"
+	rawTicket99, _ := json.Marshal(ticket99)
+	if err := client.Set(ctx, "console:auth:session:"+token99, rawTicket99, 10*time.Second).Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	matched, _, err := gorilla.DefaultDialer.Dial(baseURL+"?token="+token88+"&taskId=10", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer matched.Close()
-	mismatched, _, err := gorilla.DefaultDialer.Dial(baseURL+"?merchantId=99&taskId=10", nil)
+	mismatched, _, err := gorilla.DefaultDialer.Dial(baseURL+"?token="+token99+"&taskId=10", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

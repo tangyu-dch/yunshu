@@ -28,7 +28,13 @@ func NewRecordingHTTPClient(url, secret string, timeout time.Duration, logger *s
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	return &RecordingHTTPClient{URL: url, Secret: secret, Timeout: timeout, Logger: logger}
+	return &RecordingHTTPClient{
+		URL:        url,
+		Secret:     secret,
+		Timeout:    timeout,
+		HTTPClient: &http.Client{Timeout: timeout},
+		Logger:     logger,
+	}
 }
 
 // Enabled 返回是否启用真实上传请求。

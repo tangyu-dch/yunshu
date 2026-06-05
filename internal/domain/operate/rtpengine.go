@@ -5,10 +5,19 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
 )
+
+// isRunningInDocker 返回当前服务是否在 Docker 容器内部运行。
+func isRunningInDocker() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	return false
+}
 
 var (
 	// ErrInvalidRtpengine 表示运营端提交的 RTPEngine 配置无效或缺少字段。
@@ -120,6 +129,13 @@ func pingRtpengine(sock string) string {
 	// 如果地址没有指定端口，默认追加控制端口 2223
 	if !strings.Contains(addr, ":") {
 		addr = addr + ":2223"
+	}
+
+	// 本地开发与宿主机运行适配：若在宿主机（非容器）环境下检测，将 rtpengine 域名映射回 127.0.0.1
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		if (host == "rtpengine" || host == "cc-rtpengine") && !isRunningInDocker() {
+			addr = net.JoinHostPort("127.0.0.1", port)
+		}
 	}
 
 	// 设置极短的拨号超时 150 毫秒
