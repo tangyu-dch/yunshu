@@ -171,3 +171,20 @@ npm run build
 - **默认“今天”时间范围**：在 [page.tsx](file:///Users/tangyu/Projects/yunshu/web/src/features/business/call-record/page.tsx) 中，通话记录列表默认初始化为当天（`startOf('day')` 至 `endOf('day')`）。同时，在 `QueryBar` 引入 `initialValues` 支持，重置时恢复今天范围，防止高并发下扫表产生大表慢查询。
 - **用户 ID 筛选条件**：在 `queryFields` 过滤字典及 `handleSearch` 提交逻辑中全新加入了 **“用户 ID”** (`userId`) 检索项，结合后端已实现的 `UserID` 查询过滤，完成前后端闭环，支持对指定用户/坐席的历史通话明细进行精准定位。
 
+### 6. 内核级地理围栏防火墙文档完备与代码推送
+- **[MODIFY] [README_zh.md](file:///Users/tangyu/Projects/yunshu/README_zh.md)** & **[README.md](file:///Users/tangyu/Projects/yunshu/README.md)**：
+  - 在核心产品特色中，新增了 `🛡️ 基于 iptables & ipset 的宿主机级地理围栏防火墙 (cc-firewall-guard)` 的文档说明。详细阐述了黑白名单双模切换、“仅放行国内 IP”强力白名单模式、高平滑热更新与安全保障（Fail-Safe RFC 1918 网段保护）、模拟开发自省（Dry-Run Mode）及前端 IP 归属可视化诊断。
+  - 新增了高质量的 **Mermaid 拓扑流与审计流程图**（包含中文与英文双版本），以图形化方式直观展现防火墙配置下发、动态 IP 拦截以及 `journalctl` 实时拦截日志抓取上报控制台的完整数据闭环。
+  - 在“生产物理部署步骤”第四步与第五步中补全了 `cc-firewall-guard` 编译指令以及标准的 Linux Systemd 守护进程配置文件配置样例。
+  - 更新了“物理项目目录结构”树以及“开发路线图”第一阶段，标记国别 IP 防火墙守护进程为 100% 已完工状态。
+- **编译与单元测试校验**：
+  - 排除临时 `scratch/` 目录干扰后，运行 `go vet` 及 `go test ./...` 对整站 CTI、ESL、Console 模块进行了 100% 验证，结果全部通过。
+- **代码提交与推送**：
+  - 将所有修改过的 README 文件提交并推送至远程 `dev` 分支，工作区状态保持 100% 干净。
+- **截图更新与 Mermaid 语法修正**：
+  - 编写了 Puppeteer 自动化浏览器脚本 `scratch/capture_all.js`，启动本地 Google Chrome 浏览器并依次模拟超级管理员和商户端账号登录，全自动截取了 14 个核心业务及系统页面的最新截图（覆盖更新至 `docs/images/`），图文信息完全符合目前最新版的页面布局，并且为新版内核防火墙专门录入新增了 `operate_ip_block.png` 审计页面截图。
+  - 修复了 README 中 Mermaid 语法对于 subgraph 带有特殊字符与括号（如 `(cc-console)`、`(cc-firewall-guard)`）的解析问题，将英文及中文版本的所有 subgraph 声明使用双引号 `""` 闭合处理，完全解决了渲染错误（Unable to render rich display）。
+  - 将所有新老图片及修正后的 README 文件一并提交并推送到远程 `dev` 分支。
+
+
+

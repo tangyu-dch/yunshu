@@ -108,6 +108,11 @@
 | ![SIP 分机配置中心](docs/images/operate_extension.png) | ![动态选号规则与频次风控](docs/images/operate_risk_control.png) |
 | *SaaS 分机配置、SIP 密码分发与在线/忙碌注册表实时自省* | *高并发外呼号码源原子级分配、频次盲区过滤与黑白名单机制* |
 
+| 🛡️ 国别 IP 拦截与安全中心 |
+| :---: |
+| ![国别 IP 拦截与安全中心](docs/images/operate_ip_block.png) |
+| *基于 iptables & ipset 的国别地理围栏防火墙与拦截审计日志面板* |
+
 #### 💼 商户控制台全景画廊 (商户端 - `/merchant`)
 以下是商户端进行批量话务导入、在线 WebRTC 呼叫与通话审计的核心工作台预览：
 
@@ -143,13 +148,13 @@
 #### 🛡️ 国别 IP 防火墙守护进程网络流与审计拓扑
 ```mermaid
 flowchart TD
-    subgraph 控制台管理 (cc-console)
+    subgraph "控制台管理 (cc-console)"
         UI[前端配置界面] -->|修改规则| DB[(MySQL 配置表)]
         DB -->|启动同步| Redis[(Redis 极热缓存)]
         UI -->|IP归属地查询| API[IP 归属查询 API]
     end
 
-    subgraph 防火墙守护进程 (cc-firewall-guard)
+    subgraph "防火墙守护进程 (cc-firewall-guard)"
         Sync[配置同步轮询器] -->|每10s读取开关与名单| Redis
         Sync -->|检测配置变更| Load[加载/下载国别网段]
         Load -->|仅放行国内| IPDenyCN[ipdeny.com 下载 cn.zone]
@@ -166,7 +171,7 @@ flowchart TD
         Lookup -->|上报 Webhook| Webhook[cti/kamailio/ipblock/log]
     end
 
-    subgraph 物理网络层
+    subgraph "物理网络层"
         Packet[外部连接 SIP 5060 / WS 5066] --> IPTables
         IPTables -->|匹配 ipset 集合| DROP[网络丢弃 Packet & 记录 Syslog]
     end

@@ -108,6 +108,11 @@ A view of the operator control interfaces:
 | ![Multi-Tenant SIP Extensions](docs/images/operate_extension.png) | ![Selection Rules & Anti-Harassment](docs/images/operate_risk_control.png) |
 | *Extension provisioning, credentials, and online status monitors* | *Atomic caller routing, blind-spot filters, and blacklist checks* |
 
+| 🛡️ Geofencing IP Firewall & Security Center |
+| :---: |
+| ![Geofencing IP Firewall & Security Center](docs/images/operate_ip_block.png) |
+| *Country-level firewall blocking via iptables/ipset and audit log monitoring* |
+
 #### Merchant Portal Gallery (Merchant Panel - `/merchant`)
 Merchant workspace preview:
 
@@ -142,13 +147,13 @@ Merchant workspace preview:
 #### 🛡️ Country IP Firewall Daemon Network Flow & Audit Topology
 ```mermaid
 flowchart TD
-    subgraph Console Management (cc-console)
+    subgraph "Console Management (cc-console)"
         UI[Frontend Config UI] -->|Update Rules| DB[(MySQL Config Table)]
         DB -->|Sync Config| Redis[(Redis Hot Cache)]
         UI -->|IP Lookup| API[IP Lookup API]
     end
 
-    subgraph Firewall Guard Daemon (cc-firewall-guard)
+    subgraph "Firewall Guard Daemon (cc-firewall-guard)"
         Sync[Config Sync Loop] -->|Every 10s| Redis
         Sync -->|On Config Changed| Load[Load/Download Ranges]
         Load -->|Only Allow CN| IPDenyCN[Download cn.zone from ipdeny.com]
@@ -165,7 +170,7 @@ flowchart TD
         Lookup -->|Report Webhook| Webhook[cti/kamailio/ipblock/log]
     end
 
-    subgraph Telephony & Media Layer
+    subgraph "Telephony & Media Layer"
         Packet[Inbound SIP 5060 / WS 5066] --> IPTables
         IPTables -->|Check ipset Set| DROP[DROP Packet & Log Syslog]
     end
