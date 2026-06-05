@@ -130,6 +130,49 @@ Merchant workspace preview:
 *   **Rigid Error Handlers**: Fails closed if API keys are missing, cloud services fail, or credentials are invalid. The engine immediately rejects mock simulations, hanging up call legs or transferring to live agents to protect production billings.
 *   **Outbox-Backed Workers**: Pushes downstream CDRs via custom hooks with exponential backoffs and HMAC-SHA256 signatures, ensuring reliable deliveries.
 
+### 🛡️ Dynamic Geo-Fencing & IP Firewall Daemon (`cc-firewall-guard`)
+*   **Host-Level Network Block**: Integrates `cc-firewall-guard`, a host-level system security daemon that periodically syncs blocking configurations from Redis and dynamically updates kernel IP sets. It enforces host-level package dropping (`DROP`) for SIP (`5060`) and WebSocket (`5066`) ports.
+*   **Dual Mode Geo-Fencing**:
+    - **Blacklist Mode**: Blocks a list of user-selected high-risk country codes (ISO 2-letter codes, e.g. `US`, `DE`).
+    - **"Only Allow CN" Whitelist Mode**: Whitelists only China (`CN`) and private loopback/private subnets (RFC 1918: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16`, `224.0.0.0/4`). All other international IP ranges are dropped. Bypasses downloading all 230+ country zone files, drastically improving firewall packet filtering lookup latency.
+*   **Atomic Heat Swapping & Fail-Safe Protection**: Implements atomic `ipset swap` commands. It loads IP ranges into a temporary set and swaps it with the active set in a single kernel instruction to guarantee zero connection loss during configuration updates. Explicitly whitelists RFC 1918 private scopes to prevent administrator connection lockout.
+*   **Adaptive Environment Detection (Dry-Run Mode)**: Runs in clean, no-op dry-run mode on macOS development environments without system rules modification. On Linux servers, it listens to kernel events via `journalctl --grep=SIP_BLOCK:` in real-time, matches blocked IPs to countries, and reports them back to `cc-console`'s Webhook to write audit logs.
+*   **Interactive IP Diagnostics**: Provides a diagnostic dashboard in the console to inspect specific IP allocations, automatically convert ISO codes to beautiful indicator flag emojis, and determine their status (Allow, Blocked, Private Scope) under the current rules.
+
+#### 🛡️ Country IP Firewall Daemon Network Flow & Audit Topology
+```mermaid
+flowchart TD
+    subgraph Console Management (cc-console)
+        UI[Frontend Config UI] -->|Update Rules| DB[(MySQL Config Table)]
+        DB -->|Sync Config| Redis[(Redis Hot Cache)]
+        UI -->|IP Lookup| API[IP Lookup API]
+    end
+
+    subgraph Firewall Guard Daemon (cc-firewall-guard)
+        Sync[Config Sync Loop] -->|Every 10s| Redis
+        Sync -->|On Config Changed| Load[Load/Download Ranges]
+        Load -->|Only Allow CN| IPDenyCN[Download cn.zone from ipdeny.com]
+        Load -->|Blacklisted Countries| IPDenyList[Download xx.zone from ipdeny.com]
+        
+        IPDenyCN -->|Inject RFC 1918 Private Ranges| Rules[Compile Active Rules]
+        IPDenyList --> Rules
+        
+        Rules -->|ipset restore / swap| IPSet{ipset Set}
+        Rules -->|iptables -I INPUT| IPTables{iptables rules}
+        
+        Scraper[Log Scraper Loop] -->|Tail journalctl stream| KernelLog[Filter prefix: SIP_BLOCK:]
+        KernelLog -->|Extract Source IP| Lookup[Local IP Cache Check]
+        Lookup -->|Report Webhook| Webhook[cti/kamailio/ipblock/log]
+    end
+
+    subgraph Telephony & Media Layer
+        Packet[Inbound SIP 5060 / WS 5066] --> IPTables
+        IPTables -->|Check ipset Set| DROP[DROP Packet & Log Syslog]
+    end
+
+    Webhook -->|Write Log| DB
+```
+
 ---
 
 ## 🚀 4. Production Deployment Roadmap & Configuration Guide
@@ -309,29 +352,49 @@ cti:
    go build -o bin/cc-console ./cmd/cc-console
    go build -o bin/cc-call ./cmd/cc-call
    go build -o bin/cc-worker ./cmd/cc-worker
+   go build -o bin/cc-firewall-guard ./cmd/cc-firewall-guard
    ```
 2. Copy `configs/default.yaml` to `configs/production.yaml` and configure it according to **4.2 Production Config Guidelines**.
 
 #### Step 5: Enforce Systemd System Service Availability
-1. Manage microservices using **Systemd** to achieve automatic recovery. Create `/etc/systemd/system/cc-call.service`:
-   ```ini
-   [Unit]
-   Description=Yunshu CallCenter Telephony Engine
-   After=network.target
+1. Manage microservices using **Systemd** to achieve automatic recovery. For `cc-call` and `cc-firewall-guard` as examples:
+   - Create `/etc/systemd/system/cc-call.service`:
+     ```ini
+     [Unit]
+     Description=Yunshu CallCenter Telephony Engine
+     After=network.target
 
-   [Service]
-   Type=simple
-   User=root
-   WorkingDirectory=/var/yunshu
-   ExecStart=/var/yunshu/bin/cc-call -config /var/yunshu/configs/production.yaml
-   Restart=always
-   RestartSec=5
-   LimitNOFILE=65535
+     [Service]
+     Type=simple
+     User=root
+     WorkingDirectory=/var/yunshu
+     ExecStart=/var/yunshu/bin/cc-call -config /var/yunshu/configs/production.yaml
+     Restart=always
+     RestartSec=5
+     LimitNOFILE=65535
 
-   [Install]
-   WantedBy=multi-user.target
-   ```
-2. Reload system configurations with `systemctl daemon-reload` and start all services, ensuring 24/7 self-healing and service reliability.
+     [Install]
+     WantedBy=multi-user.target
+     ```
+   - Create `/etc/systemd/system/cc-firewall-guard.service` (The firewall guard daemon must run as root):
+     ```ini
+     [Unit]
+     Description=Yunshu CallCenter IP Geofencing Firewall Guard Daemon
+     After=network.target
+
+     [Service]
+     Type=simple
+     User=root
+     WorkingDirectory=/var/yunshu
+     ExecStart=/var/yunshu/bin/cc-firewall-guard -config /var/yunshu/configs/production.yaml
+     Restart=always
+     RestartSec=5
+     LimitNOFILE=65535
+
+     [Install]
+     WantedBy=multi-user.target
+     ```
+2. Reload system configurations with `systemctl daemon-reload` and start all services (including `cc-firewall-guard`), ensuring 24/7 self-healing and service reliability.
 
 ---
 
@@ -467,6 +530,7 @@ Here is the integration and configuration modification guide for the core VoIP c
 │   ├── cc-console/             # Operations and tenant admin panel server
 │   ├── cc-worker/              # Async distributed workers
 │   ├── cc-edge/                # Edge authentication and rate limiting proxy
+│   ├── cc-firewall-guard/      # IP Geofencing Firewall guard daemon
 │   ├── cc-all/                 # All-in-One combined runtime daemon
 │   └── update-agents/          # Generated contract updates builder
 ├── internal/
@@ -522,6 +586,7 @@ Yunshu is actively refactoring legacy call center logic into the high-performanc
 *   ✅ **Decoupled Workflow Fields**: Eliminated mock LLM options from UI dropdowns and unified forms.
 *   ✅ **Capacity Check Self-Reflection**: Allowed services to check implementation before exposing routes.
 *   ✅ **Strict Fail-Closed Execution**: Prevented mock fallbacks to guarantee production billing logic safety.
+*   ✅ **IP Geofencing Firewall Daemon (`cc-firewall-guard`)**: Dynamic host-level blocking via iptables/ipset, "Only Allow CN" whitelist mode, RFC 1918 security inclusion, and syslog automatic log auditing.
 
 ### Phase 2: Selection Concurrency & Event Registries [In Progress]
 *   ✅ **Double Concurrency Atomicity**: Evaluated concurrent allocations on both Gateway and Extension levels natively in Redis Lua scripts.
