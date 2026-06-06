@@ -24,7 +24,7 @@ import (
 // RegisterConsumers 注册 cc-call 内部事件消费者。
 // 当前消费者负责订阅事件总线，并在事件发生时提取上下文，向 CTI 或 ESL 引擎发送状态推进信号。
 // 涵盖 API 外呼、批量外呼、拨号盘直呼以及客户呼入四大经典通信流程。
-func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, statusReader esl.ExtensionStatusReader, batchRepo cti.BatchTaskRepository, queue cti.CallQueue, logger *slog.Logger) {
+func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *workflow.Runner, eslRunner *workflow.Runner, sessionService *esl.SessionService, originate *esl.OriginateService, runtimeSelector *cti.RuntimeSelector, candidateSource cti.CandidateSource, statusReader esl.ExtensionStatusReader, batchRepo cti.BatchTaskRepository, queue cti.CallQueue, mediaRegistry *MediaRegistry, logger *slog.Logger) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -108,7 +108,12 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 			}
 		}
 
-		// 1. 实时更新分机状态并处理排队分配
+		// 1.2 媒体编排器安全清理：通话挂断时停止 broadcastTime 定时器，防止 goroutine 泄漏
+		if eventName == string(esl.EventChannelHangupComplete) && mediaRegistry != nil {
+			mediaRegistry.Remove(event.AggregateID)
+		}
+
+		// 2. 实时更新分机状态并处理排队分配
 		if legRole == string(contracts.LegRoleAgent) {
 			var ext string
 			var userID int
@@ -308,23 +313,23 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 				if legRole == string(contracts.LegRoleAgent) {
 					return handleAPIOutboundAgentProgress(ctx, event, sessionService, originate, runtimeSelector, candidateSource, logger)
 				}
-				// 被叫（客户）振铃：在需要补振铃的情况下向坐席播放补振铃音
+				// 被叫（客户）侧事件：区分 180 振铃与 183 早期媒体
 				if legRole == string(contracts.LegRoleCustomer) {
-					if eventName == string(esl.EventChannelProgress) {
-						return handleAPIOutboundCustomerProgress(ctx, event, sessionService, originate, logger)
+					if eventName == string(esl.EventChannelProgressMedia) {
+						return handleAPIOutboundCustomerEarlyMedia(ctx, event, sessionService, originate, mediaRegistry, logger)
 					}
-					return handleAPIOutboundCustomerReady(ctx, event, sessionService, originate, logger)
+					return handleAPIOutboundCustomerProgress(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			case string(esl.EventChannelAnswer):
 				// 主叫（坐席）应答：标记主叫就绪并尝试两腿桥接
 				if legRole == string(contracts.LegRoleAgent) {
-					if err := handleAPIOutboundAgentAnswer(ctx, event, sessionService, originate, logger); err != nil {
+					if err := handleAPIOutboundAgentAnswer(ctx, event, sessionService, originate, mediaRegistry, logger); err != nil {
 						return err
 					}
 				}
 				// 被叫（客户）应答：标记被叫就绪并尝试两腿桥接，同时切断补振铃音
 				if legRole == string(contracts.LegRoleCustomer) {
-					return handleAPIOutboundCustomerReady(ctx, event, sessionService, originate, logger)
+					return handleAPIOutboundCustomerReady(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			}
 
@@ -336,12 +341,12 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 				if legRole == string(contracts.LegRoleCustomer) && workflowID == esl.WorkflowESLBatchSynergy {
 					return handleBatchOutboundCustomerProgress(ctx, event, sessionService, originate, logger)
 				}
-				// 坐席侧振铃：在需要补振铃的情况下向客户腿播放补振铃音
+				// 坐席侧振铃与早期媒体：补铃音编排 + 桥接决策
 				if legRole == string(contracts.LegRoleAgent) {
-					if eventName == string(esl.EventChannelProgress) {
-						return handleBatchOutboundAgentProgress(ctx, event, sessionService, originate, logger)
+					if eventName == string(esl.EventChannelProgressMedia) {
+						return handleBatchOutboundAgentEarlyMedia(ctx, event, sessionService, originate, mediaRegistry, logger)
 					}
-					return handleBatchOutboundAgentReady(ctx, event, sessionService, originate, logger)
+					return handleBatchOutboundAgentProgress(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			case string(esl.EventChannelAnswer):
 				// 客户应答：
@@ -352,7 +357,7 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 				}
 				// 坐席应答：切断补振铃并桥接双腿
 				if legRole == string(contracts.LegRoleAgent) {
-					return handleBatchOutboundAgentReady(ctx, event, sessionService, originate, logger)
+					return handleBatchOutboundAgentReady(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			}
 
@@ -366,15 +371,15 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 				}
 				// 客户侧应答：停止补振铃并桥接双腿
 				if legRole == string(contracts.LegRoleCustomer) {
-					return handleDialpadCustomerReady(ctx, event, sessionService, originate, logger)
+					return handleDialpadCustomerReady(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			case string(esl.EventChannelProgress), string(esl.EventChannelProgressMedia):
-				// 客户侧振铃：播放补振铃音
+				// 客户侧振铃与早期媒体：补铃音编排
 				if legRole == string(contracts.LegRoleCustomer) {
-					if eventName == string(esl.EventChannelProgress) {
-						return handleDialpadCustomerProgress(ctx, event, sessionService, originate, logger)
+					if eventName == string(esl.EventChannelProgressMedia) {
+						return handleDialpadCustomerEarlyMedia(ctx, event, sessionService, originate, mediaRegistry, logger)
 					}
-					return handleDialpadCustomerReady(ctx, event, sessionService, originate, logger)
+					return handleDialpadCustomerProgress(ctx, event, sessionService, originate, mediaRegistry, logger)
 				}
 			}
 
@@ -696,7 +701,8 @@ func handleAPIOutboundAgentProgress(ctx context.Context, event contracts.EventEn
 
 // handleAPIOutboundAgentAnswer 处理 API 外呼主叫（坐席侧）应答事件。
 // 当坐席已接听电话时，如果被叫客户侧已经振铃但尚未应答，为了提升坐席感知，可立即向坐席下发播放补振铃音命令。
-func handleAPIOutboundAgentAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// 集成 MediaOrchestrator 支持 broadcastTime 定时截断。
+func handleAPIOutboundAgentAnswer(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -712,24 +718,41 @@ func handleAPIOutboundAgentAnswer(ctx context.Context, event contracts.EventEnve
 		supplementRingFile, _ := session.Metadata["supplementRingFile"].(string)
 		agentUUID, _ := session.Metadata["agentUuid"].(string)
 		if supplementRingFile != "" && agentUUID != "" {
-			cmd := telephony.NewCommand(
-				"playback:"+callID+":supplement_ring",
-				"playback",
-				callID,
-				agentUUID,
-				session.FSAddr,
-				contracts.LegRoleAgent,
-				session.Profile,
-				map[string]any{
-					"file": supplementRingFile,
-					"both": "aleg",
-				},
-			)
-			if err := originate.CommandService.Execute(ctx, cmd); err == nil {
-				session.Metadata["supplementRingPlaying"] = true
-				logger.Info("API 外呼主叫(坐席)应答时被叫已振铃，向主叫发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
+			broadcastTime := int64FromMap(session.Metadata, "broadcastTime")
+			broadcastTimeFlag := boolFromMap(session.Metadata, "broadcastTimeFlag")
+			var effectiveBroadcastMs int64
+			if broadcastTimeFlag && broadcastTime > 0 {
+				effectiveBroadcastMs = broadcastTime
+			}
+
+			if mediaRegistry != nil {
+				orch := mediaRegistry.GetOrCreate(callID, originate.CommandService, sessionService.Store, logger)
+				if startErr := orch.Start(ctx, supplementRingFile, agentUUID, session.FSAddr, effectiveBroadcastMs, contracts.LegRoleAgent, session.Profile); startErr == nil {
+					session.Metadata["supplementRingPlaying"] = true
+					logger.Info("API 外呼主叫(坐席)应答时被叫已振铃，通过编排器向主叫发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile, "broadcastMs", effectiveBroadcastMs)
+				} else {
+					logger.Error("API 外呼主叫应答时通过编排器发送补振铃失败", "callId", callID, "error", startErr.Error())
+				}
 			} else {
-				logger.Error("API 外呼主叫应答时发送补振铃失败", "callId", callID, "error", err.Error())
+				cmd := telephony.NewCommand(
+					"playback:"+callID+":supplement_ring",
+					"playback",
+					callID,
+					agentUUID,
+					session.FSAddr,
+					contracts.LegRoleAgent,
+					session.Profile,
+					map[string]any{
+						"file": supplementRingFile,
+						"both": "aleg",
+					},
+				)
+				if err := originate.CommandService.Execute(ctx, cmd); err == nil {
+					session.Metadata["supplementRingPlaying"] = true
+					logger.Info("API 外呼主叫(坐席)应答时被叫已振铃，向主叫发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
+				} else {
+					logger.Error("API 外呼主叫应答时发送补振铃失败", "callId", callID, "error", err.Error())
+				}
 			}
 		}
 	}
@@ -740,9 +763,9 @@ func handleAPIOutboundAgentAnswer(ctx context.Context, event contracts.EventEnve
 	return maybeBridgeAPIOutbound(ctx, session, originate, logger, "agent_answer")
 }
 
-// handleAPIOutboundCustomerReady 处理 API 外呼被叫（客户侧）振铃或就绪事件。
-// 一旦客户准备好或应答，立即切断向坐席侧播放的补振铃音，并在两腿同时就绪时触发桥接命令。
-func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// handleAPIOutboundCustomerReady 处理 API 外呼被叫（客户侧）应答事件。
+// 一旦客户应答，立即切断向坐席侧播放的补振铃音，并在两腿同时就绪时触发桥接命令。
+func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -752,6 +775,13 @@ func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEn
 		session.Metadata = map[string]any{}
 	}
 	session.Metadata["customerReady"] = true
+
+	// 安全停止编排器（取消 broadcastTime 定时器）
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.Stop(ctx)
+		}
+	}
 
 	// 停止主叫(坐席)侧播放的补振铃音
 	if boolFromMap(session.Metadata, "supplementRingPlaying") {
@@ -764,7 +794,7 @@ func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEn
 				agentUUID,
 				session.FSAddr,
 				contracts.LegRoleAgent,
-				contracts.CallFlowAPIOutbound,
+				session.Profile,
 				map[string]any{},
 			)
 			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {
@@ -898,8 +928,29 @@ func atoi(raw string) int {
 	return value
 }
 
-// handleAPIOutboundCustomerProgress 处理 API 外呼被叫客户侧振铃补振铃动作。
-func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// int64FromMap 工具方法，安全截取 int64 值。
+func int64FromMap(payload map[string]any, key string) int64 {
+	value, ok := payload[key]
+	if !ok || value == nil {
+		return 0
+	}
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case string:
+		parsed, _ := strconv.ParseInt(typed, 10, 64)
+		return parsed
+	}
+	return 0
+}
+
+// handleAPIOutboundCustomerProgress 处理 API 外呼被叫客户侧振铃（180）补振铃动作。
+// 集成 MediaOrchestrator 支持 broadcastTime 定时截断。
+func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -926,6 +977,29 @@ func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.Even
 	if agentUUID == "" {
 		return esl.ErrInvalidCommand
 	}
+
+	broadcastTime := int64FromMap(session.Metadata, "broadcastTime")
+	broadcastTimeFlag := boolFromMap(session.Metadata, "broadcastTimeFlag")
+	var effectiveBroadcastMs int64
+	if broadcastTimeFlag && broadcastTime > 0 {
+		effectiveBroadcastMs = broadcastTime
+	}
+
+	if mediaRegistry != nil {
+		orch := mediaRegistry.GetOrCreate(callID, originate.CommandService, sessionService.Store, logger)
+		if startErr := orch.Start(ctx, supplementRingFile, agentUUID, session.FSAddr, effectiveBroadcastMs, contracts.LegRoleAgent, session.Profile); startErr != nil {
+			logger.Error("API 外呼通过编排器发送补振铃失败", "callId", callID, "error", startErr.Error())
+			return startErr
+		}
+		session.Metadata["supplementRingPlaying"] = true
+		if err := sessionService.Store.Save(ctx, session); err != nil {
+			return err
+		}
+		logger.Info("API 外呼已通过编排器向主叫(坐席)腿发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile, "broadcastMs", effectiveBroadcastMs)
+		return nil
+	}
+
+	// 降级：无编排器时直接发送 playback
 	cmd := telephony.NewCommand(
 		"playback:"+callID+":supplement_ring",
 		"playback",
@@ -933,7 +1007,7 @@ func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.Even
 		agentUUID,
 		session.FSAddr,
 		contracts.LegRoleAgent,
-		contracts.CallFlowAPIOutbound,
+		session.Profile,
 		map[string]any{
 			"file": supplementRingFile,
 			"both": "aleg",
@@ -949,6 +1023,59 @@ func handleAPIOutboundCustomerProgress(ctx context.Context, event contracts.Even
 	}
 	logger.Info("API 外呼已向主叫(坐席)腿发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile)
 	return nil
+}
+
+// handleAPIOutboundCustomerEarlyMedia 处理 API 外呼被叫客户侧早期媒体（183 Session Progress + SDP）。
+// 运营商早期媒体到达时，标记媒体相位。如果坐席已应答且补铃音正在播放，
+// 则由编排器安全停止补铃音（避免与运营商早期媒体重叠），随后桥接双腿。
+func handleAPIOutboundCustomerEarlyMedia(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+	session.Metadata["carrierEarlyMedia"] = true
+
+	// 标记媒体相位并安全停止补铃音
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.MarkCarrierEarlyMedia()
+			orch.Stop(ctx)
+		}
+	}
+
+	// 停止主叫(坐席)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		agentUUID, _ := session.Metadata["agentUuid"].(string)
+		if agentUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement_early_media",
+				"break",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				session.Profile,
+				map[string]any{},
+			)
+			if berr := originate.CommandService.Execute(ctx, breakCmd); berr == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("运营商早期媒体到达，停止主叫(坐席)腿的补振铃", "callId", callID, "agentUuid", agentUUID)
+			} else {
+				logger.Error("运营商早期媒体到达时停止补振铃失败", "callId", callID, "error", berr.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("API 外呼收到被叫(客户)早期媒体(183)", "callId", callID)
+	return maybeBridgeAPIOutbound(ctx, session, originate, logger, "CHANNEL_PROGRESS_MEDIA")
 }
 
 // handleBatchOutboundCustomerAnswer 处理批量外呼客户应答（Leg A 先应答）。
@@ -1185,8 +1312,9 @@ func handleBatchOutboundCustomerProgress(ctx context.Context, event contracts.Ev
 	return nil
 }
 
-// handleBatchOutboundAgentProgress 批量外呼下坐席分机侧振铃，向客户侧播放补振铃音。
-func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// handleBatchOutboundAgentProgress 批量外呼下坐席分机侧振铃（180），向客户侧播放补振铃音。
+// 集成 MediaOrchestrator 支持 broadcastTime 定时截断。
+func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -1213,6 +1341,28 @@ func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.Event
 	if customerUUID == "" {
 		return esl.ErrInvalidCommand
 	}
+
+	broadcastTime := int64FromMap(session.Metadata, "broadcastTime")
+	broadcastTimeFlag := boolFromMap(session.Metadata, "broadcastTimeFlag")
+	var effectiveBroadcastMs int64
+	if broadcastTimeFlag && broadcastTime > 0 {
+		effectiveBroadcastMs = broadcastTime
+	}
+
+	if mediaRegistry != nil {
+		orch := mediaRegistry.GetOrCreate(callID, originate.CommandService, sessionService.Store, logger)
+		if startErr := orch.Start(ctx, supplementRingFile, customerUUID, session.FSAddr, effectiveBroadcastMs, contracts.LegRoleCustomer, session.Profile); startErr != nil {
+			logger.Error("批量外呼通过编排器发送补振铃失败", "callId", callID, "error", startErr.Error())
+			return startErr
+		}
+		session.Metadata["supplementRingPlaying"] = true
+		if err := sessionService.Store.Save(ctx, session); err != nil {
+			return err
+		}
+		logger.Info("批量外呼已通过编排器向被叫(客户)腿发送补振铃", "callId", callID, "customerUuid", customerUUID, "file", supplementRingFile, "broadcastMs", effectiveBroadcastMs)
+		return nil
+	}
+
 	cmd := telephony.NewCommand(
 		"playback:"+callID+":supplement_ring",
 		"playback",
@@ -1220,7 +1370,7 @@ func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.Event
 		customerUUID,
 		session.FSAddr,
 		contracts.LegRoleCustomer,
-		contracts.CallFlowBatchOutbound,
+		session.Profile,
 		map[string]any{
 			"file": supplementRingFile,
 			"both": "aleg",
@@ -1238,8 +1388,9 @@ func handleBatchOutboundAgentProgress(ctx context.Context, event contracts.Event
 	return nil
 }
 
-// handleBatchOutboundAgentReady 批量外呼下坐席分机侧摘机应答。切断向客户腿播放的补振铃并桥接。
-func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// handleBatchOutboundAgentEarlyMedia 处理批量外呼坐席侧早期媒体（183 Session Progress + SDP）。
+// 运营商早期媒体到达时停止补铃音，标记客户就绪并尝试桥接。
+func handleBatchOutboundAgentEarlyMedia(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -1249,6 +1400,64 @@ func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnv
 		session.Metadata = map[string]any{}
 	}
 	session.Metadata["agentAnswered"] = true
+	session.Metadata["carrierEarlyMedia"] = true
+
+	// 安全停止编排器
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.MarkCarrierEarlyMedia()
+			orch.Stop(ctx)
+		}
+	}
+
+	// 停止被叫(客户)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		customerUUID, _ := session.Metadata["customerUuid"].(string)
+		if customerUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement_early_media",
+				"break",
+				callID,
+				customerUUID,
+				session.FSAddr,
+				contracts.LegRoleCustomer,
+				session.Profile,
+				map[string]any{},
+			)
+			if berr := originate.CommandService.Execute(ctx, breakCmd); berr == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("运营商早期媒体到达，停止被叫(客户)腿的补振铃", "callId", callID, "customerUuid", customerUUID)
+			} else {
+				logger.Error("运营商早期媒体到达时停止补振铃失败", "callId", callID, "error", berr.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("批量外呼收到坐席侧早期媒体(183)", "callId", callID)
+	return maybeBridgeBatchOutbound(ctx, session, originate, logger, "CHANNEL_PROGRESS_MEDIA")
+}
+
+// handleBatchOutboundAgentReady 批量外呼下坐席分机侧摘机应答。切断向客户腿播放的补振铃并桥接。
+func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["agentAnswered"] = true
+
+	// 安全停止编排器
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.Stop(ctx)
+		}
+	}
 
 	// 停止被叫(客户)侧播放的补振铃音
 	if boolFromMap(session.Metadata, "supplementRingPlaying") {
@@ -1261,7 +1470,7 @@ func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnv
 				customerUUID,
 				session.FSAddr,
 				contracts.LegRoleCustomer,
-				contracts.CallFlowBatchOutbound,
+				session.Profile,
 				map[string]any{},
 			)
 			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {
@@ -1429,8 +1638,9 @@ func handleDialpadAgentAnswer(ctx context.Context, event contracts.EventEnvelope
 	return nil
 }
 
-// handleDialpadCustomerProgress 拨号盘直呼下，客户侧振铃补振铃。
-func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// handleDialpadCustomerProgress 拨号盘直呼下，客户侧振铃（180）补振铃。
+// 集成 MediaOrchestrator 支持 broadcastTime 定时截断。
+func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -1457,6 +1667,28 @@ func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnv
 	if agentUUID == "" {
 		return esl.ErrInvalidCommand
 	}
+
+	broadcastTime := int64FromMap(session.Metadata, "broadcastTime")
+	broadcastTimeFlag := boolFromMap(session.Metadata, "broadcastTimeFlag")
+	var effectiveBroadcastMs int64
+	if broadcastTimeFlag && broadcastTime > 0 {
+		effectiveBroadcastMs = broadcastTime
+	}
+
+	if mediaRegistry != nil {
+		orch := mediaRegistry.GetOrCreate(callID, originate.CommandService, sessionService.Store, logger)
+		if startErr := orch.Start(ctx, supplementRingFile, agentUUID, session.FSAddr, effectiveBroadcastMs, contracts.LegRoleAgent, session.Profile); startErr != nil {
+			logger.Error("拨号盘直呼通过编排器发送补振铃失败", "callId", callID, "error", startErr.Error())
+			return startErr
+		}
+		session.Metadata["supplementRingPlaying"] = true
+		if err := sessionService.Store.Save(ctx, session); err != nil {
+			return err
+		}
+		logger.Info("拨号盘直呼已通过编排器向主叫(坐席)腿发送补振铃", "callId", callID, "agentUuid", agentUUID, "file", supplementRingFile, "broadcastMs", effectiveBroadcastMs)
+		return nil
+	}
+
 	cmd := telephony.NewCommand(
 		"playback:"+callID+":supplement_ring",
 		"playback",
@@ -1464,7 +1696,7 @@ func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnv
 		agentUUID,
 		session.FSAddr,
 		contracts.LegRoleAgent,
-		contracts.CallFlowAPIDirect,
+		session.Profile,
 		map[string]any{
 			"file": supplementRingFile,
 			"both": "aleg",
@@ -1482,8 +1714,8 @@ func handleDialpadCustomerProgress(ctx context.Context, event contracts.EventEnv
 	return nil
 }
 
-// handleDialpadCustomerReady 拨号盘直呼被叫（客户）应答或就绪。
-func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, logger *slog.Logger) error {
+// handleDialpadCustomerEarlyMedia 处理拨号盘直呼客户侧早期媒体（183 Session Progress + SDP）。
+func handleDialpadCustomerEarlyMedia(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
 	callID := event.AggregateID
 	session, err := sessionService.Store.Get(ctx, callID)
 	if err != nil {
@@ -1493,6 +1725,64 @@ func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelo
 		session.Metadata = map[string]any{}
 	}
 	session.Metadata["customerReady"] = true
+	session.Metadata["carrierEarlyMedia"] = true
+
+	// 安全停止编排器
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.MarkCarrierEarlyMedia()
+			orch.Stop(ctx)
+		}
+	}
+
+	// 停止主叫(坐席)侧播放的补振铃音
+	if boolFromMap(session.Metadata, "supplementRingPlaying") {
+		agentUUID, _ := session.Metadata["agentUuid"].(string)
+		if agentUUID != "" {
+			breakCmd := telephony.NewCommand(
+				"break:"+callID+":stop_supplement_early_media",
+				"break",
+				callID,
+				agentUUID,
+				session.FSAddr,
+				contracts.LegRoleAgent,
+				session.Profile,
+				map[string]any{},
+			)
+			if berr := originate.CommandService.Execute(ctx, breakCmd); berr == nil {
+				session.Metadata["supplementRingPlaying"] = false
+				logger.Info("运营商早期媒体到达，停止主叫(坐席)腿的补振铃", "callId", callID, "agentUuid", agentUUID)
+			} else {
+				logger.Error("运营商早期媒体到达时停止补振铃失败", "callId", callID, "error", berr.Error())
+			}
+		}
+	}
+
+	if err := sessionService.Store.Save(ctx, session); err != nil {
+		return err
+	}
+	logger.Info("拨号盘直呼收到客户侧早期媒体(183)", "callId", callID)
+	return maybeBridgeDialpadDirect(ctx, session, originate, logger, "CHANNEL_PROGRESS_MEDIA")
+}
+
+// handleDialpadCustomerReady 拨号盘直呼被叫（客户）应答或就绪。
+func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelope[map[string]any], sessionService *esl.SessionService, originate *esl.OriginateService, mediaRegistry *MediaRegistry, logger *slog.Logger) error {
+	callID := event.AggregateID
+	session, err := sessionService.Store.Get(ctx, callID)
+	if err != nil {
+		return err
+	}
+	if session.Metadata == nil {
+		session.Metadata = map[string]any{}
+	}
+	session.Metadata["customerReady"] = true
+
+	// 安全停止编排器
+	if mediaRegistry != nil {
+		if orch := mediaRegistry.Get(callID); orch != nil {
+			orch.Stop(ctx)
+		}
+	}
 
 	// 停止主叫(坐席)侧播放的补振铃音
 	if boolFromMap(session.Metadata, "supplementRingPlaying") {
@@ -1505,7 +1795,7 @@ func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelo
 				agentUUID,
 				session.FSAddr,
 				contracts.LegRoleAgent,
-				contracts.CallFlowAPIDirect,
+				session.Profile,
 				map[string]any{},
 			)
 			if err := originate.CommandService.Execute(ctx, breakCmd); err == nil {

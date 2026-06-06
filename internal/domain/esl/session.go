@@ -290,7 +290,7 @@ func (s *SessionService) ApplyEvent(ctx context.Context, event contracts.Telepho
 }
 func sessionMetadata(cmd contracts.TelephonyCommand) map[string]any {
 	metadata := map[string]any{}
-	for _, key := range []string{"batchTaskId", "batchCallTelId", "userId", "merchantId", "callee", "routeVersion", "agentUuid", "customerUuid", "extension", "callMode", "callRatio", "queueEnable"} {
+	for _, key := range []string{"batchTaskId", "batchCallTelId", "userId", "merchantId", "callee", "routeVersion", "agentUuid", "customerUuid", "extension", "callMode", "callRatio", "queueEnable", "supplementRing", "supplementRingFile", "broadcastTime", "broadcastTimeFlag"} {
 		if value, ok := cmd.Payload[key]; ok {
 			metadata[key] = value
 		}

@@ -632,22 +632,23 @@ Yunshu is actively refactoring legacy call center logic into the high-performanc
 
 ### Phase 2: Selection Concurrency & Event Registries [In Progress]
 *   ✅ **Double Concurrency Atomicity**: Evaluated concurrent allocations on both Gateway and Extension levels natively in Redis Lua scripts.
-*   ⏳ **Stateless ESL Lease Dispatcher**: Coordinated Event Socket listener leases among multi-instance telephony nodes.
-*   📅 **Early Media / Progress Control**: Visual ACD IVR nodes managing media channels before call leg bridges.
+*   ✅ **Early Media / Progress Control**: Media orchestrator managing carrier 183 early media and supplemental ring-back tone playback with broadcast timer enforcement.
+*   ✅ **Selection Lease Watchdog**: Background TTL renewal for active number-selection claims to prevent long-call concurrency slot expiration.
+*   ✅ **Stateless ESL Lease Dispatcher**: Coordinated Event Socket listener leases among multi-instance telephony nodes via MySQL CAS row-locking on `cc_res_fs_lease`.
 
-### Phase 3: Transaction Billing Workflows [Planned]
+### Phase 3: Transaction Billing Workflows [100% Completed]
 *   ✅ **Durable CDR Outbox**: Buffered raw session events in reliable local database transactional outbox queues.
-*   ⏳ **Distributed Pricing Processors**: Decoupled tariff matching from critical call paths using dedicated workers.
-*   ⏳ **Real-Time Prepaid Safe-Lock**: Applied Redis Lua credits locking to mitigate balance deficits during active dialogs.
+*   ✅ **Distributed Pricing Processors**: Merchant-specific rate resolution with GORM + Redis caching, configurable billing cycle granularity, and audit trail.
+*   ✅ **Real-Time Prepaid Safe-Lock**: Redis Lua atomic balance debit with credit limit support and settlement ledger integration.
 
-### Phase 4: Async Compression & Notification Webhooks [In Progress]
+### Phase 4: Async Compression & Notification Webhooks [100% Completed]
 *   ✅ **ClaimDue Outbox Workers**: Competing daemon consumers claiming outbox events safely via DB locks.
 *   ✅ **Verified downstream Webhooks**: Cryptographically signed callback alerts with SHA256 tokens and backoffs.
-*   ⏳ **Media Compression & OSS Uploads**: Scanned and compressed audio records locally, pushing to cloud buckets asynchronously.
+*   ✅ **Media Compression & OSS Uploads**: S3-compatible recording upload (MinIO/Alibaba OSS), CDN base URL mapping, and automatic outbox retry on failure.
 
-### Phase 5: Dynamic Auth & Operations ACLs [In Progress]
+### Phase 5: Dynamic Auth & Operations ACLs [100% Completed]
 *   ✅ **Dynamic RBAC Schema**: Outlined console permission mappings and routes database models.
-*   ⏳ **RBAC Middleware Filters**: Load operating agent privileges from database profiles for console route evaluation.
+*   ✅ **RBAC Middleware Filters**: Two-level caching (local memory + Redis) for route permission resolution with Pub/Sub cross-instance invalidation and warm-up on startup.
 
 ---
 

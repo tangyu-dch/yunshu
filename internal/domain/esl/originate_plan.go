@@ -130,7 +130,11 @@ func BuildBatchOutboundPlan(callID, version, fsAddr string, req contracts.BatchC
 		logger = slog.Default()
 	}
 	extra := parseExtra(req.Extra)
-	gateway := contracts.FirstNonEmpty(extra["gatewayName"], extra["gatewayRegion"], extra["gateway"], "default")
+	// 网关选择：优先使用 CTI 运行时选号分配的网关，否则从 extra 中获取
+	gateway := req.CallerGatewayID
+	if gateway == "" {
+		gateway = contracts.FirstNonEmpty(extra["gatewayName"], extra["gatewayRegion"], extra["gateway"], "default")
+	}
 	supplementRing := extraBool(extra, "supplementRing", "supplement_ring")
 	supplementRingFile := contracts.FirstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
 	broadcastTime := extraInt64(extra, "broadcastTime", "broadcast_time")
@@ -153,6 +157,12 @@ func BuildBatchOutboundPlan(callID, version, fsAddr string, req contracts.BatchC
 		"variable_agent_extension":     req.Extension,
 		"variable_api_user_id":         req.UserID,
 		"origination_caller_id_number": maskPhone(req.Phone),
+	}
+	// CTI 运行时选号分配的主叫号码透传到 SIP INVITE From 头
+	if req.CallerNumber != "" {
+		options["origination_caller_id_number"] = req.CallerNumber
+		options["variable_origination_caller_id_number"] = req.CallerNumber
+		options["variable_yunshu_selected_caller"] = req.CallerNumber
 	}
 	if supplementRingFile != "" {
 		options["ringback"] = supplementRingFile

@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-const (
-	StatusRated = "rated"
-)
-
 // Ledger 是 CDR 计费流水的领域快照。
 type Ledger struct {
 	ID           string

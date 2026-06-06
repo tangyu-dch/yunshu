@@ -18,6 +18,8 @@ import (
 
 	"yunshu/internal/contracts"
 	"yunshu/internal/domain/cti"
+	"yunshu/internal/domain/esl"
+	"yunshu/internal/infra/extensionstatus"
 	"yunshu/internal/infra/fsesl"
 	"yunshu/internal/infra/resource"
 	"yunshu/internal/transport/http/middleware"
@@ -46,6 +48,7 @@ func RegisterRoutes(
 	// Selector 根据呼叫上下文和选号规则从候选号码中选择最优号码。
 	// 选号逻辑考虑号码可用性、并发限制、风险等级等因素。
 	selector := cti.Selector{}
+	statusWriter := extensionstatus.NewRedisReader(redisClient)
 	r.POST("/cti/callTask/call", checkAppCredentials(gormDB), middleware.RateLimitMiddleware(10, 2.0), func(c *gin.Context) {
 		var req contracts.ApiCallReq
 		if err := c.ShouldBindJSON(&req); err != nil {
@@ -339,7 +342,7 @@ func RegisterRoutes(
 				if !active {
 					hasStuckState = true
 					// 强行清理重置为 Idle (1)
-					_ = redisClient.HSet(ctx, contracts.KeyExtensionStatus, ext, "1").Err()
+					_ = statusWriter.SetExtensionStatus(ctx, ext, esl.ExtensionStatusIdle)
 				}
 			}
 		}
@@ -385,21 +388,21 @@ func RegisterRoutes(
 			return
 		}
 
-		status := "-1" // unregister, expire 默认离线
+		esStatus := esl.ExtensionStatusOffline // unregister, expire 默认离线
 		if event == "register" {
-			status = "1" // Idle 状态
+			esStatus = esl.ExtensionStatusIdle
 		}
 
 		ctx := c.Request.Context()
-		err := redisClient.HSet(ctx, contracts.KeyExtensionStatus, ext, status).Err()
+		err := statusWriter.SetExtensionStatus(ctx, ext, esStatus)
 		if err != nil {
 			slog.Error("收到 Kamailio SIP 注册状态回调更新 Redis 失败", "extension", ext, "event", event, "error", err.Error())
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "更新 Redis 状态失败"))
 			return
 		}
 
-		slog.Info("收到 Kamailio SIP 注册状态回调 Webhook", "extension", ext, "event", event, "contact", req.Contact, "status", status)
-		c.JSON(http.StatusOK, contracts.OK(map[string]any{"extension": ext, "event": event, "status": status}))
+		slog.Info("收到 Kamailio SIP 注册状态回调 Webhook", "extension", ext, "event", event, "contact", req.Contact, "status", int(esStatus))
+		c.JSON(http.StatusOK, contracts.OK(map[string]any{"extension": ext, "event": event, "status": int(esStatus)}))
 	})
 
 	r.POST("/cti/kamailio/auth", func(c *gin.Context) {
@@ -500,7 +503,7 @@ func RegisterRoutes(
 			return
 		}
 
-		err = redisClient.HSet(ctx, contracts.KeyExtensionStatus, req.Username, "1").Err()
+		err = statusWriter.SetExtensionStatus(ctx, req.Username, esl.ExtensionStatusIdle)
 		if err != nil {
 			slog.Error("更新分机状态为 IDLE 失败", "username", req.Username, "error", err.Error())
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "更新分机状态失败"))
@@ -539,7 +542,7 @@ func RegisterRoutes(
 			return
 		}
 
-		err = redisClient.HSet(ctx, contracts.KeyExtensionStatus, req.Username, "-1").Err()
+		err = statusWriter.SetExtensionStatus(ctx, req.Username, esl.ExtensionStatusOffline)
 		if err != nil {
 			slog.Error("更新分机状态为 OFFLINE 失败", "username", req.Username, "error", err.Error())
 			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "更新分机状态失败"))

@@ -11,22 +11,24 @@ type ApiCallReq struct {
 // BatchCallReq 对齐  BatchCallReq。
 // CTI 调度器下发单个批量号码时，ESL 侧应直接使用这些元数据构造起呼计划。
 type BatchCallReq struct {
-	UserID         int            `json:"userId"`
-	BatchTaskID    int            `json:"batchTaskId"`
-	CallTaskState  BatchTaskState `json:"callTaskState,omitempty"`
-	BatchCallTelID int            `json:"batchCallTelId"`
-	Phone          string         `json:"phone"`
-	MerchantID     int            `json:"merchantId"`
-	SeatNumber     string         `json:"seatNumber,omitempty"`
-	UserName       string         `json:"userName,omitempty"`
-	Extension      string         `json:"extension"`
-	ExtensionID    int            `json:"extensionId,omitempty"`
-	AIFlag         bool           `json:"aiFlag,omitempty"`
-	Push           bool           `json:"push"`
-	Extra          string         `json:"extra,omitempty"`
-	CallMode       int            `json:"callMode,omitempty"`
-	CallRatio      float64        `json:"callRatio,omitempty"`
-	QueueEnable    bool           `json:"queueEnable,omitempty"`
+	UserID            int            `json:"userId"`
+	BatchTaskID       int            `json:"batchTaskId"`
+	CallTaskState     BatchTaskState `json:"callTaskState,omitempty"`
+	BatchCallTelID    int            `json:"batchCallTelId"`
+	Phone             string         `json:"phone"`
+	MerchantID        int            `json:"merchantId"`
+	SeatNumber        string         `json:"seatNumber,omitempty"`
+	UserName          string         `json:"userName,omitempty"`
+	Extension         string         `json:"extension"`
+	ExtensionID       int            `json:"extensionId,omitempty"`
+	AIFlag            bool           `json:"aiFlag,omitempty"`
+	Push              bool           `json:"push"`
+	Extra             string         `json:"extra,omitempty"`
+	CallMode          int            `json:"callMode,omitempty"`
+	CallRatio         float64        `json:"callRatio,omitempty"`
+	QueueEnable       bool           `json:"queueEnable,omitempty"`
+	CallerNumber      string         `json:"callerNumber,omitempty"`      // CTI 运行时选号分配的主叫号码
+	CallerGatewayID   string         `json:"callerGatewayId,omitempty"`   // CTI 运行时选号分配的网关标识
 }
 
 type BatchTaskState string

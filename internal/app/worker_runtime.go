@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"yunshu/internal/domain/callflow"
 	"yunshu/internal/infra/business"
@@ -13,6 +15,7 @@ import (
 	"yunshu/internal/infra/config"
 	"yunshu/internal/infra/projection"
 	redisinfra "yunshu/internal/infra/redis"
+	"yunshu/internal/infra/storage"
 )
 
 // WorkerRuntime 聚合 cc-worker 后台流程节点。
@@ -20,15 +23,16 @@ import (
 // 当前先承接 outbox 投递，后续导入导出、录音修复、回调补偿等 worker 节点都应
 // 以同样方式注册为明确的流程投递器或事件消费者。
 type WorkerRuntime struct {
-	Outbox     business.OutboxStore
-	CDR        business.CdrStore
-	Billing    business.BillingLedgerStore
-	Settlement business.SettlementStore
-	Recording  business.RecordingStore
-	Reporting  business.ReportingStore
-	Downstream business.DownstreamStore
-	Dispatcher *callflow.OutboxDispatcher
-	Logger     *slog.Logger
+	Outbox       business.OutboxStore
+	CDR          business.CdrStore
+	Billing      business.BillingLedgerStore
+	Settlement   business.SettlementStore
+	Recording    business.RecordingStore
+	Reporting    business.ReportingStore
+	Downstream   business.DownstreamStore
+	RateResolver business.RateResolver
+	Dispatcher   *callflow.OutboxDispatcher
+	Logger       *slog.Logger
 }
 
 // NewWorkerRuntimeWithConfig 创建 worker 运行时。
@@ -43,52 +47,113 @@ func NewWorkerRuntimeWithConfig(cfg config.Config, logger *slog.Logger) (*Worker
 	outboxStore := buildOutboxStore(gormDB, logger)
 	cdrStore := buildCDRStore(gormDB, logger)
 	billingStore := buildBillingStore(gormDB, logger)
-	settlementStore := buildSettlementStore(gormDB, logger)
+
+	// 初始化 Redis 客户端（如果有配置）
+	var redisClient *goredis.Client
+	if len(cfg.Redis.Addrs) > 0 {
+		redisClient = redisinfra.NewClient(cfg.Redis)
+		logger.Info("cc-worker Redis 客户端已初始化", "redisAddr", cfg.Redis.Addrs[0])
+	}
+
+	// 初始化 RateResolver
+	rateResolver := buildRateResolver(gormDB, redisClient, cfg.Worker.Billing.DefaultRatePerMin, logger)
+
+	// 初始化余额缓存（如果有 Redis）
+	var balanceCache *redisinfra.MerchantBalanceCache
+	if redisClient != nil {
+		balanceCache = redisinfra.NewMerchantBalanceCache(redisClient, logger)
+		logger.Info("cc-worker 商户余额缓存已初始化")
+	}
+
+	// 初始化结算仓储（可能包含余额缓存）
+	settlementStore := buildSettlementStore(gormDB, balanceCache, logger)
+
 	recordingStore := buildRecordingStore(gormDB, logger)
 	reportingStore := buildReportingStore(gormDB, logger)
 	downstreamStore := buildDownstreamStore(gormDB, logger)
+
 	// 使用重构后独立出来的高凝聚力 projection 包的 Redis 批量外呼投影器
 	var batchProjector *projection.RedisBatchProjector
 	if len(cfg.Redis.Addrs) > 0 {
-		batchProjector = projection.NewRedisBatchProjector(redisinfra.NewClient(cfg.Redis), logger)
+		batchProjector = projection.NewRedisBatchProjector(redisClient, logger)
 		logger.Info("cc-worker 批量外呼 Redis 投影已启用", "redisAddr", cfg.Redis.Addrs[0])
 	} else {
 		logger.Warn("cc-worker 未配置 Redis 地址，批量外呼投影仅记录日志", "impact", "WebSocket/控制台无法读取 Redis 投影视图")
 	}
+
 	callbackClient := callback.NewHTTPClient(cfg.Worker.Callback.URL, cfg.Worker.Callback.Secret, cfg.Worker.Callback.Timeout, logger)
 	if cfg.Worker.Callback.URL == "" {
 		logger.Warn("cc-worker 客户回调地址未配置，回调 outbox 将按本地跳过处理", "impact", "生产环境应配置 CALLBACK_URL")
 	} else {
 		logger.Info("cc-worker 客户回调投递已启用", "callbackURL", cfg.Worker.Callback.URL, "timeout", cfg.Worker.Callback.Timeout)
 	}
+
 	downstreamClient := business.NewDownstreamHTTPClient(cfg.Worker.Downstream.URL, cfg.Worker.Downstream.Secret, cfg.Worker.Downstream.Timeout, logger)
 	if !downstreamClient.Enabled() {
 		logger.Warn("cc-worker CDR 下游 HTTP 地址未配置，下游推送任务将仅持久化为 pending", "impact", "生产环境应配置 DOWNSTREAM_CDR_URL")
 	} else {
 		logger.Info("cc-worker CDR 下游 HTTP 投递已启用", "downstreamURL", cfg.Worker.Downstream.URL, "timeout", cfg.Worker.Downstream.Timeout)
 	}
+
 	recordingClient := business.NewRecordingHTTPClient(cfg.Worker.Recording.URL, cfg.Worker.Recording.Secret, cfg.Worker.Recording.Timeout, logger)
 	if !recordingClient.Enabled() {
 		logger.Warn("cc-worker 录音上传地址未配置，录音任务将仅持久化为 pending/skipped", "impact", "生产环境应配置 RECORDING_UPLOAD_URL")
 	} else {
 		logger.Info("cc-worker 录音上传 HTTP 投递已启用", "recordingURL", cfg.Worker.Recording.URL, "timeout", cfg.Worker.Recording.Timeout)
 	}
+
+	// 初始化录音 OSS 上传器
+	var ossUploader *storage.OSSUploader
+	var recordingOSSStore *business.RecordingOSSStore
+	if cfg.Worker.Recording.OSS.Endpoint != "" {
+		ossUploader, err = storage.NewOSSUploader(
+			cfg.Worker.Recording.OSS.Endpoint,
+			cfg.Worker.Recording.OSS.AccessKey,
+			cfg.Worker.Recording.OSS.SecretKey,
+			cfg.Worker.Recording.OSS.Bucket,
+			cfg.Worker.Recording.OSS.BaseDir,
+			cfg.Worker.Recording.OSS.CDNBaseURL,
+			logger,
+		)
+		if err != nil {
+			logger.Error("cc-worker 初始化 OSS 上传器失败", "error", err.Error())
+		} else {
+			recordingOSSStore = business.NewRecordingOSSStore(ossUploader, cdrStore, logger)
+			logger.Info("cc-worker 录音 OSS 上传已启用", "ossEndpoint", cfg.Worker.Recording.OSS.Endpoint, "bucket", cfg.Worker.Recording.OSS.Bucket)
+		}
+	} else {
+		logger.Warn("cc-worker 未配置 OSS 上传，录音 OSS 任务将跳过")
+	}
+
 	if cfg.Worker.Billing.DefaultRatePerMin <= 0 {
 		logger.Warn("cc-worker 计费默认费率未配置或为零，当前只会产出零金额审计记录", "impact", "生产环境应配置 WORKER_BILLING_DEFAULT_RATE_PER_MIN")
 	} else {
 		logger.Info("cc-worker 计费默认费率已启用", "defaultRatePerMin", cfg.Worker.Billing.DefaultRatePerMin)
 	}
+
 	dispatcher := &callflow.OutboxDispatcher{
 		Store:      outboxStore,
-		Handlers:   defaultOutboxHandlers(outboxStore, batchProjector, callbackClient, downstreamClient, recordingClient, cdrStore, billingStore, settlementStore, recordingStore, reportingStore, downstreamStore, cfg.Worker.Billing.DefaultRatePerMin, logger),
+		Handlers:   defaultOutboxHandlers(outboxStore, batchProjector, callbackClient, downstreamClient, recordingClient, recordingOSSStore, cdrStore, billingStore, settlementStore, recordingStore, reportingStore, downstreamStore, rateResolver, cfg.Worker.Billing.DefaultRatePerMin, logger),
 		WorkerID:   cfg.Worker.Outbox.WorkerID,
 		RetryDelay: cfg.Worker.Outbox.RetryDelay,
 		Lease:      cfg.Worker.Outbox.Lease,
 		BatchSize:  cfg.Worker.Outbox.BatchSize,
 		Logger:     logger,
 	}
+
 	logger.Info("cc-worker outbox 投递器已初始化", "workerId", dispatcher.WorkerID, "batchSize", dispatcher.BatchSize, "retryDelay", dispatcher.RetryDelay, "lease", dispatcher.Lease)
-	return &WorkerRuntime{Outbox: outboxStore, CDR: cdrStore, Billing: billingStore, Settlement: settlementStore, Recording: recordingStore, Reporting: reportingStore, Downstream: downstreamStore, Dispatcher: dispatcher, Logger: logger}, nil
+	return &WorkerRuntime{
+		Outbox:       outboxStore,
+		CDR:          cdrStore,
+		Billing:      billingStore,
+		Settlement:   settlementStore,
+		Recording:    recordingStore,
+		Reporting:    reportingStore,
+		Downstream:   downstreamStore,
+		RateResolver: rateResolver,
+		Dispatcher:   dispatcher,
+		Logger:       logger,
+	}, nil
 }
 
 // Start 启动 worker 后台循环。
@@ -114,7 +179,7 @@ func (r *WorkerRuntime) Start(ctx context.Context, interval time.Duration) {
 	}()
 }
 
-func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *projection.RedisBatchProjector, callbackClient *callback.HTTPClient, downstreamClient *business.DownstreamHTTPClient, recordingClient *business.RecordingHTTPClient, cdrStore business.CdrStore, billingStore business.BillingLedgerStore, settlementStore business.SettlementStore, recordingStore business.RecordingStore, reportingStore business.ReportingStore, downstreamStore business.DownstreamStore, defaultRatePerMin float64, logger *slog.Logger) map[string]callflow.OutboxHandler {
+func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *projection.RedisBatchProjector, callbackClient *callback.HTTPClient, downstreamClient *business.DownstreamHTTPClient, recordingClient *business.RecordingHTTPClient, recordingOSSStore *business.RecordingOSSStore, cdrStore business.CdrStore, billingStore business.BillingLedgerStore, settlementStore business.SettlementStore, recordingStore business.RecordingStore, reportingStore business.ReportingStore, downstreamStore business.DownstreamStore, rateResolver business.RateResolver, defaultRatePerMin float64, logger *slog.Logger) map[string]callflow.OutboxHandler {
 	return map[string]callflow.OutboxHandler{
 		"call_center_cdr_queue": func(ctx context.Context, entry business.Entry) error {
 			if cdrStore != nil {
@@ -143,18 +208,36 @@ func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *pro
 				return nil
 			}
 
-			rateNote := ""
-			rate := defaultRatePerMin
-			if rate <= 0 {
-				logger.Warn("【云枢计费告警】系统默认计费费率未配置或为零！将只生成审计用的零费率估算，不允许直接当作最终扣费结果。", "callId", ledger.CallID)
-				rateNote = "【审计估算】系统默认费率未配置，采用零金额审计结转"
+			// 使用 RateResolver 解析费率
+			var rating business.RatingResult
+			merchantID := ledger.MerchantID
+			if rateResolver != nil {
+				decision, resolveErr := rateResolver.Resolve(ctx, merchantID)
+				if resolveErr == nil {
+					// 使用动态颗粒度计费
+					rating = business.EstimateByGranularity(ledger.DurationSec, decision.BillingCycle, decision.BillingPrice)
+					rating.Note = decision.AuditNote(ledger.DurationSec, int(math.Ceil(float64(ledger.DurationSec)/float64(decision.BillingCycle))), rating.Amount)
+					logger.Info("使用商户专属费率计费", "merchantId", merchantID, "callId", ledger.CallID, "rateTemplateId", decision.RateTemplateID, "billingCycle", decision.BillingCycle, "billingPrice", decision.BillingPrice)
+				} else {
+					logger.Warn("解析商户费率失败，回退到默认费率", "merchantId", merchantID, "error", resolveErr.Error())
+				}
 			}
 
-			rating := business.EstimateByMinute(ledger.DurationSec, rate)
-			if rateNote != "" {
-				rating.Note = rateNote
-				rating.RatePerMin = 0
-				rating.Amount = 0
+			// 如果没有使用 RateResolver，使用默认费率
+			if rating.Amount == 0 && rating.Note == "" {
+				rateNote := ""
+				rate := defaultRatePerMin
+				if rate <= 0 {
+					logger.Warn("【云枢计费告警】系统默认计费费率未配置或为零！将只生成审计用的零费率估算，不允许直接当作最终扣费结果。", "callId", ledger.CallID)
+					rateNote = "【审计估算】系统默认费率未配置，采用零金额审计结转"
+				}
+
+				rating = business.EstimateByMinute(ledger.DurationSec, rate)
+				if rateNote != "" {
+					rating.Note = rateNote
+					rating.RatePerMin = 0
+					rating.Amount = 0
+				}
 			}
 
 			if err := billingStore.MarkRated(ctx, ledger.CallID, rating.Amount, rating.RatePerMin, rating.Note); err != nil {
@@ -209,6 +292,13 @@ func defaultOutboxHandlers(outboxStore business.OutboxStore, batchProjector *pro
 				return err
 			}
 			return recordingStore.MarkUploaded(ctx, job.ID, time.Now().UTC())
+		},
+		callflow.DestinationCDRRecordingOSS: func(ctx context.Context, entry business.Entry) error {
+			if recordingOSSStore == nil {
+				logger.Info("CDR 录音 OSS 上传流程节点已领取但未配置 OSS 上传器", "outboxId", entry.ID, "callId", entry.AggregateID, "destination", entry.Destination)
+				return nil
+			}
+			return recordingOSSStore.ProcessOutbox(ctx, entry)
 		},
 		callflow.DestinationCDRReportProjection: func(ctx context.Context, entry business.Entry) error {
 			if reportingStore != nil {
@@ -357,11 +447,22 @@ func buildDownstreamStore(gormDB *gorm.DB, logger *slog.Logger) business.Downstr
 	return business.NewPushGormStore(gormDB, logger)
 }
 
-func buildSettlementStore(gormDB *gorm.DB, logger *slog.Logger) business.SettlementStore {
+func buildRateResolver(gormDB *gorm.DB, redisClient *goredis.Client, defaultRatePerMin float64, logger *slog.Logger) business.RateResolver {
+	if gormDB == nil {
+		logger.Warn("费率解析器将使用默认费率（无数据库支持）")
+		return &business.DefaultRateResolver{DefaultRatePerMin: defaultRatePerMin}
+	}
+	return business.NewGormRateResolver(gormDB, redisClient, defaultRatePerMin, 5*time.Minute, logger)
+}
+
+func buildSettlementStore(gormDB *gorm.DB, balanceCache *redisinfra.MerchantBalanceCache, logger *slog.Logger) business.SettlementStore {
 	if gormDB == nil {
 		logger.Warn("结算任务将使用内存存储，本地开发可用，生产环境必须配置 MySQL", "table", "call_billing_settlement_job")
 		return business.NewSettlementMemoryStore()
 	}
 	logger.Info("结算任务将使用数据库持久化", "table", "call_billing_settlement_job")
+	if balanceCache != nil {
+		return business.NewSettlementGormStoreWithBalanceCache(gormDB, logger, balanceCache)
+	}
 	return business.NewSettlementGormStore(gormDB, logger)
 }

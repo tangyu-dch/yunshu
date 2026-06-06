@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-const (
-	StatusUploaded = "uploaded"
-)
-
 // RecordingJob 表示一条录音处理任务。
 type RecordingJob struct {
 	ID           string

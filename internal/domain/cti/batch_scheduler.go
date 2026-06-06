@@ -110,6 +110,8 @@ type BatchSchedulerService struct {
 	Queue      CallQueue
 	ESL        BatchESLClient
 	Events     events.Bus
+	Candidates CandidateSource  // CTI 选号候选源（Redis 缓存穿透）
+	Selector   *RuntimeSelector // CTI 运行时选号器（规则链 + Redis 原子占用）
 	Now        func() time.Time
 	NewCallID  BatchCallIDFactory
 	Logger     *slog.Logger
@@ -177,23 +179,55 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 		logger.Warn("批量外呼未获取到可派发号码", "taskId", taskID, "error", err.Error())
 		return contracts.BatchCallReq{}, "", ErrNoBatchTel
 	}
+
+	// 运行时选号：为批量外呼分配主叫号码和网关（高并发原子占用）
+	var selectedCaller string
+	var selectedGatewayID string
+	effectiveUserID := firstNonZero(assignedUserID, tel.UserID, task.UserID)
+	if s.Selector != nil && s.Candidates != nil && effectiveUserID > 0 {
+		candidates, candErr := s.Candidates.CandidatesForUser(ctx, effectiveUserID)
+		if candErr != nil {
+			logger.Warn("批量外呼加载选号候选失败，将使用默认路由", "taskId", taskID, "userId", effectiveUserID, "error", candErr.Error())
+		} else if len(candidates) > 0 {
+			callID := s.callID(task, tel)
+			selReq := SelectionRequest{
+				CallID:     callID,
+				MerchantID: fmt.Sprint(firstNonZero(tel.MerchantID, task.MerchantID)),
+				Callee:     tel.Tel,
+				UserID:     effectiveUserID,
+				Candidates: candidates,
+			}
+			_, allocation, selErr := s.Selector.SelectAndClaim(ctx, selReq)
+			if selErr != nil {
+				logger.Error("批量外呼选号失败，释放号码并中止调度", "taskId", taskID, "telId", tel.ID, "callee", tel.Tel, "error", selErr.Error())
+				_ = s.Repository.ReleaseBatchTel(ctx, taskID, tel.ID, now)
+				return contracts.BatchCallReq{}, "", fmt.Errorf("批量选号失败: %w", selErr)
+			}
+			selectedCaller = allocation.Caller
+			selectedGatewayID = allocation.GatewayID
+			logger.Info("批量外呼运行时选号成功", "taskId", taskID, "telId", tel.ID, "caller", selectedCaller, "gatewayId", selectedGatewayID, "candidateIndex", allocation.CandidateIndex)
+		}
+	}
+
 	callID := s.callID(task, tel)
 	req := contracts.BatchCallReq{
-		UserID:         firstNonZero(assignedUserID, tel.UserID, task.UserID),
-		BatchTaskID:    task.ID,
-		CallTaskState:  contracts.BatchTaskRunning,
-		BatchCallTelID: tel.ID,
-		Phone:          tel.Tel,
-		MerchantID:     firstNonZero(tel.MerchantID, task.MerchantID),
-		UserName:       contracts.FirstNonEmpty(tel.CustomerName, task.UserName),
-		Extension:      contracts.FirstNonEmpty(assignedExtension, task.ExtensionNumber),
-		ExtensionID:    task.ExtensionID,
-		AIFlag:         task.AIFlag,
-		Push:           true,
-		Extra:          contracts.FirstNonEmpty(tel.Extra, task.Extra),
-		CallMode:       task.CallMode,
-		CallRatio:      task.CallRatio,
-		QueueEnable:    task.QueueEnable,
+		UserID:          effectiveUserID,
+		BatchTaskID:     task.ID,
+		CallTaskState:   contracts.BatchTaskRunning,
+		BatchCallTelID:  tel.ID,
+		Phone:           tel.Tel,
+		MerchantID:      firstNonZero(tel.MerchantID, task.MerchantID),
+		UserName:        contracts.FirstNonEmpty(tel.CustomerName, task.UserName),
+		Extension:       contracts.FirstNonEmpty(assignedExtension, task.ExtensionNumber),
+		ExtensionID:     task.ExtensionID,
+		AIFlag:          task.AIFlag,
+		Push:            true,
+		Extra:           contracts.FirstNonEmpty(tel.Extra, task.Extra),
+		CallMode:        task.CallMode,
+		CallRatio:       task.CallRatio,
+		QueueEnable:     task.QueueEnable,
+		CallerNumber:    selectedCaller,
+		CallerGatewayID: selectedGatewayID,
 	}
 	if s.Events != nil {
 		if err := s.Events.Publish(ctx, contracts.NewEventEnvelope(

@@ -627,38 +627,77 @@ func RegisterDialpadCompatRoutes(
 		}))
 	})
 
-	// 8. Auto-Call task stubs
+	// 8. Auto-Call batch task endpoints
 	r.GET("/mer/v1/batch-call-dialpad/ws-pause-status", func(c *gin.Context) {
-		_, ok := authenticateDialpad(c, authService)
+		tenant, ok := authenticateDialpad(c, authService)
 		if !ok {
 			return
 		}
+		userID, _ := strconv.Atoi(tenant.UserID)
+		taskID := findUserLatestTaskID(db, userID)
+		hasTask := taskID > 0
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{
-			"hasTask": false,
-			"taskId":  "",
+			"hasTask": hasTask,
+			"taskId":  strconv.Itoa(taskID),
 		}))
 	})
 
 	r.POST("/mer/v1/batch-call-dialpad/ws-pause-mark", func(c *gin.Context) {
-		_, ok := authenticateDialpad(c, authService)
+		tenant, ok := authenticateDialpad(c, authService)
 		if !ok {
 			return
+		}
+		var req struct {
+			TaskID int `json:"taskId"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		userID, _ := strconv.Atoi(tenant.UserID)
+		taskID := req.TaskID
+		if taskID <= 0 {
+			taskID = findUserLatestTaskID(db, userID)
+		}
+		if taskID > 0 {
+			setUserTaskEnable(db, taskID, false, "坐席标记暂停")
 		}
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 
 	r.POST("/mer/v1/batch-call-dialpad/apply-ws-pause", func(c *gin.Context) {
-		_, ok := authenticateDialpad(c, authService)
+		tenant, ok := authenticateDialpad(c, authService)
 		if !ok {
 			return
+		}
+		var req struct {
+			TaskID int `json:"taskId"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		userID, _ := strconv.Atoi(tenant.UserID)
+		taskID := req.TaskID
+		if taskID <= 0 {
+			taskID = findUserLatestTaskID(db, userID)
+		}
+		if taskID > 0 {
+			setUserTaskEnable(db, taskID, false, "工作暂停")
 		}
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 
 	r.POST("/mer/v1/batch-call-dialpad/start-task", func(c *gin.Context) {
-		_, ok := authenticateDialpad(c, authService)
+		tenant, ok := authenticateDialpad(c, authService)
 		if !ok {
 			return
+		}
+		var req struct {
+			TaskID int `json:"taskId"`
+		}
+		_ = c.ShouldBindJSON(&req)
+		userID, _ := strconv.Atoi(tenant.UserID)
+		taskID := req.TaskID
+		if taskID <= 0 {
+			taskID = findUserLatestTaskID(db, userID)
+		}
+		if taskID > 0 {
+			setUserTaskEnable(db, taskID, true, "")
 		}
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
@@ -1160,4 +1199,34 @@ func isTest() bool {
 		}
 	}
 	return flag.Lookup("test.v") != nil || strings.HasSuffix(os.Args[0], ".test")
+}
+
+
+// findUserLatestTaskID 查询用户最近的未删除批量外呼任务 ID。
+// 返回 0 表示该用户没有活跃任务。
+func findUserLatestTaskID(db *gorm.DB, userID int) int {
+	var taskID int
+	db.Table("cc_biz_task").
+		Select("id").
+		Where("user_id = ? AND del_flag = ?", userID, false).
+		Order("updated_time DESC").
+		Limit(1).
+		Scan(&taskID)
+	return taskID
+}
+
+// setUserTaskEnable 切换批量外呼任务的启用状态及暂停原因。
+func setUserTaskEnable(db *gorm.DB, taskID int, enable bool, reason string) {
+	updates := map[string]any{
+		"enable":       enable,
+		"updated_time": time.Now().UTC(),
+	}
+	if enable {
+		updates["paused_reason"] = ""
+	} else if reason != "" {
+		updates["paused_reason"] = reason
+	}
+	db.Table("cc_biz_task").
+		Where("id = ? AND del_flag = ?", taskID, false).
+		Updates(updates)
 }

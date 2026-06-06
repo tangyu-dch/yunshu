@@ -72,6 +72,31 @@ const (
 
 	// KeyExtensionStatus 坐席分机实时注册与通话状态 Hash 键，由 ESL/注册服务写入，用于外呼准入校验
 	KeyExtensionStatus = "extension:status"
+
+	// KeyExtensionAlivePrefix 分机伴生活跃标记前缀，格式为 extension:alive:{ext}。
+	// 写入非离线状态时同时设置该 key（TTL 5 分钟），清理协程据此检测幽灵在线状态。
+	KeyExtensionAlivePrefix = "extension:alive:*"
+
+	// KeyCtiSelectClaimPrefix 选号并发占用幂等 Key 前缀，用于看门狗扫描并续期活跃呼叫的租约。
+	// 格式为 cti:select:claim:{callId}，值存储 "phone|gatewayID"。
+	KeyCtiSelectClaimPrefix = "cti:select:claim:*"
+
+	// KeyMerchantRateCache 商户费率绑定缓存前缀，格式为 cc:rate:merchant:{merchantId}。
+	// 值为 JSON 序列化的 RateDecision，TTL 5 分钟，管理端费率绑定变更时主动失效。
+	KeyMerchantRateCache = "cc:rate:merchant:*"
+
+	// KeyMerchantBalance 商户余额原子防超扣 Hash 前缀，格式为 cc:balance:{merchantId}。
+	// Hash 字段：balance（当前余额）、credit_limit（信用额度）。
+	// 由充值接口写穿，由 Redis Lua 脚本原子扣款，服务重启时从 DB 重新加载。
+	KeyMerchantBalance = "cc:balance:*"
+
+	// KeyConsoleRoutePermCache 管理端路由权限规则缓存前缀，格式为 cc:perm:route:{method}。
+	// 值为 JSON 序列化的路由权限规则列表，TTL 由配置控制（默认 10 分钟）。
+	KeyConsoleRoutePermCache = "cc:perm:route:*"
+
+	// KeyConsolePermInvalidate 管理端权限变更通知 Pub/Sub 通道。
+	// 权限规则变更时发布此通道，其他实例订阅后主动失效本地缓存。
+	KeyConsolePermInvalidate = "cc:perm:invalidate"
 )
 
 var RedisContracts = []RedisContract{
@@ -91,7 +116,12 @@ var RedisContracts = []RedisContract{
 	{KeyBlacklistGatewaySync, "operate", "cc-console", "cc-call", "none", "gateway sync event", "consumer ack after sync state", "blacklist version"},
 	{KeyCallResourceAllocation, "cti", "cc-call", "cc-call", "short", "allocation lock", "release after allocation outcome", "command id"},
 	{KeyCallCdrSentPrefix, "cti", "cc-call", "cc-call/cc-worker", "audit window", "cdr sent marker", "expire after retry window", "callId + downstream"},
-	{KeyExtensionStatus, "esl", "cc-call", "cc-call/cc-console", "none", "-compatible Redis extension status hash (-1 offline, 0 busy, 1 idle, etc.)", "never delete manually", "extensionNumber"},
+	{KeyExtensionStatus, "esl", "cc-call", "cc-call/cc-console", "none (companion alive key enforces liveness)", "-compatible Redis extension status hash (-1 offline, 0 busy, 1 idle, etc.)", "never delete manually", "extensionNumber"},
+	{KeyExtensionAlivePrefix, "esl", "cc-call", "cc-call", "5m", "companion alive marker (1) for extension status liveness", "expire on TTL or delete on offline", "extensionNumber"},
+	{KeyCtiSelectClaimPrefix, "cti", "cc-call", "cc-call", "30m", "selection claim idempotency key with phone|gatewayID value", "expire on TTL or release on hangup", "callId + watchdog scan"},
+	{KeyMerchantRateCache, "billing", "cc-worker", "cc-worker", "5m", "merchant rate binding JSON with BillingCycle and BillingPrice", "expire on TTL or invalidate on rate change", "merchantId"},
+	{KeyMerchantBalance, "billing", "cc-console", "cc-worker", "none", "merchant balance hash with balance and credit_limit fields", "sync from DB on startup and recharge", "merchantId"},
+	{KeyConsoleRoutePermCache, "operate", "cc-console", "cc-console", "10m", "route permission rule list JSON per HTTP method", "expire on TTL or invalidate on permission change", "method"},
 }
 
 // BuildBatchTelKey 构造用于存储批量外呼单个号码拨打状态及详情的 Redis 投影键 (Hash 类型)

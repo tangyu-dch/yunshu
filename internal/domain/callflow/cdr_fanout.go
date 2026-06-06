@@ -10,6 +10,7 @@ import (
 const (
 	DestinationCDRBilling          = "cti_cdr_billing"
 	DestinationCDRRecording        = "cti_cdr_recording"
+	DestinationCDRRecordingOSS     = "cti_cdr_recording_oss"
 	DestinationCDRReportProjection = "cti_cdr_report_projection"
 	DestinationCDRDownstreamPush   = "cti_cdr_downstream_push"
 )
@@ -23,12 +24,15 @@ func BuildCDRFanoutEntries(cdrEntry outbox.Entry, now time.Time) []outbox.Entry 
 	if callID == "" || callID == "<nil>" {
 		callID = cdrEntry.AggregateID
 	}
-	return []outbox.Entry{
+	entries := []outbox.Entry{
 		cdrFanoutEntry(cdrEntry, callID, DestinationCDRBilling, "billing", now),
 		cdrFanoutEntry(cdrEntry, callID, DestinationCDRRecording, "recording", now),
 		cdrFanoutEntry(cdrEntry, callID, DestinationCDRReportProjection, "report", now),
 		cdrFanoutEntry(cdrEntry, callID, DestinationCDRDownstreamPush, "downstream", now),
 	}
+	// 添加录音 OSS 上传任务
+	entries = append(entries, cdrFanoutEntry(cdrEntry, callID, DestinationCDRRecordingOSS, "recording_oss", now))
+	return entries
 }
 
 func cdrFanoutEntry(cdrEntry outbox.Entry, callID, destination, suffix string, now time.Time) outbox.Entry {

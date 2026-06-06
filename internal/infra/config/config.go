@@ -78,6 +78,15 @@ type ConsoleConfig struct {
 	CallBaseURL string              `yaml:"callBaseURL"`
 	Dialpad     DialpadUpdateConfig `yaml:"dialpad"`
 	LicensePath string              `yaml:"licensePath"`
+	Perm        ConsolePermConfig   `yaml:"perm"`
+}
+
+// ConsolePermConfig 定义管理端权限缓存参数。
+type ConsolePermConfig struct {
+	// RouteCacheTTL 路由权限规则在 Redis 中的缓存 TTL，默认 10 分钟。
+	RouteCacheTTL time.Duration `yaml:"routeCacheTTL"`
+	// LocalCacheTTL 单进程内本地内存缓存的 TTL，默认 5 秒。减少对 Redis 的跳次。
+	LocalCacheTTL time.Duration `yaml:"localCacheTTL"`
 }
 
 // DialpadUpdateConfig 定义桌面拨号盘客户端更新配置。
@@ -133,6 +142,26 @@ type WorkerRecordingConfig struct {
 	URL     string        `yaml:"url"`
 	Secret  string        `yaml:"secret"`
 	Timeout time.Duration `yaml:"timeout"`
+	OSS     OSSConfig     `yaml:"oss"`
+}
+
+// OSSConfig 定义 S3 兼容对象存储的录音上传参数。
+// 支持 MinIO、RustFS、阿里云 OSS 等 S3 兼容接口。
+type OSSConfig struct {
+	// Endpoint S3 服务地址，如 http://minio:9000。为空时跳过 OSS 上传。
+	Endpoint string `yaml:"endpoint"`
+	// AccessKey S3 Access Key ID。
+	AccessKey string `yaml:"accessKey"`
+	// SecretKey S3 Secret Access Key。
+	SecretKey string `yaml:"secretKey"`
+	// Bucket 录音文件所在 bucket 名称，默认 recordings。
+	Bucket string `yaml:"bucket"`
+	// BaseDir FreeSWITCH 录音文件在本地文件系统的挂载根目录。
+	// Worker 读取录音文件时以此为根路径拼接相对路径。
+	BaseDir string `yaml:"baseDir"`
+	// CDNBaseURL OSS 对象的公网访问前缀，如 https://cdn.example.com/recordings。
+	// 上传成功后 record_url 将设为 CDNBaseURL + "/" + objectKey。
+	CDNBaseURL string `yaml:"cdnBaseURL"`
 }
 
 // WorkerBillingConfig 定义 worker 计费估算参数。
@@ -252,6 +281,24 @@ func applyEnv(cfg *Config) {
 	}
 	if value := os.Getenv("RECORDING_UPLOAD_SECRET"); value != "" {
 		cfg.Worker.Recording.Secret = value
+	}
+	if value := os.Getenv("RECORDING_OSS_ENDPOINT"); value != "" {
+		cfg.Worker.Recording.OSS.Endpoint = value
+	}
+	if value := os.Getenv("RECORDING_OSS_ACCESS_KEY"); value != "" {
+		cfg.Worker.Recording.OSS.AccessKey = value
+	}
+	if value := os.Getenv("RECORDING_OSS_SECRET_KEY"); value != "" {
+		cfg.Worker.Recording.OSS.SecretKey = value
+	}
+	if value := os.Getenv("RECORDING_OSS_BUCKET"); value != "" {
+		cfg.Worker.Recording.OSS.Bucket = value
+	}
+	if value := os.Getenv("RECORDING_LOCAL_BASE_DIR"); value != "" {
+		cfg.Worker.Recording.OSS.BaseDir = value
+	}
+	if value := os.Getenv("RECORDING_CDN_BASE_URL"); value != "" {
+		cfg.Worker.Recording.OSS.CDNBaseURL = value
 	}
 	if value := os.Getenv("WORKER_BILLING_DEFAULT_RATE_PER_MIN"); value != "" {
 		if parsed, err := strconv.ParseFloat(value, 64); err == nil {

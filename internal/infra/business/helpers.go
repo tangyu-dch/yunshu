@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-const (
-	StatusPending = "pending"
-	StatusSuccess = "success"
-	StatusFailed  = "failed"
-	StatusSkipped = "skipped"
-)
-
 func hmacSign(raw []byte, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write(raw)
@@ -83,4 +76,24 @@ func firstString(candidates ...any) string {
 		}
 	}
 	return ""
+}
+
+// floatValue 将任意类型值转换为 float64。
+func floatValue(value any) float64 {
+	switch typed := value.(type) {
+	case float64:
+		return typed
+	case float32:
+		return float64(typed)
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case string:
+		var parsed float64
+		_, _ = fmt.Sscanf(typed, "%f", &parsed)
+		return parsed
+	default:
+		return 0
+	}
 }

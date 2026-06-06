@@ -127,6 +127,7 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	nodeRegistry := buildFSRegistry(cfg, gormDB, logger)
 	extensionResolver := buildExtensionResolver(gormDB, logger)
 	outboundGuard := buildOutboundGuard(gormDB, extensionstatus.NewRedisReader(redisClient), logger)
+	extensionStatusReader := extensionstatus.NewRedisReader(redisClient)
 	nodes, err := nodeRegistry.ListEnabled(context.Background())
 	if err != nil {
 		logger.Error("读取 FreeSWITCH 节点配置失败", "error", err.Error())
@@ -156,15 +157,14 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 			if redisClient == nil {
 				return
 			}
-			status := "-1" // 默认注销/到期 = Offline (-1)
+			status := esl.ExtensionStatusOffline
 			if subclass == "sofia::register" {
-				status = "1" // 注册成功 = Idle (1)
+				status = esl.ExtensionStatusIdle
 			}
-			err := redisClient.HSet(ctx, contracts.KeyExtensionStatus, extension, status).Err()
-			if err != nil {
-				logger.Error("实时同步分机注册状态到 Redis 失败", "extension", extension, "subclass", subclass, "status", status, "error", err.Error())
+			if err := extensionStatusReader.SetExtensionStatus(ctx, extension, status); err != nil {
+				logger.Error("实时同步分机注册状态到 Redis 失败", "extension", extension, "subclass", subclass, "status", int(status), "error", err.Error())
 			} else {
-				logger.Info("已实时同步分机注册状态到 Redis", "extension", extension, "subclass", subclass, "status", status)
+				logger.Info("已实时同步分机注册状态到 Redis", "extension", extension, "subclass", subclass, "status", int(status))
 			}
 		}
 		executor = &fsesl.ESLCommandExecutor{Pool: pool, Timeout: cfg.FreeSwitch.CommandTimeout, Logger: logger}
@@ -214,7 +214,9 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 		callQueue = selectioninfra.NewRedisCallQueue(redisClient)
 	}
 
-	callflow.RegisterConsumers(ctx, bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, logger)
+	mediaRegistry := callflow.NewMediaRegistry()
+
+	callflow.RegisterConsumers(ctx, bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, mediaRegistry, logger)
 	var batchScheduler *cti.BatchSchedulerService
 	if gormDB != nil {
 		batchScheduler = &cti.BatchSchedulerService{
@@ -222,6 +224,8 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 			Queue:      callQueue,
 			ESL:        inProcessESLClient{originate: originate},
 			Events:     bus,
+			Candidates: candidateSource,
+			Selector:   runtimeSelector,
 			Logger:     logger,
 		}
 		callflow.RegisterBatchConsumers(bus, ctiRunner, batchScheduler, logger)
@@ -242,6 +246,23 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 
 	if gormDB != nil && redisClient != nil {
 		go startOfflineExtensionUnbinder(ctx, gormDB, redisClient, logger)
+	}
+
+	// 分机状态清理协程：周期扫描 extension:status Hash，将已失去 alive key 的幽灵在线状态重置为离线
+	if redisClient != nil {
+		go extensionStatusReader.StartStatusCleaner(ctx, 60*time.Second)
+	}
+
+	// 选号租约看门狗：周期扫描活跃 claim Key 并续期，防止长通话超时导致并发计数器过期
+	if redisClient != nil {
+		redisAllocator := selectioninfra.NewRedisAllocator(redisClient, 30*time.Minute)
+		watchdog := &selectioninfra.ClaimWatchdog{
+			Client:       redisClient,
+			Allocator:    redisAllocator,
+			SessionStore: session.Store,
+			Logger:       logger,
+		}
+		go watchdog.Start(ctx)
 	}
 
 	callControl := cti.NewCallControlService(session.Store, command, extensionResolver, logger)

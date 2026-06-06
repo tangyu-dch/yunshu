@@ -55,14 +55,26 @@ type fakeRuntimeAllocator struct {
 	failPhone string
 }
 
-func (f fakeRuntimeAllocator) Claim(_ context.Context, _ SelectionRequest, candidates []NumberCandidate) (RuntimeAllocation, error) {
+// Claim 模拟批量原子试选：逐个试选候选号码，跳过 failPhone，首个成功占用即返回。
+// 这与真实 Redis 批量 Lua 脚本的行为一致——Redis 内部按序试选直到成功。
+func (f fakeRuntimeAllocator) Claim(_ context.Context, req SelectionRequest, candidates []NumberCandidate) (RuntimeAllocation, error) {
 	if len(candidates) == 0 {
 		return RuntimeAllocation{}, ErrNoAvailableNumber
 	}
-	if candidates[0].Phone == f.failPhone {
-		return RuntimeAllocation{}, ErrRuntimeConcurrencyExhausted
+	for i, c := range candidates {
+		if c.Phone == f.failPhone {
+			// 模拟该候选号码并发已满，继续试选下一个
+			continue
+		}
+		return RuntimeAllocation{
+			CallID:         req.CallID,
+			MerchantID:     req.MerchantID,
+			Caller:         c.Phone,
+			GatewayID:      c.GatewayID,
+			CandidateIndex: i,
+		}, nil
 	}
-	return RuntimeAllocation{Caller: candidates[0].Phone, GatewayID: candidates[0].GatewayID}, nil
+	return RuntimeAllocation{}, ErrRuntimeConcurrencyExhausted
 }
 
 func (fakeRuntimeAllocator) Release(context.Context, RuntimeAllocation) error {

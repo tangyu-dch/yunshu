@@ -39,6 +39,7 @@ type Record struct {
 // Store 定义 CDR 记录落库能力。
 type CdrStore interface {
 	SaveFromOutbox(ctx context.Context, entry Entry) error
+	UpdateRecordURL(ctx context.Context, callID, recordURL string) error
 }
 
 // MemoryStore 是 CDR 内存仓储，用于测试和本地无数据库兜底。
@@ -62,6 +63,19 @@ func (s *CdrMemoryStore) SaveFromOutbox(_ context.Context, entry Entry) error {
 	}
 	s.Records[record.CallID] = record
 	return nil
+}
+
+// UpdateRecordURL 更新 CDR 的录音文件 URL。
+func (s *CdrMemoryStore) UpdateRecordURL(_ context.Context, callID, recordURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if record, ok := s.Records[callID]; ok {
+		record.RecordFile = recordURL
+		s.Records[callID] = record
+		return nil
+	}
+	return fmt.Errorf("cdr not found: %s", callID)
 }
 
 func recordFromOutbox(entry Entry) Record {

@@ -16,8 +16,8 @@ func TestBuildCDRFanoutEntries(t *testing.T) {
 		AggregateID: "call-1",
 		Payload:     map[string]any{"callId": "call-1", "uuid": "uuid-1"},
 	}, now)
-	if len(entries) != 4 {
-		t.Fatalf("expected four fanout entries, got %d", len(entries))
+	if len(entries) != 5 {
+		t.Fatalf("expected five fanout entries, got %d", len(entries))
 	}
 	got := map[string]bool{}
 	for _, entry := range entries {
@@ -26,7 +26,7 @@ func TestBuildCDRFanoutEntries(t *testing.T) {
 			t.Fatalf("unexpected fanout entry: %+v", entry)
 		}
 	}
-	if !got[DestinationCDRBilling] || !got[DestinationCDRRecording] || !got[DestinationCDRReportProjection] || !got[DestinationCDRDownstreamPush] {
+	if !got[DestinationCDRBilling] || !got[DestinationCDRRecording] || !got[DestinationCDRRecordingOSS] || !got[DestinationCDRReportProjection] || !got[DestinationCDRDownstreamPush] {
 		t.Fatalf("unexpected fanout destinations: %+v", entries)
 	}
 }

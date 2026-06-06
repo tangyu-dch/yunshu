@@ -14,11 +14,12 @@ var ErrRuntimeAllocatorNotConfigured = errors.New("runtime number allocator not 
 
 // RuntimeAllocation 表示运行时已成功占用的主叫号码资源。
 type RuntimeAllocation struct {
-	CallID     string `json:"callId"`
-	MerchantID string `json:"merchantId"`
-	Caller     string `json:"caller"`
-	GatewayID  string `json:"gatewayId"`
-	ClaimKey   string `json:"claimKey"`
+	CallID         string `json:"callId"`
+	MerchantID     string `json:"merchantId"`
+	Caller         string `json:"caller"`
+	GatewayID      string `json:"gatewayId"`
+	ClaimKey       string `json:"claimKey"`
+	CandidateIndex int    `json:"candidateIndex"` // 批量原子试选中成功占用的候选位置（0-based）
 }
 
 // RuntimeAllocator 定义高并发选号的运行时原子分配能力。
@@ -61,19 +62,32 @@ func (s RuntimeSelector) SelectAndClaim(ctx context.Context, req SelectionReques
 		logger.Error("CTI 选号未配置运行时 allocator，直接拒绝起呼", "callId", req.CallID, "merchantId", req.MerchantID, "impact", "生产环境必须配置 Redis 原子分配")
 		return SelectionResult{Success: false, Reason: ErrRuntimeAllocatorNotConfigured.Error(), Trace: trace}, nil, ErrRuntimeAllocatorNotConfigured
 	}
-	for i, candidate := range eligible {
-		result := SelectionResult{Success: true, Caller: &candidate, Trace: trace}
-		allocation, err := s.Allocator.Claim(ctx, req, []NumberCandidate{candidate})
-		if err == nil {
-			logger.Info("CTI 运行时号码占用成功", "callId", req.CallID, "merchantId", req.MerchantID, "caller", allocation.Caller, "gatewayId", allocation.GatewayID, "claimKey", allocation.ClaimKey, "candidateIndex", i)
-			return result, &allocation, nil
+	// 所有合格候选号码打包进单次 Redis 原子试选调用，消除 N-1 次网络往返。
+	// Redis Lua 脚本内部按排序优先级逐个试选，首个成功占用的候选立即返回。
+	allocation, err := s.Allocator.Claim(ctx, req, eligible)
+	if err == nil {
+		// 从批量 Lua 返回的索引获取成功占用的候选号码
+		var caller NumberCandidate
+		if allocation.CandidateIndex >= 0 && allocation.CandidateIndex < len(eligible) {
+			caller = eligible[allocation.CandidateIndex]
+		} else {
+			// 兜底：通过 Caller 和 GatewayID 匹配
+			for _, c := range eligible {
+				if c.Phone == allocation.Caller && c.GatewayID == allocation.GatewayID {
+					caller = c
+					break
+				}
+			}
 		}
-		if errors.Is(err, ErrRuntimeConcurrencyExhausted) {
-			logger.Warn("CTI 候选号运行时并发已满，继续尝试下一个候选", "callId", req.CallID, "merchantId", req.MerchantID, "candidateIndex", i, "gatewayId", candidate.GatewayID)
-			continue
-		}
-		logger.Warn("CTI 运行时号码占用失败", "callId", req.CallID, "merchantId", req.MerchantID, "candidateIndex", i, "error", err.Error())
-		return SelectionResult{Success: false, Reason: err.Error(), Trace: trace}, nil, err
+		result := SelectionResult{Success: true, Caller: &caller, Trace: trace}
+		logger.Info("CTI 运行时号码占用成功", "callId", req.CallID, "merchantId", req.MerchantID, "caller", allocation.Caller, "gatewayId", allocation.GatewayID, "claimKey", allocation.ClaimKey, "candidateIndex", allocation.CandidateIndex, "totalCandidates", len(eligible))
+		return result, &allocation, nil
 	}
-	return SelectionResult{Success: false, Reason: ErrNoAvailableNumber.Error(), Trace: trace}, nil, ErrNoAvailableNumber
+	if errors.Is(err, ErrRuntimeConcurrencyExhausted) {
+		logger.Warn("CTI 所有候选号码运行时并发已满，选号失败", "callId", req.CallID, "merchantId", req.MerchantID, "totalCandidates", len(eligible))
+		return SelectionResult{Success: false, Reason: ErrNoAvailableNumber.Error(), Trace: trace}, nil, ErrNoAvailableNumber
+	}
+	// 非并发错误（如 Redis 不可达），中止选号
+	logger.Warn("CTI 运行时号码占用失败", "callId", req.CallID, "merchantId", req.MerchantID, "error", err.Error())
+	return SelectionResult{Success: false, Reason: err.Error(), Trace: trace}, nil, err
 }

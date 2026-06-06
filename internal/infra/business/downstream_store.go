@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-const (
-	StatusDelivered = "delivered"
-)
-
 // PushJob 表示一条 CDR 下游推送任务。
 type PushJob struct {
 	ID           string

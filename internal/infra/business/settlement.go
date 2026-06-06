@@ -15,12 +15,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	redisinfra "yunshu/internal/infra/redis"
 	"yunshu/internal/infra/merchant"
-)
-
-const (
-	StatusSettled = "settled"
-	StatusNoOp    = "no_op"
 )
 
 // ErrBillingOverviewNotFound 表示商户的账费余额总览不存在，在进行结算扣除时用作显式的 no-op 回退标记。
@@ -169,30 +165,12 @@ func settlementJobFromOutbox(entry Entry, now time.Time) SettlementJob {
 	}
 }
 
-func floatValue(value any) float64 {
-	switch typed := value.(type) {
-	case float64:
-		return typed
-	case float32:
-		return float64(typed)
-	case int:
-		return float64(typed)
-	case int64:
-		return float64(typed)
-	case string:
-		var parsed float64
-		_, _ = fmt.Sscanf(typed, "%f", &parsed)
-		return parsed
-	default:
-		return 0
-	}
-}
-
 // GormStore 使用数据库保存结算任务并执行余额扣减。
 type SettlementGormStore struct {
-	DB     *gorm.DB
-	Now    func() time.Time
-	Logger *slog.Logger
+	DB           *gorm.DB
+	Now          func() time.Time
+	Logger       *slog.Logger
+	BalanceCache *redisinfra.MerchantBalanceCache
 }
 
 // NewGormStore 创建 GORM 结算仓储。
@@ -201,6 +179,14 @@ func NewSettlementGormStore(db *gorm.DB, logger *slog.Logger) *SettlementGormSto
 		logger = slog.Default()
 	}
 	return &SettlementGormStore{DB: db, Now: time.Now, Logger: logger}
+}
+
+// NewGormStoreWithBalanceCache 创建带有余额缓存的 GORM 结算仓储。
+func NewSettlementGormStoreWithBalanceCache(db *gorm.DB, logger *slog.Logger, balanceCache *redisinfra.MerchantBalanceCache) *SettlementGormStore {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &SettlementGormStore{DB: db, Now: time.Now, Logger: logger, BalanceCache: balanceCache}
 }
 
 // SettlementJobModel 映射结算任务表。
@@ -254,6 +240,41 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 	if amount <= 0 {
 		return 0, 0, nil
 	}
+
+	// 1. 如果有 Redis 缓存，先尝试原子扣款
+	if s.BalanceCache != nil {
+		// 首先需要从数据库获取当前余额和信用额度（用于 Redis 同步或检查）
+		var billing merchant.MerchantBillingOverviewModel
+		if err := s.DB.WithContext(ctx).
+			Where("merchant_id = ?", merchantID).
+			First(&billing).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				s.Logger.Info("商户账单总览不存在，准备回退为 no-op 结算逻辑", "merchantId", merchantID, "amount", amount)
+				return 0, 0, ErrBillingOverviewNotFound
+			}
+			return 0, 0, err
+		}
+
+		// 尝试 Redis 原子扣款
+		debitResult, err := s.BalanceCache.AtomicDebit(ctx, merchantID, amount, billing.CreditLimit)
+		if err != nil {
+			s.Logger.Warn("Redis 原子扣款失败，回退到数据库扣款", "merchantId", merchantID, "error", err.Error())
+		} else if debitResult == redisinfra.DebitResultInsufficientBalance {
+			// 明确的余额不足
+			return 0, 0, fmt.Errorf("insufficient merchant billing balance")
+		} else if debitResult == redisinfra.DebitResultSuccess {
+			// Redis 扣款成功，现在同步更新数据库
+			return s.debitBalanceOnlyDB(ctx, merchantID, amount)
+		}
+		// 其他情况（Key 不存在）继续走数据库流程
+	}
+
+	// 2. 回退到纯数据库扣款
+	return s.debitBalanceOnlyDB(ctx, merchantID, amount)
+}
+
+// debitBalanceOnlyDB 只使用数据库进行余额扣款（不经过 Redis）
+func (s *SettlementGormStore) debitBalanceOnlyDB(ctx context.Context, merchantID int, amount float64) (float64, float64, error) {
 	now := s.now()
 	var before, after float64
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -277,6 +298,12 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 			Where("merchant_id = ?", merchantID).
 			Updates(map[string]any{"current_balance": after, "updated_time": now}).Error; err != nil {
 			return err
+		}
+		// 数据库更新成功后，同步更新 Redis 缓存
+		if s.BalanceCache != nil {
+			if syncErr := s.BalanceCache.SyncFromDB(ctx, merchantID, after, billing.CreditLimit); syncErr != nil {
+				s.Logger.Warn("同步余额到 Redis 失败", "merchantId", merchantID, "error", syncErr.Error())
+			}
 		}
 		return nil
 	})

@@ -83,6 +83,26 @@ func (s *CdrGormStore) SaveFromOutbox(ctx context.Context, entry Entry) error {
 	return nil
 }
 
+// UpdateRecordURL 更新 CDR 的录音文件 URL。
+func (s *CdrGormStore) UpdateRecordURL(ctx context.Context, callID, recordURL string) error {
+	result := s.DB.WithContext(ctx).Model(&RecordModel{}).
+		Where("call_id = ?", callID).
+		Updates(map[string]any{
+			"record_file_path": recordURL,
+			"updated_at":       s.now(),
+		})
+	if result.Error != nil {
+		s.Logger.Error("CDR 更新录音 URL 失败", "callId", callID, "error", result.Error.Error())
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		s.Logger.Warn("CDR 更新录音 URL 未找到记录", "callId", callID)
+		return nil
+	}
+	s.Logger.Info("CDR 更新录音 URL 成功", "callId", callID, "recordUrl", recordURL)
+	return nil
+}
+
 func (s *CdrGormStore) now() time.Time {
 	if s.Now != nil {
 		return s.Now().UTC()
