@@ -103,7 +103,7 @@ func TestBuildAPIOutboundPlanInjectsRingbackMetadata(t *testing.T) {
 		UserID: 7,
 		Callee: "13800138000",
 		Extra:  `{"extension":"1001","supplementRing":true,"supplementRingFile":"/tmp/ring.wav","broadcastTime":30,"broadcastTimeFlag":true}`,
-	}, "", nil)
+	}, "", "", nil)
 
 	if !plan.SupplementRing || plan.SupplementRingFile != "/tmp/ring.wav" {
 		t.Fatalf("unexpected ringback metadata: %+v", plan)

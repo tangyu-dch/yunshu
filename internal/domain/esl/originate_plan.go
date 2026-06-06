@@ -38,7 +38,7 @@ type OriginatePlan struct {
 // BuildAPIOutboundPlan 构建 API 外呼的 AGENT_FIRST originate 计划。
 //
 //	API 外呼会先呼坐席分机，再由后续流程选择客户线路；这里保持相同方向。
-func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallReq, extensionNumber string, logger *slog.Logger) OriginatePlan {
+func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallReq, extensionNumber, sipDomain string, logger *slog.Logger) OriginatePlan {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -54,6 +54,14 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 	supplementRingFile := contracts.FirstNonEmpty(extra["supplementRingFile"], extra["supplement_ring_file"], extra["ringbackFile"], extra["ringback_file"], extra["yunshuRingbackFile"], extra["yunshu_ringback_file"])
 	broadcastTime := extraInt64(extra, "broadcastTime", "broadcast_time")
 	broadcastTimeFlag := extraBool(extra, "broadcastTimeFlag", "broadcast_time_flag")
+
+	domainOrGateway := defaultKamailioDomain
+	paiDomain := domainHost(defaultKamailioDomain)
+	if sipDomain != "" {
+		domainOrGateway = fmt.Sprintf("%s;fs_path=sip:%s", sipDomain, defaultKamailioDomain)
+		paiDomain = sipDomain
+	}
+
 	options := map[string]any{
 		"Call-ID":                      callID,
 		"yunshu_call_id":               callID,
@@ -71,8 +79,8 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 		"ignore_early_media":           false,
 		"sip_from_user":                displayNumber,
 		"sip_from_display":             displayNumber,
-		"sip_h_P-Asserted-Identity":    fmt.Sprintf("\"%s\"<sip:%s@%s>", displayNumber, displayNumber, domainHost(defaultKamailioDomain)),
-		"sip_h_Remote-Party-ID":        fmt.Sprintf("\"%s\"<sip:%s@%s>", displayNumber, displayNumber, domainHost(defaultKamailioDomain)),
+		"sip_h_P-Asserted-Identity":    fmt.Sprintf("\"%s\"<sip:%s@%s>", displayNumber, displayNumber, paiDomain),
+		"sip_h_Remote-Party-ID":        fmt.Sprintf("\"%s\"<sip:%s@%s>", displayNumber, displayNumber, paiDomain),
 		"sip_h_X-Internal-Call":        true,
 		"sip_h_X-S-C-I":                callID,
 		"sip_h_X-S-C-T":                0,
@@ -93,7 +101,7 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 	if broadcastTimeFlag {
 		options["variable_yunshu_broadcast_time_flag"] = true
 	}
-	logger.Info("已构建 API 外呼 AGENT_FIRST 起呼计划", "callId", callID, "fsAddr", fsAddr, "extension", extension, "mode", contracts.OriginateModeAgentFirst)
+	logger.Info("已构建 API 外呼 AGENT_FIRST 起呼计划", "callId", callID, "fsAddr", fsAddr, "extension", extension, "sipDomain", sipDomain, "mode", contracts.OriginateModeAgentFirst)
 	return OriginatePlan{
 		CallID:             callID,
 		FSAddr:             fsAddr,
@@ -102,7 +110,7 @@ func BuildAPIOutboundPlan(callID, version, fsAddr string, req contracts.ApiCallR
 		AgentUUID:          agentUUID,
 		CustomerUUID:       customerUUID,
 		Destination:        extension,
-		DomainOrGateway:    defaultKamailioDomain,
+		DomainOrGateway:    domainOrGateway,
 		Register:           false,
 		SupplementRing:     supplementRing,
 		SupplementRingFile: supplementRingFile,

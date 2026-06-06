@@ -32,6 +32,7 @@ type Extension struct {
 	UserID          int
 	MerchantID      int
 	ExtensionNumber string
+	SipDomain       string
 }
 
 // ExtensionResolver 按用户读取已绑定分机。
@@ -167,6 +168,7 @@ func (s *OriginateService) StartAPIOutbound(ctx context.Context, req OriginateRe
 		fsAddr = selected
 	}
 	extensionNumber := ""
+	sipDomain := ""
 	if s.Extensions != nil {
 		extension, err := s.Extensions.GetByUserID(ctx, req.Request.UserID)
 		if err != nil {
@@ -174,6 +176,7 @@ func (s *OriginateService) StartAPIOutbound(ctx context.Context, req OriginateRe
 			return err
 		}
 		extensionNumber = extension.ExtensionNumber
+		sipDomain = extension.SipDomain
 		logger.Info("ESL API 外呼已读取坐席分机", "callId", req.CallID, "userId", req.Request.UserID, "extensionId", extension.ID, "extension", extension.ExtensionNumber, "merchantId", extension.MerchantID)
 		if s.Guard != nil {
 			if err := s.Guard.ValidateAPICall(ctx, req.Request, extension); err != nil {
@@ -183,7 +186,7 @@ func (s *OriginateService) StartAPIOutbound(ctx context.Context, req OriginateRe
 			logger.Info("ESL API 外呼兜底校验通过", "callId", req.CallID, "userId", req.Request.UserID, "extensionId", extension.ID, "merchantId", extension.MerchantID)
 		}
 	}
-	plan := BuildAPIOutboundPlan(req.CallID, req.Version, fsAddr, req.Request, extensionNumber, logger)
+	plan := BuildAPIOutboundPlan(req.CallID, req.Version, fsAddr, req.Request, extensionNumber, sipDomain, logger)
 	cmd := telephony.NewCommand(
 		"originate:"+req.CallID,
 		"originate",

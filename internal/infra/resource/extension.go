@@ -70,6 +70,7 @@ func (r *ExtensionRepository) GetByUserID(ctx context.Context, userID int) (esl.
 		UserID:          model.UserID,
 		MerchantID:      model.MerchantID,
 		ExtensionNumber: model.ExtensionNumber,
+		SipDomain:       model.SipDomain,
 	}, nil
 }
 

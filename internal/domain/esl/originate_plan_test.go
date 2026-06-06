@@ -13,7 +13,7 @@ func TestBuildAPIOutboundPlanUsesAgentFirst(t *testing.T) {
 		UserID: 7,
 		Callee: "13800138000",
 		Extra:  `{"extension":"1001"}`,
-	}, "", nil)
+	}, "", "", nil)
 
 	if plan.OriginateMode != contracts.OriginateModeAgentFirst {
 		t.Fatalf("unexpected mode: %s", plan.OriginateMode)
@@ -36,10 +36,27 @@ func TestBuildAPIOutboundPlanPrefersResolvedExtension(t *testing.T) {
 		UserID: 7,
 		Callee: "13800138000",
 		Extra:  `{"extension":"1001"}`,
-	}, "2002", nil)
+	}, "2002", "", nil)
 
 	if plan.Destination != "2002" {
 		t.Fatalf("expected resolved extension, got %s", plan.Destination)
+	}
+}
+
+func TestBuildAPIOutboundPlanWithSipDomain(t *testing.T) {
+	t.Parallel()
+
+	plan := BuildAPIOutboundPlan("call-1", "v1", "10.0.0.1:8021", contracts.ApiCallReq{
+		UserID: 7,
+		Callee: "13800138000",
+		Extra:  `{"extension":"1001"}`,
+	}, "2002", "domainA.com", nil)
+
+	if plan.DomainOrGateway != "domainA.com;fs_path=sip:127.0.0.1:5060" {
+		t.Fatalf("expected sipDomain with fs_path, got: %s", plan.DomainOrGateway)
+	}
+	if plan.Options["sip_h_P-Asserted-Identity"] != "\"138****8000\"<sip:138****8000@domainA.com>" {
+		t.Fatalf("expected custom PAI domain, got %v", plan.Options["sip_h_P-Asserted-Identity"])
 	}
 }
 
