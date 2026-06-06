@@ -57,8 +57,6 @@ func TestAuthServiceUsesDynamicPermissionResolver(t *testing.T) {
 	}
 }
 
-
-
 type fakeLoginPermissionResolver struct {
 	permissions []string
 }

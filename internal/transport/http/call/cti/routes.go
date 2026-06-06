@@ -41,6 +41,7 @@ func RegisterRoutes(
 	gormDB *gorm.DB,
 	redisClient *goredis.Client,
 	pool *fsesl.ConnectionPool,
+	callControl *cti.CallControlService,
 ) {
 	// Selector 根据呼叫上下文和选号规则从候选号码中选择最优号码。
 	// 选号逻辑考虑号码可用性、并发限制、风险等级等因素。
@@ -546,6 +547,86 @@ func RegisterRoutes(
 		}
 
 		slog.Info("收到 Kamailio 注销成功回调，状态同步成功", "username", req.Username, "ip", req.IP, "domain", req.Domain)
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+
+	r.POST("/cti/call/eavesdrop", checkAppCredentials(gormDB), func(c *gin.Context) {
+		var req contracts.CallEavesdropReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		merchantID := 0
+		if tenant, ok := contracts.TenantFromContext(c.Request.Context()); ok && tenant.MerchantID != "" {
+			merchantID, _ = strconv.Atoi(tenant.MerchantID)
+		} else {
+			c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户未登录或对接密钥无效"))
+			return
+		}
+
+		// 安全加固：防水平越权校验
+		if gormDB != nil {
+			var user resource.MerchantUserModel
+			err := gormDB.WithContext(c.Request.Context()).
+				Where("id = ? AND del_flag = ?", req.UserID, false).
+				First(&user).Error
+			if err != nil {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "越权操作：请求的主管用户 ID 不存在"))
+				return
+			}
+			if user.MerchantID != merchantID {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, "越权操作：请求的主管用户 ID 不属于您所属的商户"))
+				return
+			}
+		}
+
+		if err := callControl.Eavesdrop(c.Request.Context(), merchantID, req); err != nil {
+			if errors.Is(err, cti.ErrSessionNotFound) {
+				c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, err.Error()))
+				return
+			}
+			if errors.Is(err, cti.ErrPermissionDenied) {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, err.Error()))
+				return
+			}
+			if errors.Is(err, cti.ErrExtensionNotFound) {
+				c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
+				return
+			}
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "监听操作失败: "+err.Error()))
+			return
+		}
+		c.JSON(http.StatusOK, contracts.OK(nil))
+	})
+
+	r.POST("/cti/call/hangup", checkAppCredentials(gormDB), func(c *gin.Context) {
+		var req contracts.CallHangupReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "请求参数错误"))
+			return
+		}
+
+		merchantID := 0
+		if tenant, ok := contracts.TenantFromContext(c.Request.Context()); ok && tenant.MerchantID != "" {
+			merchantID, _ = strconv.Atoi(tenant.MerchantID)
+		} else {
+			c.JSON(http.StatusUnauthorized, contracts.Fail(contracts.CodeUnauthorized, "商户未登录或对接密钥无效"))
+			return
+		}
+
+		if err := callControl.Hangup(c.Request.Context(), merchantID, req); err != nil {
+			if errors.Is(err, cti.ErrSessionNotFound) {
+				c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeNotFound, err.Error()))
+				return
+			}
+			if errors.Is(err, cti.ErrPermissionDenied) {
+				c.JSON(http.StatusForbidden, contracts.Fail(contracts.CodeForbidden, err.Error()))
+				return
+			}
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeInternal, "强拆操作失败: "+err.Error()))
+			return
+		}
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 

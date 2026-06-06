@@ -20,6 +20,8 @@ func BuildAPICommand(cmd contracts.TelephonyCommand) (name string, args string, 
 		return "originate", BuildOriginateArgs(cmd), true
 	case "bridge":
 		return "uuid_bridge", fmt.Sprintf("%v %v", value(cmd, "uuid1", cmd.UUID), value(cmd, "uuid2", "")), true
+	case "uuid_eavesdrop":
+		return "uuid_eavesdrop", fmt.Sprintf("%s %s", cmd.UUID, stringValue(cmd, "targetUuid", "")), true
 	case "hangup":
 		reason := stringValue(cmd, "reasonCode", "NORMAL_CLEARING")
 		return "uuid_kill", fmt.Sprintf("%s %s", cmd.UUID, reason), true
@@ -42,7 +44,7 @@ func BuildAPICommand(cmd contracts.TelephonyCommand) (name string, args string, 
 		if direction == "both" || direction == "" {
 			direction = "write" // 规范化：FreeSWITCH 官方只支持 read/write，默认操作被叫听筒 (write) 方向
 		}
-		
+
 		// 检查静音或音量大小参数
 		if boolValue(cmd, "mute", false) {
 			return "uuid_audio", fmt.Sprintf("%s start %s mute", cmd.UUID, direction), true
@@ -94,13 +96,15 @@ func BuildOriginateArgs(cmd contracts.TelephonyCommand) string {
 		destination = stringValue(cmd, "callee", "")
 	}
 	domainOrGateway := stringValue(cmd, "domainOrGateway", stringValue(cmd, "domain", "default"))
+	executeApp := stringValue(cmd, "executeApp", stringValue(cmd, "execute_app", "park()"))
+	executeApp = strings.TrimPrefix(executeApp, "&")
 	if mode == contracts.OriginateModeAgentFirst {
-		return fmt.Sprintf("{%s}sofia/external/%s@%s &park()", optionText, destination, domainOrGateway)
+		return fmt.Sprintf("{%s}sofia/external/%s@%s &%s", optionText, destination, domainOrGateway, executeApp)
 	}
 	if boolValue(cmd, "register", true) {
-		return fmt.Sprintf("{%s}sofia/gateway/%s/%s &park()", optionText, domainOrGateway, destination)
+		return fmt.Sprintf("{%s}sofia/gateway/%s/%s &%s", optionText, domainOrGateway, destination, executeApp)
 	}
-	return fmt.Sprintf("{%s}sofia/external/%s@%s &park()", optionText, destination, domainOrGateway)
+	return fmt.Sprintf("{%s}sofia/external/%s@%s &%s", optionText, destination, domainOrGateway, executeApp)
 }
 
 func optionsFromPayload(cmd contracts.TelephonyCommand) map[string]any {

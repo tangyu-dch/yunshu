@@ -35,13 +35,13 @@ func NewClient(cfg config.RedisConfig) *goredis.Client {
 		ReadTimeout:     readTimeout,
 		WriteTimeout:    writeTimeout,
 		DialTimeout:     5 * time.Second,
-		PoolSize:        20,                       // 连接池大小
-		MinIdleConns:    5,                        // 最小空闲连接
-		ConnMaxIdleTime: 5 * time.Minute,          // 空闲连接最大存活时间
-		ConnMaxLifetime: 30 * time.Minute,         // 连接最大生命周期
-		MaxRetries:      3,                        // 最大重试次数
-		MinRetryBackoff: 8 * time.Millisecond,     // 重试最小退避
-		MaxRetryBackoff: 512 * time.Millisecond,   // 重试最大退避
+		PoolSize:        20,                     // 连接池大小
+		MinIdleConns:    5,                      // 最小空闲连接
+		ConnMaxIdleTime: 5 * time.Minute,        // 空闲连接最大存活时间
+		ConnMaxLifetime: 30 * time.Minute,       // 连接最大生命周期
+		MaxRetries:      3,                      // 最大重试次数
+		MinRetryBackoff: 8 * time.Millisecond,   // 重试最小退避
+		MaxRetryBackoff: 512 * time.Millisecond, // 重试最大退避
 	})
 }
 

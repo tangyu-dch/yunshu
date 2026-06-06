@@ -188,4 +188,3 @@ func TestBuildAPICommandsOptimized(t *testing.T) {
 		t.Fatalf("unexpected audio-stream start command build: %s, %s", name, args)
 	}
 }
-

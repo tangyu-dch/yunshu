@@ -610,7 +610,7 @@ func (s *Server) routes() {
 		if s.callRuntime.WSHub != nil {
 			redisClient = s.callRuntime.WSHub.Client
 		}
-		httpcti.RegisterRoutes(s.gin, s.callRuntime.APICall, s.callRuntime.Selector, s.callRuntime.BatchScheduler, s.callRuntime.Candidates, s.callRuntime.Marker, s.callRuntime.WSHub, s.callRuntime.DB, redisClient, s.callRuntime.FSPool)
+		httpcti.RegisterRoutes(s.gin, s.callRuntime.APICall, s.callRuntime.Selector, s.callRuntime.BatchScheduler, s.callRuntime.Candidates, s.callRuntime.Marker, s.callRuntime.WSHub, s.callRuntime.DB, redisClient, s.callRuntime.FSPool, s.callRuntime.CallControl)
 		httpesl.RegisterRoutes(s.gin, s.callRuntime.Originate, s.callRuntime.Command, s.callRuntime.Session, s.callRuntime.GatewaySync, s.callRuntime.FSNodes, s.callRuntime.FSPool, s.callRuntime.DB)
 	case contracts.ServiceConsole:
 		httpoperate.RegisterAuthRoutes(s.gin, s.console.Auth)

@@ -92,3 +92,17 @@ type CallControlReq struct {
 	CustomCause string         `json:"customCause,omitempty"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
+
+// CallEavesdropReq 是 CTI 监听/强插接口的外部请求
+type CallEavesdropReq struct {
+	UserID       int    `json:"userId" binding:"required"`
+	TargetCallID string `json:"targetCallId" binding:"required"`
+	TargetUUID   string `json:"targetUuid,omitempty"`    // 可选，如果为空则由系统匹配活跃通道
+	Mode         string `json:"mode" binding:"required"` // spy, whisper, barge
+}
+
+// CallHangupReq 是 CTI 强拆接口的外部请求
+type CallHangupReq struct {
+	CallID string `json:"callId" binding:"required"`
+	UUID   string `json:"uuid,omitempty"` // 可选，为空则挂断整个呼叫的所有活跃通道
+}

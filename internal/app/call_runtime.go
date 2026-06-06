@@ -23,17 +23,17 @@ import (
 	"yunshu/internal/infra/events"
 	"yunshu/internal/infra/extensionstatus"
 	"yunshu/internal/infra/fsesl"
+	infrahttp "yunshu/internal/infra/http"
 	"yunshu/internal/infra/kamailioauth"
 	"yunshu/internal/infra/merchant"
 	redisinfra "yunshu/internal/infra/redis"
 	"yunshu/internal/infra/resource"
 	"yunshu/internal/infra/security"
 	selectioninfra "yunshu/internal/infra/selection"
+	"yunshu/internal/infra/storage"
 	"yunshu/internal/infra/system"
 	"yunshu/internal/infra/telephony"
 	wsinfra "yunshu/internal/infra/websocket"
-	infrahttp "yunshu/internal/infra/http"
-	"yunshu/internal/infra/storage"
 	"yunshu/pkg/idempotency"
 	"yunshu/pkg/workflow"
 
@@ -68,6 +68,7 @@ type CallRuntime struct {
 	WSHub          *wsinfra.Hub
 	WSHubCancel    context.CancelFunc
 	ASRServer      *wsinfra.ASRServer
+	CallControl    *cti.CallControlService
 }
 
 // NewCallRuntime 创建 cc-call 运行时依赖。
@@ -243,7 +244,9 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 		go startOfflineExtensionUnbinder(ctx, gormDB, redisClient, logger)
 	}
 
-	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub, WSHubCancel: wsCancel, ASRServer: asrServer}, nil
+	callControl := cti.NewCallControlService(session.Store, command, extensionResolver, logger)
+
+	return &CallRuntime{APICall: apiCall, BatchScheduler: batchScheduler, Originate: originate, Command: command, Session: session, GatewaySync: gatewaySync, Events: bus, CTIFlow: ctiRunner, ESLFlow: eslRunner, Executor: executor, FSPool: pool, FSNodes: nodeRegistry, DB: gormDB, Selector: runtimeSelector, Candidates: candidateSource, Marker: candidateMarker, WSHub: wsHub, WSHubCancel: wsCancel, ASRServer: asrServer, CallControl: callControl}, nil
 }
 
 // openRuntimeDB 打开数据库连接。

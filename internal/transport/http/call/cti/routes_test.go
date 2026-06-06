@@ -22,7 +22,7 @@ func TestSelectNumberRoute(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	body := []byte(`{"callId":"call-1","merchantId":"m1","candidates":[{"phone":"1001","gatewayId":"gw-1","available":true,"riskAllowed":true,"concurrency":1}]}`)
 	req := httptest.NewRequest(http.MethodPost, "/cti/select-number", bytes.NewReader(body))
@@ -46,7 +46,7 @@ func TestSelectNumberRouteBusinessFailure(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/select-number", bytes.NewReader([]byte(`{"callId":"call-1","merchantId":"m1"}`)))
 	rec := httptest.NewRecorder()
@@ -69,7 +69,7 @@ func TestCompatibleAPICallRoute(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/callTask/call?callId=call-1", bytes.NewReader([]byte(`{"userId":7,"callee":"13800000000","extra":"{}"}`)))
 	rec := httptest.NewRecorder()
@@ -92,7 +92,7 @@ func TestCompatibleSelectRuleRoute(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/select/number/rule?callId=call-1", bytes.NewReader([]byte(`{"merchantId":1,"callee":"13800000000","userId":7}`)))
 	rec := httptest.NewRecorder()
@@ -115,7 +115,7 @@ func TestCompatibleSelectRuleRouteUsesCandidateSource(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, testCandidateSource{}, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, testCandidateSource{}, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/select/number/rule?callId=call-1", bytes.NewReader([]byte(`{"merchantId":1,"callee":"13800000000","userId":7}`)))
 	rec := httptest.NewRecorder()
@@ -141,7 +141,7 @@ func TestSelectNumberRouteUsesCandidateSource(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, testCandidateSource{}, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, testCandidateSource{}, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/select-number", bytes.NewReader([]byte(`{"callId":"call-1","merchantId":"m1","userId":7}`)))
 	rec := httptest.NewRecorder()
@@ -173,7 +173,7 @@ func TestBatchDispatchRoute(t *testing.T) {
 		ESL:        eslClient,
 		NewCallID:  func(cti.BatchTaskSnapshot, cti.BatchTelSnapshot) string { return "batch-call-1" },
 	}
-	RegisterRoutes(router, testAPICallService(), nil, scheduler, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, scheduler, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/cti/batch-call-task/dispatch", bytes.NewReader([]byte(`{"taskId":10}`)))
 	rec := httptest.NewRecorder()
@@ -196,7 +196,7 @@ func TestWebSocketRouteDisabled(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/cti/ws", nil)
 	rec := httptest.NewRecorder()
@@ -212,7 +212,7 @@ func TestKamailioRegisterStatusWebhook(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 1. 测试参数缺失
 	body1 := []byte(`{"extension":"100001"}`)
@@ -240,7 +240,7 @@ func TestKamailioCompatibilityAuthWebhooks(t *testing.T) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil)
+	RegisterRoutes(router, testAPICallService(), nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// 1. Test /cti/kamailio/auth
 	bodyAuth := []byte(`{"username":"1001","ip":"10.0.0.5"}`)

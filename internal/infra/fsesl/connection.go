@@ -361,7 +361,6 @@ func (p *ConnectionPool) SnapshotNodes() []NodeConfig {
 	return nodes
 }
 
-
 func (p *ConnectionPool) claimLease(ctx context.Context, fsAddr string) error {
 	if p.LeaseRegistry == nil {
 		return nil
