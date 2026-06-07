@@ -1,0 +1,58 @@
+# 云枢 FreeSWITCH 开发测试专用
+# 包含 mod_audio_stream 模块
+
+version: '3.8'
+
+services:
+  # FreeSWITCH：支持 AI 音频流推流
+  freeswitch:
+    build:
+      context: ./docker/freeswitch
+      dockerfile: Dockerfile
+    image: yunshu/freeswitch:latest
+    container_name: cc-freeswitch-dev
+    restart: unless-stopped
+    network_mode: host  # 推荐使用主机网络，避免 NAT 问题
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - IPC_LOCK
+    environment:
+      - ESL_PASSWORD=ClueCon
+    volumes:
+      # 配置文件挂载
+      - ./docker/freeswitch/modules.conf.xml:/etc/freeswitch/modules.conf.xml:ro
+      - ./docker/freeswitch/audio_stream.conf.xml:/etc/freeswitch/autoload_configs/audio_stream.conf.xml:ro
+      # 录音文件挂载
+      - fs_recordings:/recordings
+    healthcheck:
+      test: ["CMD", "fs_cli", "-x", "show channels 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Qdrant：向量数据库（RAG）
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: cc-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__LOG_LEVEL=INFO
+
+volumes:
+  fs_recordings:
+    name: cc_fs_recordings
+  qdrant_data:
+    name: cc_qdrant_data
+
+networks:
+  callcenter_net:
+    name: callcenter_net
+    driver: bridge

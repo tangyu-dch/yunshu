@@ -92,6 +92,10 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	// 注入基础设施层的 HTTP 客户端与 TTS 缓存存储实现，解耦 domain 依赖
 	callflow.SetHTTPClient(infrahttp.NewDefaultHTTPClient(15 * time.Second))
 	callflow.SetTTSCacheStore(storage.NewLocalTTSCacheStore(""))
+	if cfg.FreeSwitch.KamailioAddr != "" {
+		esl.SetDefaultKamailioAddr(cfg.FreeSwitch.KamailioAddr)
+		cti.DefaultKamailioAddr = cfg.FreeSwitch.KamailioAddr
+	}
 	if bus == nil {
 		bus = events.NewMemoryBus(logger)
 	}

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  呼入 - SIPp UAC 场景 (模拟客户通过 DID 呼入)
+
+  使用方法:
+    sipp -sf inbound_uac.xml \
+         -s 01088886666 \            # 呼入 DID 号码
+         127.0.0.1:5080              # FreeSWITCH 外部 Profile
+
+  验证要点:
+    1. 向 DID 发起 INVITE
+    2. 收到 100 Trying + 180 Ringing (等待坐席接听)
+    3. 收到 200 OK (坐席接听)
+    4. 发送 ACK 进入通话
+    5. 客户挂机发送 BYE
+-->
+<scenario name="inbound_uac">
+  <!-- 发起 INVITE -->
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: [cseq] INVITE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: yunshu-inbound-test
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 8 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 100 Trying -->
+  <recv response="100" optional="true" />
+
+  <!-- 180 Ringing (等待坐席) -->
+  <recv response="180" optional="true" />
+
+  <!-- 183 Session Progress -->
+  <recv response="183" optional="true" />
+
+  <!-- 200 OK (坐席接听) -->
+  <recv response="200" rtd="true" />
+
+  <!-- ACK -->
+  <send>
+    <![CDATA[
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] ACK
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 通话保持 5 秒 -->
+  <pause milliseconds="5000" />
+
+  <!-- 客户挂机 -->
+  <send retrans="500">
+    <![CDATA[
+      BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] BYE
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="200" />
+
+  <timewait milliseconds="1000" />
+</scenario>

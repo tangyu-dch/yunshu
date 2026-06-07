@@ -1,0 +1,9 @@
+
+&lt;configuration name="audio_stream.conf" description="音频流配置"&gt;
+  &lt;settings&gt;
+    &lt;param name="debug" value="true"/&gt;
+    &lt;param name="log_level" value="info"/&gt;
+    &lt;param name="buffer_size" value="4096"/&gt;
+    &lt;param name="max_connections" value="100"/&gt;
+  &lt;/settings&gt;
+&lt;/configuration&gt;

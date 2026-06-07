@@ -125,7 +125,7 @@ func (s *KnowledgeBaseManagementService) SaveDocument(ctx context.Context, doc K
 	} else {
 		// 查找现有文档
 		docs := s.documents[doc.KBID]
-		for i, d := range docs {
+		for _, d := range docs {
 			if d.ID == doc.ID {
 				doc.CreatedAt = d.CreatedAt
 				break

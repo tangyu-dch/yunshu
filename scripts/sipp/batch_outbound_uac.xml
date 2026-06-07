@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  批量外呼 - SIPp UAC 场景 (模拟 FreeSWITCH 向客户发起 INVITE)
+
+  使用方法:
+    sipp -sf batch_outbound_uac.xml \
+         -s 13800001111 \           # 被叫号码（客户）
+         -rsa 127.0.0.1:5080 \      # FreeSWITCH 外呼 SIP Profile
+         -r 1 -rp 1000 \            # 每秒 1 呼
+         -m 10 \                    # 共 10 呼
+         127.0.0.1:5080
+
+  验证要点:
+    1. INVITE 发出后收到 100 Trying
+    2. 收到 183 Session Progress (带早期媒体)
+    3. 收到 200 OK
+    4. 发送 ACK 后进入通话
+    5. 收到 BYE 后回复 200 OK
+-->
+<scenario name="batch_outbound_uac">
+  <!-- 发起 INVITE -->
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:01012345678@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: [cseq] INVITE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: yunshu-batch-outbound-test
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 8 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 期望收到 100 Trying -->
+  <recv response="100" optional="true" />
+
+  <!-- 期望收到 183 Session Progress (早期媒体) -->
+  <recv response="183" optional="true" />
+
+  <!-- 期望收到 200 OK -->
+  <recv response="200" rtd="true" />
+
+  <!-- 发送 ACK -->
+  <send>
+    <![CDATA[
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:01012345678@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] ACK
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 模拟通话保持 5 秒 -->
+  <pause milliseconds="5000" />
+
+  <!-- 收到 BYE (系统挂断) -->
+  <recv request="BYE" />
+
+  <!-- 回复 200 OK -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 呼叫结束定义 -->
+  <timewait milliseconds="1000" />
+
+  <!-- 异常路径：收到 CANCEL -->
+  <recv request="CANCEL" optional="true" />
+  <send optional="true">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+  <send optional="true">
+    <![CDATA[
+      SIP/2.0 487 Request Terminated
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      CSeq: [cseq] INVITE
+      Content-Length: 0
+    ]]>
+  </send>
+</scenario>

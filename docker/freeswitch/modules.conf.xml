@@ -1,0 +1,36 @@
+# 云枢 FreeSWITCH 模块配置
+# 自动加载的模块列表
+
+# 核心模块（始终加载）
+load module mod_commands
+load module mod_event_socket
+
+# SIP 模块
+load module mod_sofia
+
+# 媒体处理
+load module mod_sndfile
+load module mod_shout
+load module mod_speex
+load module mod_opus
+load module mod_g729
+
+# 音频流处理（AI 功能核心）
+load module mod_audio_stream
+
+# IVR 和语音
+load module mod_tone_stream
+load module mod_local_stream
+
+# 录音功能
+load module mod_file_string
+load module mod_native_file
+
+# DTMF 处理
+load module mod_dtmf
+
+# RTP 和媒体代理
+load module mod_rtp
+
+# 事件系统
+# mod_event_socket 已在顶部加载

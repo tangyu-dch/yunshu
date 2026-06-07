@@ -10,9 +10,16 @@ import (
 	"yunshu/internal/contracts"
 )
 
-const (
+var (
 	defaultKamailioDomain = "127.0.0.1:5060"
 )
+
+// SetDefaultKamailioAddr 设置 Kamailio SIP 代理地址，应在服务启动时从配置注入。
+func SetDefaultKamailioAddr(addr string) {
+	if addr != "" {
+		defaultKamailioDomain = addr
+	}
+}
 
 // OriginatePlan 是业务起呼命令到 FreeSWITCH originate 命令之间的中间态。
 //

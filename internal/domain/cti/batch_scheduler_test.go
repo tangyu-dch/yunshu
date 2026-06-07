@@ -69,7 +69,7 @@ func (r *fakeBatchRepository) GetBatchTaskStats(context.Context, int) (BatchTask
 	return BatchTaskStats{TaskID: r.task.ID, MerchantID: r.task.MerchantID, UserID: r.task.UserID, TotalCount: 1, CalledCount: 1, CompletedCount: 1}, nil
 }
 
-func (r *fakeBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int) (int, string, error) {
+func (r *fakeBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int, int) (int, string, error) {
 	return 0, "", nil
 }
 

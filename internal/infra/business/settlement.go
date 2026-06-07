@@ -277,7 +277,7 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 			before, after, err := s.debitBalanceOnlyDB(ctx, merchantID, amount)
 			if err != nil {
 				// DB 扣款失败，补偿 Redis：将扣减的金额加回
-				if compErr := s.BalanceCache.AtomicDebit(ctx, merchantID, -amount, billing.CreditLimit); compErr != nil {
+				if _, compErr := s.BalanceCache.AtomicDebit(ctx, merchantID, -amount, billing.CreditLimit); compErr != nil {
 					s.Logger.Error("Redis 扣款补偿回滚失败，需人工介入", "merchantId", merchantID, "amount", amount, "compensateError", compErr.Error(), "originalError", err.Error())
 				} else {
 					s.Logger.Warn("Redis 扣款已补偿回滚", "merchantId", merchantID, "amount", amount, "originalError", err.Error())

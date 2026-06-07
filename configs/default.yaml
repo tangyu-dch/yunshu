@@ -12,6 +12,9 @@ console:
 freeswitch:
     commandTimeout: 5s
     eventLeaseTTL: 30s
+    kamailioAddr: "127.0.0.1:5060"
+    kamailioWSPort: 5066
+    sipDomain: "sip.yunshu.local"
     nodes: []
     reconnect:
         interval: 5s
@@ -68,3 +71,30 @@ worker:
         secret: ""
         timeout: 5s
         url: ""
+        oss:
+            endpoint: ""
+            accessKey: ""
+            secretKey: ""
+            bucket: "recordings"
+            baseDir: "/recordings"
+            cdnBaseURL: ""
+# AI/RAG 功能配置
+ai:
+    # 是否启用 AI 功能
+    enabled: false
+    # 嵌入模型配置
+    embedder:
+        provider: "openai"
+        apiKey: ""
+        endpoint: ""
+        model: "text-embedding-3-small"
+    # 向量数据库配置
+    vectorDB:
+        type: "memory"
+        address: "http://127.0.0.1:6333"
+        collection: "yunshu_knowledge"
+    # RAG 检索增强生成配置
+    rag:
+        topK: 5
+        scoreThreshold: 0.7
+        maxTokens: 4000

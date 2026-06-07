@@ -69,7 +69,7 @@ services:
   # 4. FreeSWITCH 媒体节点服务：处理具体呼叫路由与 IVR 音频逻辑
   # =========================================================================
   freeswitch:
-    image: bytedesk/freeswitch:latest
+    image: yunshu/freeswitch:latest
     container_name: cc-freeswitch
     restart: always
     ports:

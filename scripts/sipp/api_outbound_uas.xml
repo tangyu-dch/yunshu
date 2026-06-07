@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  API 外呼 - SIPp UAS 场景 (模拟坐席 SIP 电话)
+
+  使用方法 (坐席侧):
+    sipp -sf api_outbound_uas.xml \
+         -s 2001 \                    # 坐席分机号
+         -p 6060 \                    # 本地 SIP 端口
+         -rsa 127.0.0.1:5060 \        # Kamailio 代理
+         127.0.0.1:5060
+
+  验证要点:
+    1. 收到系统 INVITE (坐席腿)
+    2. 回复 180 Ringing
+    3. 回复 200 OK (摘机)
+    4. 收到 ACK
+    5. 进入通话
+    6. 发送 BYE (坐席挂机) 或收到 BYE (系统挂机)
+-->
+<scenario name="api_outbound_uas">
+  <!-- 收到 INVITE -->
+  <recv request="INVITE" />
+
+  <!-- 回复 100 Trying -->
+  <send>
+    <![CDATA[
+      SIP/2.0 100 Trying
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 模拟振铃 1 秒 -->
+  <pause milliseconds="1000" />
+
+  <!-- 回复 180 Ringing -->
+  <send>
+    <![CDATA[
+      SIP/2.0 180 Ringing
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 模拟摘机延迟 -->
+  <pause milliseconds="500" />
+
+  <!-- 回复 200 OK (摘机) -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 8 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 收到 ACK -->
+  <recv request="ACK" />
+
+  <!-- 模拟通话 5 秒 -->
+  <pause milliseconds="5000" />
+
+  <!-- 坐席主动挂机 -->
+  <send retrans="500">
+    <![CDATA[
+      BYE sip:[service]@[local_ip]:[local_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: [service] <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
+      To: sipp <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] BYE
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 收到 200 OK -->
+  <recv response="200" />
+
+  <timewait milliseconds="1000" />
+</scenario>

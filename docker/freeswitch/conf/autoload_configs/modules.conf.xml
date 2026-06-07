@@ -1,0 +1,177 @@
+<configuration name="modules.conf" description="Modules">
+  <modules>
+    <!-- Loggers (I'd load these first) -->
+    <load module="mod_console" />
+    <!-- <load module="mod_graylog2"/> -->
+    <load module="mod_logfile" />
+    <!-- <load module="mod_syslog"/> -->
+    <!--<load module="mod_yaml"/>-->
+
+    <!-- Multi-Faceted -->
+    <!-- mod_enum is a dialplan interface, an application interface and an api command interface -->
+    <load module="mod_enum" />
+
+    <!-- XML Interfaces -->
+    <!-- <load module="mod_xml_rpc"/> -->
+    <load module="mod_xml_curl" />
+    <!-- <load module="mod_xml_cdr"/> -->
+    <!-- <load module="mod_xml_radius"/> -->
+    <!-- <load module="mod_xml_scgi"/> -->
+
+    <!-- Event Handlers -->
+    <!-- <load module="mod_amqp"/> -->
+    <load module="mod_cdr_csv" />
+    <!-- <load module="mod_cdr_sqlite"/> -->
+    <!-- <load module="mod_event_multicast"/> -->
+    <load module="mod_event_socket" />
+    <!-- <load module="mod_event_zmq"/> -->
+    <!-- <load module="mod_zeroconf"/> -->
+    <!-- <load module="mod_erlang_event"/> -->
+    <!-- <load module="mod_smpp"/> -->
+    <!-- <load module="mod_snmp"/> -->
+    <!-- ODBC CDR - 通过 ODBC 将 CDR 记录写入数据库 -->
+    <load module="mod_odbc_cdr" />
+    <!-- JSON CDR - 现代化的 JSON 格式 CDR 记录⭐⭐⭐⭐ -->
+    <!-- <load module="mod_json_cdr" /> -->
+    <!-- Fail2ban - 安全防护，防止暴力破解 -->
+    <!-- <load module="mod_fail2ban" /> -->
+
+    <!-- Directory Interfaces -->
+    <!-- <load module="mod_ldap"/> -->
+
+    <!-- Endpoints -->
+    <!-- <load module="mod_dingaling"/> -->
+    <!-- <load module="mod_portaudio"/> -->
+    <!-- <load module="mod_alsa"/> -->
+    <load module="mod_sofia" />
+    <load module="mod_loopback" />
+    <!-- <load module="mod_woomera"/> -->
+    <!-- <load module="mod_freetdm"/> -->
+    <!-- <load module="mod_unicall"/> -->
+    <!-- <load module="mod_skinny"/> -->
+    <!-- <load module="mod_khomp"/>   -->
+    <load module="mod_rtc" />
+    <!-- <load module="mod_rtmp"/>   -->
+    <!-- <load module="mod_verto"/> -->
+    <!-- mod_verto 已禁用，WebRTC 改用 SIP.js + mod_sofia (ws/wss) 方式 -->
+
+    <!-- Applications -->
+    <!-- <load module="mod_signalwire"/> -->
+    <load module="mod_commands" />
+    <load module="mod_audio_stream" />
+    <load module="mod_conference" />
+    <!-- 呼叫中心核心模块 -->
+    <!-- <load module="mod_callcenter" /> -->
+    <!-- 黑名单功能 -->
+    <!-- <load module="mod_blacklist" /> -->
+    <!-- cURL HTTP 请求功能 -->
+    <!-- <load module="mod_curl" /> -->
+    <load module="mod_db" />
+    <!-- <load module="mod_mariadb"/> -->
+    <load module="mod_dptools" />
+    <load module="mod_expr" />
+    <load module="mod_fifo" />
+    <load module="mod_hash" />
+    <!-- Redis 客户端支持 -->
+    <!-- <load module="mod_hiredis" /> -->
+    <!-- <load module="mod_redis" /> -->
+    <!--<load module="mod_mongo"/> -->
+    <load module="mod_voicemail" />
+    <!-- 呼叫分配器 - 用于负载均衡和路由 -->
+    <!-- <load module="mod_distributor" /> -->
+    <!-- 最低成本路由 - 用于智能路由选择 -->
+    <!-- <load module="mod_lcr" /> -->
+    <!-- 来电显示查询 - 号码归属地查询 -->
+    <!-- <load module="mod_cidlookup" /> -->
+    <!-- 计费模块 - 实时计费扣费 -->
+    <!-- <load module="mod_nibblebill" /> -->
+    <!-- 简化路由查询模块（数据库路由） -->
+    <!-- <load module="mod_easyroute"/>  -->
+    <load module="mod_esf" />
+    <load module="mod_fsv" />
+    <!--<load module="mod_cluechoo"/>-->
+    <load module="mod_valet_parking" />
+    <!--<load module="mod_fsk"/>-->
+    <!-- 监听/窃听/耳语模块（呼叫中心质检必备） -->
+    <!-- <load module="mod_spy" />  -->
+    <!-- 强烈推荐的呼叫中心模块 -->
+     <!-- 答录机检测（外呼必备）⭐⭐⭐⭐⭐ -->
+    <!-- <load module="mod_avmd" />  -->
+    <!-- 企业通讯录（座席效率）⭐⭐⭐⭐ -->
+    <!-- <load module="mod_directory" />  -->
+    <!-- 增强型语音邮箱（完整功能）⭐⭐⭐⭐ -->
+    <!-- <load module="mod_voicemail_ivr" />  -->
+    <!--<load module="mod_sms"/>-->
+    <!--<load module="mod_sms_flowroute"/>-->
+    <!--<load module="mod_smpp"/>-->
+    <!--<load module="mod_random"/>-->
+    <load module="mod_httapi" />
+    <!--<load module="mod_translate"/>-->
+
+    <!-- SNOM Module -->
+    <!--<load module="mod_snom"/>-->
+
+    <!-- This one only works on Linux for now -->
+    <!--<load module="mod_ladspa"/>-->
+
+    <!-- Dialplan Interfaces -->
+    <!-- <load module="mod_dialplan_directory"/> -->
+    <load module="mod_dialplan_xml" />
+    <load module="mod_dialplan_asterisk" />
+
+    <!-- Codec Interfaces -->
+    <load module="mod_spandsp" />
+    <load module="mod_g723_1" />
+    <load module="mod_g729" />
+    <load module="mod_amr" />
+    <!--<load module="mod_ilbc"/>-->
+    <!--<load module="mod_h26x"/>-->
+    <load module="mod_b64" />
+    <!--<load module="mod_siren"/>-->
+    <!--<load module="mod_isac"/>-->
+    <load module="mod_opus" />
+
+    <!-- File Format Interfaces -->
+    <load module="mod_av" />
+    <load module="mod_sndfile" />
+    <load module="mod_native_file" />
+    <!--<load module="mod_opusfile"/>-->
+    <load module="mod_png" />
+    <!-- <load module="mod_shell_stream"/> -->
+    <!--For icecast/mp3 streams/files-->
+    <!--<load module="mod_shout"/>-->
+    <!--For
+    local streams (play all the files in a directory)-->
+    <load module="mod_local_stream" />
+    <load module="mod_tone_stream" />
+
+    <!-- Timers -->
+    <!-- <load module="mod_timerfd"/> -->
+    <!-- <load module="mod_posix_timer"/> -->
+
+    <!-- Languages -->
+    <!-- <load module="mod_v8"/> -->
+    <!-- <load module="mod_perl"/> -->
+    <!-- <load module="mod_python"/> -->
+    <!-- Python3 语言支持 - 用于编写 Python 脚本 -->
+    <!-- <load module="mod_python3" /> -->
+    <!-- Java 语言支持 - 用于编写 Java 应用 -->
+    <load module="mod_java" />
+    <load module="mod_lua" />
+
+    <!-- ASR /TTS -->
+  <load module="mod_unimrcp" />
+    <!-- <load module="mod_flite"/> -->
+    <!-- <load module="mod_pocketsphinx"/> -->
+    <!-- <load module="mod_cepstral"/> -->
+    <!-- <load module="mod_tts_commandline"/> -->
+    <!-- <load module="mod_rss"/> -->
+
+    <!-- Say -->
+    <load module="mod_say_en" />
+    <!-- <load module="mod_say_ru"/> -->
+    <load module="mod_say_zh" />
+    <!-- <load module="mod_say_sv"/> -->
+
+  </modules>
+</configuration>load module mod_audio_stream

@@ -244,7 +244,7 @@ func (s *CustomerProfileService) GetWorkflowByID(id uint64) (*ProfileWorkflow, e
 // ExecuteWorkflow 执行画像编排流程
 func (s *CustomerProfileService) ExecuteWorkflow(workflowID uint64, customerIDs []uint64, merchantID uint64) error {
 	// 获取流程信息
-	workflow, err := s.GetWorkflowByID(workflowID)
+	_, err := s.GetWorkflowByID(workflowID)
 	if err != nil {
 		return err
 	}

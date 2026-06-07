@@ -497,24 +497,44 @@ func (in *Installer) writeComposeFile(params SetupParams) error {
       - redis
 
   # =========================================================================
-  # 4. FreeSWITCH 媒体节点服务：处理具体呼叫路由与 IVR 音频逻辑
+  # 4. FreeSWITCH 媒体节点服务：处理具体呼叫路由与 IVR 音频逻辑（AI 音频流增强版）
   # =========================================================================
   freeswitch:
-    image: bytedesk/freeswitch:latest
+    image: yunshu/freeswitch:latest
     container_name: cc-freeswitch
     restart: always
-    ports:
-      - "5080:5080/udp"
-      - "8021:8021"
+    network_mode: host
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+      - IPC_LOCK
     environment:
       - ESL_PASSWORD=ClueCon
-    networks:
-      - callcenter_net
+    volumes:
+      - fs_recordings:/recordings
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # =========================================================================
+  # 4.5. Qdrant 向量数据库服务：RAG 检索增强生成支持
+  # =========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: cc-qdrant
+    restart: always
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - callcenter_net
+    environment:
+      - QDRANT__SERVICE__HTTP_PORT=6333
+      - QDRANT__LOG_LEVEL=INFO
 
   # =========================================================================
   # 5. Kamailio 信令网关与注册服务：处理坐席注册、动态均衡分发与 NAT 穿透
@@ -570,6 +590,10 @@ volumes:
     name: cc_mysql_data
   redis_data:
     name: cc_redis_data
+  fs_recordings:
+    name: cc_fs_recordings
+  qdrant_data:
+    name: cc_qdrant_data
 `
 
 	content := fmt.Sprintf(composeTmpl,
@@ -693,6 +717,10 @@ func (in *Installer) InitializeDatabase(ctx context.Context, params SetupParams)
 		&business.MessageOutboxModel{},
 		&resource.DialpadVersionModel{},
 		&resource.DepartmentModel{},
+		&operatedomain.CustomerProfile{},
+		&operatedomain.CustomerProfileTag{},
+		&operatedomain.ProfileWorkflow{},
+		&operatedomain.ProfileWorkflowExecution{},
 	)
 	if err != nil {
 		in.logger.Error("GORM 数据库自动迁移失败", "error", err.Error())
@@ -803,6 +831,44 @@ func (in *Installer) InitializeDatabase(ctx context.Context, params SetupParams)
 		in.logger.Info("默认 RTPEngine 媒体节点种子数据播种成功！", "socket", rtpSeed.RtpengineSock, "setId", rtpSeed.SetID)
 	}
 
+	// 动态填充客户画像演示数据种子
+	var profileCount int64
+	if err := gormDB.Model(&operatedomain.CustomerProfile{}).Where("merchant_id = ?", merchantID).Count(&profileCount).Error; err == nil && profileCount == 0 {
+		in.logger.Info("检测到客户画像表为空，开始自动播种客户画像演示数据...")
+		
+		// 1. 先播种标签数据
+		tagSeeds := GetCustomerProfileTagSeeds(uint64(merchantID))
+		for _, tag := range tagSeeds {
+			if err := gormDB.WithContext(ctx).Create(&tag).Error; err != nil {
+				in.logger.Warn("播种客户标签失败", "error", err.Error(), "tagName", tag.Name)
+			}
+		}
+		
+		// 2. 播种客户画像数据
+		profileSeeds := GetCustomerProfileSeeds(uint64(merchantID))
+		profileService := operatedomain.NewCustomerProfileService(gormDB)
+		for _, profile := range profileSeeds {
+			if err := profileService.CreateProfile(&profile); err != nil {
+				in.logger.Warn("播种客户画像失败", "error", err.Error(), "phone", profile.PhoneNumber)
+				continue
+			}
+			// 为每个画像生成向量（使用我们的mock方法）
+			if err := profileService.UpdateProfileEmbedding(&profile); err != nil {
+				in.logger.Warn("生成客户画像向量失败", "error", err.Error(), "profileId", profile.ID)
+			}
+		}
+		
+		// 3. 播种画像编排流程数据
+		workflowSeeds := GetProfileWorkflowSeeds(uint64(merchantID))
+		for _, workflow := range workflowSeeds {
+			if err := gormDB.WithContext(ctx).Create(&workflow).Error; err != nil {
+				in.logger.Warn("播种画像编排流程失败", "error", err.Error(), "workflowName", workflow.Name)
+			}
+		}
+		
+		in.logger.Info("客户画像演示数据种子播种成功！", "profiles", len(profileSeeds), "tags", len(tagSeeds), "workflows", len(workflowSeeds))
+	}
+
 	in.logger.Info("一键数据库迁移及种子数据填充全部圆满完成！")
 	return nil
 }
@@ -866,4 +932,249 @@ func loadConfigFromFile(path string) (installerConfig, error) {
 		return installerConfig{}, err
 	}
 	return cfg, nil
+}
+
+// GetCustomerProfileSeeds 获取客户画像演示数据种子
+func GetCustomerProfileSeeds(merchantID uint64) []operatedomain.CustomerProfile {
+	now := time.Now()
+	tags1, _ := json.Marshal([]string{"高价值", "潜在客户", "北京地区"})
+	tags2, _ := json.Marshal([]string{"普通客户", "回访"})
+	tags3, _ := json.Marshal([]string{"重要客户", "合作意向高", "上海地区"})
+	tags4, _ := json.Marshal([]string{"新客户", "首次联系"})
+	tags5, _ := json.Marshal([]string{"老客户", "多次购买", "广州地区"})
+
+	return []operatedomain.CustomerProfile{
+		{
+			ID:              1,
+			PhoneNumber:     "13800138001",
+			MerchantID:      merchantID,
+			Name:            "张三",
+			Gender:          "male",
+			Age:             35,
+			Province:        "北京",
+			City:            "北京市",
+			Tags:            string(tags1),
+			CustomFields:    map[string]interface{}{"company": "科技公司", "position": "技术总监"},
+			Source:          "网站咨询",
+			FirstContact:    &now,
+			LastContact:     &now,
+			TotalCalls:      15,
+			ConnectedCalls:  12,
+			AvgDuration:     180,
+			Status:          "active",
+			ProfileSummary:  "客户姓名：张三，手机号：13800138001，性别：男，年龄：35岁，省份：北京，城市：北京市，来源：网站咨询，总呼叫次数：15次，接通次数：12次，平均通话时长：180秒，标签：高价值、潜在客户、北京地区，自定义信息：company=科技公司、position=技术总监",
+		},
+		{
+			ID:              2,
+			PhoneNumber:     "13800138002",
+			MerchantID:      merchantID,
+			Name:            "李四",
+			Gender:          "female",
+			Age:             28,
+			Province:        "上海",
+			City:            "上海市",
+			Tags:            string(tags2),
+			CustomFields:    map[string]interface{}{"company": "教育机构", "position": "市场经理"},
+			Source:          "朋友推荐",
+			FirstContact:    &now,
+			LastContact:     &now,
+			TotalCalls:      8,
+			ConnectedCalls:  6,
+			AvgDuration:     120,
+			Status:          "active",
+			ProfileSummary:  "客户姓名：李四，手机号：13800138002，性别：女，年龄：28岁，省份：上海，城市：上海市，来源：朋友推荐，总呼叫次数：8次，接通次数：6次，平均通话时长：120秒，标签：普通客户、回访，自定义信息：company=教育机构、position=市场经理",
+		},
+		{
+			ID:              3,
+			PhoneNumber:     "13800138003",
+			MerchantID:      merchantID,
+			Name:            "王五",
+			Gender:          "male",
+			Age:             42,
+			Province:        "上海",
+			City:            "上海市",
+			Tags:            string(tags3),
+			CustomFields:    map[string]interface{}{"company": "金融企业", "position": "副总经理"},
+			Source:          "展会",
+			FirstContact:    &now,
+			LastContact:     &now,
+			TotalCalls:      22,
+			ConnectedCalls:  20,
+			AvgDuration:     240,
+			Status:          "active",
+			ProfileSummary:  "客户姓名：王五，手机号：13800138003，性别：男，年龄：42岁，省份：上海，城市：上海市，来源：展会，总呼叫次数：22次，接通次数：20次，平均通话时长：240秒，标签：重要客户、合作意向高、上海地区，自定义信息：company=金融企业、position=副总经理",
+		},
+		{
+			ID:              4,
+			PhoneNumber:     "13800138004",
+			MerchantID:      merchantID,
+			Name:            "赵六",
+			Gender:          "female",
+			Age:             30,
+			Province:        "广东",
+			City:            "广州市",
+			Tags:            string(tags4),
+			CustomFields:    map[string]interface{}{"company": "电商平台", "position": "运营主管"},
+			Source:          "广告投放",
+			FirstContact:    &now,
+			LastContact:     &now,
+			TotalCalls:      3,
+			ConnectedCalls:  2,
+			AvgDuration:     90,
+			Status:          "active",
+			ProfileSummary:  "客户姓名：赵六，手机号：13800138004，性别：女，年龄：30岁，省份：广东，城市：广州市，来源：广告投放，总呼叫次数：3次，接通次数：2次，平均通话时长：90秒，标签：新客户、首次联系，自定义信息：company=电商平台、position=运营主管",
+		},
+		{
+			ID:              5,
+			PhoneNumber:     "13800138005",
+			MerchantID:      merchantID,
+			Name:            "钱七",
+			Gender:          "male",
+			Age:             45,
+			Province:        "广东",
+			City:            "广州市",
+			Tags:            string(tags5),
+			CustomFields:    map[string]interface{}{"company": "制造工厂", "position": "厂长"},
+			Source:          "老客户介绍",
+			FirstContact:    &now,
+			LastContact:     &now,
+			TotalCalls:      35,
+			ConnectedCalls:  30,
+			AvgDuration:     300,
+			Status:          "active",
+			ProfileSummary:  "客户姓名：钱七，手机号：13800138005，性别：男，年龄：45岁，省份：广东，城市：广州市，来源：老客户介绍，总呼叫次数：35次，接通次数：30次，平均通话时长：300秒，标签：老客户、多次购买、广州地区，自定义信息：company=制造工厂、position=厂长",
+		},
+	}
+}
+
+// GetCustomerProfileTagSeeds 获取客户标签演示数据种子
+func GetCustomerProfileTagSeeds(merchantID uint64) []operatedomain.CustomerProfileTag {
+	return []operatedomain.CustomerProfileTag{
+		{
+			ID:          1,
+			MerchantID:  merchantID,
+			Name:        "高价值",
+			Color:       "#ff4d4f",
+			Description: "高价值客户标签",
+			Category:    "价值分类",
+			Enable:      true,
+		},
+		{
+			ID:          2,
+			MerchantID:  merchantID,
+			Name:        "潜在客户",
+			Color:       "#faad14",
+			Description: "有合作意向的客户",
+			Category:    "意向分类",
+			Enable:      true,
+		},
+		{
+			ID:          3,
+			MerchantID:  merchantID,
+			Name:        "重要客户",
+			Color:       "#52c41a",
+			Description: "重要的合作客户",
+			Category:    "价值分类",
+			Enable:      true,
+		},
+		{
+			ID:          4,
+			MerchantID:  merchantID,
+			Name:        "普通客户",
+			Color:       "#1890ff",
+			Description: "普通价值客户",
+			Category:    "价值分类",
+			Enable:      true,
+		},
+		{
+			ID:          5,
+			MerchantID:  merchantID,
+			Name:        "新客户",
+			Color:       "#13c2c2",
+			Description: "刚刚联系的新客户",
+			Category:    "客户阶段",
+			Enable:      true,
+		},
+		{
+			ID:          6,
+			MerchantID:  merchantID,
+			Name:        "老客户",
+			Color:       "#722ed1",
+			Description: "多次合作的老客户",
+			Category:    "客户阶段",
+			Enable:      true,
+		},
+		{
+			ID:          7,
+			MerchantID:  merchantID,
+			Name:        "北京地区",
+			Color:       "#eb2f96",
+			Description: "北京地区客户",
+			Category:    "地域分类",
+			Enable:      true,
+		},
+		{
+			ID:          8,
+			MerchantID:  merchantID,
+			Name:        "上海地区",
+			Color:       "#fa541c",
+			Description: "上海地区客户",
+			Category:    "地域分类",
+			Enable:      true,
+		},
+		{
+			ID:          9,
+			MerchantID:  merchantID,
+			Name:        "广州地区",
+			Color:       "#a0d911",
+			Description: "广州地区客户",
+			Category:    "地域分类",
+			Enable:      true,
+		},
+		{
+			ID:          10,
+			MerchantID:  merchantID,
+			Name:        "回访",
+			Color:       "#2f54eb",
+			Description: "需要回访的客户",
+			Category:    "操作分类",
+			Enable:      true,
+		},
+	}
+}
+
+// GetProfileWorkflowSeeds 获取画像编排流程演示数据种子
+func GetProfileWorkflowSeeds(merchantID uint64) []operatedomain.ProfileWorkflow {
+	config1, _ := json.Marshal(map[string]interface{}{
+		"steps": []map[string]interface{}{
+			{"name": "标签识别", "type": "tag_check", "tags": []string{"高价值"}},
+			{"name": "地域分析", "type": "location_analysis"},
+			{"name": "推荐策略", "type": "recommend", "content": "专属优惠方案"},
+		},
+	})
+	config2, _ := json.Marshal(map[string]interface{}{
+		"steps": []map[string]interface{}{
+			{"name": "新客户识别", "type": "tag_check", "tags": []string{"新客户"}},
+			{"name": "欢迎流程", "type": "welcome", "content": "欢迎加入我们！"},
+		},
+	})
+
+	return []operatedomain.ProfileWorkflow{
+		{
+			ID:          1,
+			MerchantID:  merchantID,
+			Name:        "高价值客户关怀流程",
+			Description: "针对高价值客户的专属关怀流程",
+			Config:      string(config1),
+			Status:      "active",
+		},
+		{
+			ID:          2,
+			MerchantID:  merchantID,
+			Name:        "新客户欢迎流程",
+			Description: "新客户首次联系后的欢迎流程",
+			Config:      string(config2),
+			Status:      "active",
+		},
+	}
 }

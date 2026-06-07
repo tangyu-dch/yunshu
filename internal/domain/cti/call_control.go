@@ -24,7 +24,10 @@ var (
 	ErrPermissionDenied  = errors.New("越权操作：通话或用户不属于发起商户")
 	ErrExtensionNotFound = errors.New("未找到绑定且启用的主管分机")
 	ErrNoActiveChannel   = errors.New("未找到可监听的活跃通道")
-)
+
+		// DefaultKamailioAddr 是 Kamailio SIP 代理地址，应在启动时从配置注入。
+		DefaultKamailioAddr = "127.0.0.1:5060"
+	)
 
 // ExtensionResolver 定义了反查坐席分机的接口能力，避免 Domain 直接依赖 DB 仓储实现。
 type ExtensionResolver interface {
@@ -188,7 +191,7 @@ func (s *CallControlService) Eavesdrop(ctx context.Context, merchantID int, req 
 	}
 
 	// 4. 组装 originate 多租户拨号串，Kamailio 默认 127.0.0.1:5060 转发路径
-	defaultKamailioDomain := "127.0.0.1:5060"
+	defaultKamailioDomain := DefaultKamailioAddr
 	domainOrGateway := defaultKamailioDomain
 	if ext.SipDomain != "" {
 		domainOrGateway = fmt.Sprintf("%s;fs_path=sip:%s", ext.SipDomain, defaultKamailioDomain)

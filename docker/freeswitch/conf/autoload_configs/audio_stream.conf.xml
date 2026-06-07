@@ -1,0 +1,9 @@
+<configuration name=\"audio_stream.conf\" description=\"Audio Stream Module Configuration\">
+  <settings>
+    <param name=\"debug\" value=\"true\"/>
+  </settings>
+</configuration>
+EOF
+# 3. 查看结果
+echo "=== modules.conf.xml ==="
+cat /usr/local/freeswitch/conf/autoload_configs/modules.conf.xml

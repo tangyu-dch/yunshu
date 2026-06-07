@@ -219,6 +219,9 @@ type WorkerBillingConfig struct {
 type FreeSwitchConfig struct {
 	EventLeaseTTL  time.Duration   `yaml:"eventLeaseTTL"`
 	CommandTimeout time.Duration   `yaml:"commandTimeout"`
+	KamailioAddr   string          `yaml:"kamailioAddr"`   // Kamailio SIP 代理地址
+	KamailioWSPort int             `yaml:"kamailioWSPort"` // Kamailio WebSocket 端口
+	SipDomain      string          `yaml:"sipDomain"`      // 默认 SIP 域名
 	Nodes          []FSNodeConfig  `yaml:"nodes"`
 	Reconnect      ReconnectConfig `yaml:"reconnect"`
 }

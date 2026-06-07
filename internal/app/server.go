@@ -93,6 +93,8 @@ type ConsoleRuntime struct {
 	AreaCode         operatedomain.AreaCodeRepository
 	License          *operatedomain.LicenseService
 	IPBlock          *operatedomain.IPBlockManagementService
+	KnowledgeBase    *operatedomain.KnowledgeBaseManagementService
+	ASRTTS           *operatedomain.ASRTTSManagementService
 	DB               *gorm.DB
 }
 
@@ -450,39 +452,46 @@ func NewConsoleRuntimeWithConfig(cfg config.Config, logger *slog.Logger) (*Conso
 		ipBlockService = operatedomain.NewIPBlockManagementService(system.NewMemoryIPBlockLogRepository(), nil, redisClient, logger)
 	}
 
-	return &ConsoleRuntime{
-		Auth:             authService,
-		RoutePermissions: routePermissionResolver,
-		Permissions:      permissionRepository,
-		Account:          &operatedomain.AccountManagementService{Repository: accountRepository, Logger: logger},
-		Channel:          &operatedomain.ChannelManagementService{Repository: channelRepository, Logger: logger},
-		Blacklist:        &operatedomain.BlacklistManagementService{Repository: blacklistRepository, Logger: logger},
-		FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Reloader: dispReloader, Logger: logger},
-		Merchant:         &operatedomain.MerchantManagementService{Repository: merchantRepository, ExtensionRepo: extensionRepository, Cache: authCacheInvalidator, Logger: logger},
-		Rate:             &operatedomain.RateManagementService{Repository: rateRepository, Logger: logger},
-		Whitelist:        &operatedomain.WhitelistManagementService{Repository: whitelistRepository, Logger: logger},
-		Billing:          &operatedomain.BillingManagementService{Repository: billingRepository, Logger: logger},
-		BatchTask:        &operatedomain.BatchTaskManagementService{Repository: batchTaskRepository, Logger: logger},
-		Department:       &operatedomain.DepartmentManagementService{Repository: departmentRepository, Logger: logger},
-		CallRecord:       callRecordService,
-		AIFlow:           aiFlowService,
-		AIConfig:         aiConfigService,
-		Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
-		Rtpengine:        rtpengineService,
-		Dispatcher:       dispatcherService,
-		Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, License: licenseService, Logger: logger},
-		Pool:             &operatedomain.PoolManagementService{Repository: poolRepository, Logger: logger},
-		PoolPhone:        &operatedomain.PoolPhoneManagementService{Repository: phoneRepository, Logger: logger},
-		PhoneGroup:       &operatedomain.PhoneGroupManagementService{Repository: phoneGroupRepository, Logger: logger},
-		SkillGroup:       &operatedomain.SkillGroupManagementService{Repository: skillGroupRepository, Logger: logger},
-		RiskControl:      &operatedomain.RiskControlManagementService{Repository: riskControlRepository, Logger: logger},
-		PhoneAttribution: &operatedomain.PhoneAttributionManagementService{Repository: phoneAttributionRepository, Logger: logger},
-		ProxyConfig:      proxyConfigService,
-		AreaCode:         areaCodeRepository,
-		License:          licenseService,
-		IPBlock:          ipBlockService,
-		DB:               gormDB,
-	}, nil
+	// 初始化知识库管理服务
+		knowledgeBaseService := operatedomain.NewKnowledgeBaseManagementService()
+		// 初始化ASR/TTS配置管理服务
+		asrttsService := operatedomain.NewASRTTSManagementService()
+
+		return &ConsoleRuntime{
+			Auth:             authService,
+			RoutePermissions: routePermissionResolver,
+			Permissions:      permissionRepository,
+			Account:          &operatedomain.AccountManagementService{Repository: accountRepository, Logger: logger},
+			Channel:          &operatedomain.ChannelManagementService{Repository: channelRepository, Logger: logger},
+			Blacklist:        &operatedomain.BlacklistManagementService{Repository: blacklistRepository, Logger: logger},
+			FreeSwitch:       &operatedomain.FreeSwitchManagementService{Registry: registry, Reloader: dispReloader, Logger: logger},
+			Merchant:         &operatedomain.MerchantManagementService{Repository: merchantRepository, ExtensionRepo: extensionRepository, Cache: authCacheInvalidator, Logger: logger},
+			Rate:             &operatedomain.RateManagementService{Repository: rateRepository, Logger: logger},
+			Whitelist:        &operatedomain.WhitelistManagementService{Repository: whitelistRepository, Logger: logger},
+			Billing:          &operatedomain.BillingManagementService{Repository: billingRepository, Logger: logger},
+			BatchTask:        &operatedomain.BatchTaskManagementService{Repository: batchTaskRepository, Logger: logger},
+			Department:       &operatedomain.DepartmentManagementService{Repository: departmentRepository, Logger: logger},
+			CallRecord:       callRecordService,
+			AIFlow:           aiFlowService,
+			AIConfig:         aiConfigService,
+			Gateway:          &operatedomain.GatewayManagementService{Repository: gatewayRepository, Synchronizer: gatewaySynchronizer, Cache: gatewayCacheInvalidator, Logger: logger},
+			Rtpengine:        rtpengineService,
+			Dispatcher:       dispatcherService,
+			Extension:        &operatedomain.ExtensionManagementService{Repository: extensionRepository, MerchantRepo: merchantRepository, Cache: authCacheInvalidator, License: licenseService, Logger: logger},
+			Pool:             &operatedomain.PoolManagementService{Repository: poolRepository, Logger: logger},
+			PoolPhone:        &operatedomain.PoolPhoneManagementService{Repository: phoneRepository, Logger: logger},
+			PhoneGroup:       &operatedomain.PhoneGroupManagementService{Repository: phoneGroupRepository, Logger: logger},
+			SkillGroup:       &operatedomain.SkillGroupManagementService{Repository: skillGroupRepository, Logger: logger},
+			RiskControl:      &operatedomain.RiskControlManagementService{Repository: riskControlRepository, Logger: logger},
+			PhoneAttribution: &operatedomain.PhoneAttributionManagementService{Repository: phoneAttributionRepository, Logger: logger},
+			ProxyConfig:      proxyConfigService,
+			AreaCode:         areaCodeRepository,
+			License:          licenseService,
+			IPBlock:          ipBlockService,
+			KnowledgeBase:    knowledgeBaseService,
+			ASRTTS:           asrttsService,
+			DB:               gormDB,
+		}, nil
 }
 
 // ListenAndServe 启动 HTTP 服务。在 context 被取消时触发优雅停机。
@@ -645,7 +654,10 @@ func (s *Server) routes() {
 		httpoperate.RegisterInstallerRoutes(s.gin, s.installer)
 		httpoperate.RegisterLicenseRoutes(s.gin, s.console.License)
 		httpoperate.RegisterIPBlockRoutes(s.gin, s.console.IPBlock)
-		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/kamailio/dispatcher", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/operate/license", "/operate/ip-block", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail")
+		httpoperate.RegisterKnowledgeBaseRoutes(s.gin, s.console.KnowledgeBase)
+		httpoperate.RegisterASRTTSRoutes(s.gin, s.console.ASRTTS)
+		httpoperate.RegisterCustomerProfileRoutes(s.gin, s.console.DB)
+		s.registerCompatibilityRoutes("/operate/auth", "/operate/account", "/operate/freeswitch", "/operate/channel", "/operate/blacklist", "/operate/whitelist", "/operate/billing", "/operate/extension", "/operate/pool", "/operate/pool-phone", "/operate/merchant", "/operate/rate", "/operate/gateway", "/operate/kamailio/rtpengine", "/operate/kamailio/dispatcher", "/operate/risk-control", "/operate/phone-attribution", "/operate/proxy-config", "/operate/area-code", "/operate/ai-model-config", "/operate/license", "/operate/ip-block", "/operate/customer-profile", "/merchant/auth", "/merchant/account", "/merchant/batch-call-task", "/merchant/batch-call-dialpad", "/merchant/call-record", "/merchant/ai-model-flow", "/merchant/ai-model-config", "/merchant/phone-group", "/merchant/skill-group", "/merchant/detail", "/merchant/knowledge-base", "/merchant/asr-config", "/merchant/tts-config", "/merchant/customer-profile")
 	default:
 		s.registerCompatibilityRoutes()
 	}
