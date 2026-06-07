@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"yunshu/internal/contracts"
 	authdomain "yunshu/internal/domain/auth"
@@ -34,11 +35,20 @@ import (
 
 // Keys and Constants matching the desktop client configuration
 var (
-	// SIPCredentialKey 和 PhoneNumberKey 从环境变量读取，默认值仅用于开发环境
-	// 生产环境必须通过 SIP_CREDENTIAL_KEY 和 PHONE_NUMBER_KEY 环境变量设置安全密钥
-	SIPCredentialKey = getEnvOrDefault("SIP_CREDENTIAL_KEY", "vL4oU4jJ8qS3oC4v")
-	PhoneNumberKey   = getEnvOrDefault("PHONE_NUMBER_KEY", "2has1d8jef49v0ru")
+	// SIPCredentialKey 和 PhoneNumberKey 从环境变量读取
+	// 必须通过 SIP_CREDENTIAL_KEY 和 PHONE_NUMBER_KEY 环境变量设置安全密钥
+	SIPCredentialKey = getEnvOrDefault("SIP_CREDENTIAL_KEY", "")
+	PhoneNumberKey   = getEnvOrDefault("PHONE_NUMBER_KEY", "")
 )
+
+func init() {
+	if SIPCredentialKey == "" {
+		slog.Warn("SIP_CREDENTIAL_KEY 环境变量未设置，SIP 凭据加密/解密功能将不可用")
+	}
+	if PhoneNumberKey == "" {
+		slog.Warn("PHONE_NUMBER_KEY 环境变量未设置，号码加密/解密功能将不可用")
+	}
+}
 
 func getEnvOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -222,18 +232,6 @@ func RegisterDialpadCompatRoutes(
 	db *gorm.DB,
 	updateCfg config.DialpadUpdateConfig,
 ) {
-	// 生产环境强制校验密钥安全性
-	if gin.Mode() == gin.ReleaseMode && !isTest() {
-		if os.Getenv("SIP_CREDENTIAL_KEY") == "" || os.Getenv("SIP_CREDENTIAL_KEY") == "vL4oU4jJ8qS3oC4v" {
-			slog.Error("生产环境下必须通过 SIP_CREDENTIAL_KEY 环境变量设置自定义安全密钥")
-			panic("生产环境未配置安全的 SIP_CREDENTIAL_KEY")
-		}
-		if os.Getenv("PHONE_NUMBER_KEY") == "" || os.Getenv("PHONE_NUMBER_KEY") == "2has1d8jef49v0ru" {
-			slog.Error("生产环境下必须通过 PHONE_NUMBER_KEY 环境变量设置自定义安全密钥")
-			panic("生产环境未配置安全的 PHONE_NUMBER_KEY")
-		}
-	}
-
 	// 创建路由子组并装载版本及强制更新校验中间件，以确保客户端升级闭环
 	var group gin.IRoutes = r
 	if rg, ok := r.(*gin.Engine); ok {
@@ -260,7 +258,7 @@ func RegisterDialpadCompatRoutes(
 		// Look up merchant by account name
 		var mch resource.MerchantModel
 		if err := db.Where("account = ? AND del_flag = ?", req.Account, false).First(&mch).Error; err != nil {
-			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "商户账号不存在"))
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "登录失败，请检查账号信息"))
 			return
 		}
 
@@ -289,7 +287,7 @@ func RegisterDialpadCompatRoutes(
 		if err := db.Table("cc_sys_account").
 			Where("username = ? AND merchant_id = ? AND del_flag = ?", req.Username, strconv.Itoa(mch.ID), false).
 			First(&account).Error; err != nil {
-			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "用户不存在或不属于该商户"))
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "登录失败，请检查账号信息"))
 			return
 		}
 
@@ -300,7 +298,7 @@ func RegisterDialpadCompatRoutes(
 
 		// Verify password using bcrypt
 		if err := bcrypt.CompareHashAndPassword([]byte(account.PasswordHash), []byte(req.Password)); err != nil {
-			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "用户名或密码错误"))
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "登录失败，请检查账号信息"))
 			return
 		}
 
@@ -344,7 +342,7 @@ func RegisterDialpadCompatRoutes(
 				var freeExt resource.ExtensionModel
 				allocErr := db.Transaction(func(tx *gorm.DB) error {
 					// 使用 FOR UPDATE 防止并发分配同一个分机
-					err := tx.Where("merchant_id = ? AND user_id = 0 AND enable = ? AND del_flag = ?", mch.ID, true, false).
+					err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("merchant_id = ? AND user_id = 0 AND enable = ? AND del_flag = ?", mch.ID, true, false).
 						Order("id ASC").
 						First(&freeExt).Error
 					if err != nil {
@@ -1043,11 +1041,17 @@ func releaseExtensionForUser(db *gorm.DB, tenant contracts.TenantContext) {
 
 // encryptHex 优先采用 AES-GCM 进行安全加密
 func encryptHex(plaintext string, key []byte) (string, error) {
+	if len(key) == 0 {
+		return "", errors.New("加密密钥未配置，请设置环境变量")
+	}
 	return encryptGCMHex(plaintext, key)
 }
 
 // decryptHex 优先采用 AES-GCM 进行解密，失败时自动退避到旧版 AES-ECB 解密，确保向后兼容性
 func decryptHex(hexText string, key []byte) (string, error) {
+	if len(key) == 0 {
+		return "", errors.New("解密密钥未配置，请设置环境变量")
+	}
 	if decrypted, err := decryptGCMHex(hexText, key); err == nil {
 		return decrypted, nil
 	}

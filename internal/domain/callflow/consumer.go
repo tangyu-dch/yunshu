@@ -1198,12 +1198,12 @@ func handleBatchOutboundCustomerAnswer(ctx context.Context, event contracts.Even
 					const queueWaitTimeout = 30 * time.Second
 					select {
 					case <-time.After(queueWaitTimeout):
-					case <-ctx.Done():
+					case <-lifetimeCtx.Done():
 						return
 					}
 
 					// 原子从队列中移除，返回 removed>0 说明客户仍在等待（超时需挂断）
-					removed, rErr := queue.Remove(ctx, capturedMerchantID, capturedSkillGroupID, capturedCallID)
+					removed, rErr := queue.Remove(lifetimeCtx, capturedMerchantID, capturedSkillGroupID, capturedCallID)
 					if rErr != nil {
 						logger.Error("排队超时：从队列清理失败", "callId", capturedCallID, "error", rErr.Error())
 						return
@@ -1225,7 +1225,7 @@ func handleBatchOutboundCustomerAnswer(ctx context.Context, event contracts.Even
 						contracts.CallFlowBatchPredictive,
 						map[string]any{"cause": "NO_ANSWER", "reason": "queue_wait_timeout"},
 					)
-					if herr := originate.CommandService.Execute(ctx, hangupCmd); herr != nil {
+					if herr := originate.CommandService.Execute(lifetimeCtx, hangupCmd); herr != nil {
 						logger.Error("排队超时挂断客户腿失败", "callId", capturedCallID, "error", herr.Error())
 					} else {
 						logger.Info("排队超时已成功挂断客户腿", "callId", capturedCallID)

@@ -366,7 +366,10 @@ func RegisterRoutes(
 		wsHub.ServeHTTP(c.Writer, c.Request)
 	})
 
-	r.POST("/cti/kamailio/subscriber/register-status", func(c *gin.Context) {
+	// --- Kamailio Webhook 端点：使用共享密钥鉴权，防止未授权请求枚举 SIP 域名和分机 ---
+	kamailioGroup := r.(*gin.RouterGroup).Group("", middleware.KamailioWebhookAuth())
+
+	kamailioGroup.POST("/cti/kamailio/subscriber/register-status", func(c *gin.Context) {
 		var req struct {
 			Extension string `json:"extension"`
 			Event     string `json:"event"` // register, unregister, expire
@@ -405,7 +408,7 @@ func RegisterRoutes(
 		c.JSON(http.StatusOK, contracts.OK(map[string]any{"extension": ext, "event": event, "status": int(esStatus)}))
 	})
 
-	r.POST("/cti/kamailio/auth", func(c *gin.Context) {
+	kamailioGroup.POST("/cti/kamailio/auth", func(c *gin.Context) {
 		var req struct {
 			Username string `json:"username"`
 			IP       string `json:"ip"`
@@ -474,7 +477,7 @@ func RegisterRoutes(
 		c.JSON(http.StatusOK, map[string]any{"code": 200, "message": "成功"})
 	})
 
-	r.POST("/cti/kamailio/auth/register", func(c *gin.Context) {
+	kamailioGroup.POST("/cti/kamailio/auth/register", func(c *gin.Context) {
 		var req struct {
 			Username string `json:"username"`
 			IP       string `json:"ip"`
@@ -514,7 +517,7 @@ func RegisterRoutes(
 		c.JSON(http.StatusOK, contracts.OK(nil))
 	})
 
-	r.POST("/cti/kamailio/auth/unregister", func(c *gin.Context) {
+	kamailioGroup.POST("/cti/kamailio/auth/unregister", func(c *gin.Context) {
 		var req struct {
 			Username string `json:"username"`
 			IP       string `json:"ip"`

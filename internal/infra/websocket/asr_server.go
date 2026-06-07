@@ -136,16 +136,16 @@ func (s *ASRServer) Stop() {
 
 // handleASRStream 处理 FreeSWITCH 侧的 Webhook/WebSocket 音频旁路连接。
 func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		s.Logger.Error("云枢 ASR 接收：WebSocket 升级失败", "error", err.Error())
-		return
+	// 共享密钥认证：若环境变量 ASR_WEBSOCKET_SECRET 已设置，则要求请求头 X-ASR-Secret 匹配
+	if secret := os.Getenv("ASR_WEBSOCKET_SECRET"); secret != "" {
+		if r.Header.Get("X-ASR-Secret") != secret {
+			s.Logger.Warn("云枢 ASR 接收：共享密钥认证失败，拒绝连接", "remote", r.RemoteAddr)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
 	}
-	defer conn.Close()
 
-	s.Logger.Info("云枢 ASR 接收：已成功握手 FreeSWITCH 语音推流连接", "remote", r.RemoteAddr, "path", r.URL.Path)
-
-	// 尝试从路径或参数提取 callId
+	// callId 为必填查询参数
 	callID := r.URL.Query().Get("callId")
 	if callID == "" {
 		parts := strings.Split(r.URL.Path, "/")
@@ -153,6 +153,20 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 			callID = parts[2]
 		}
 	}
+	if callID == "" {
+		s.Logger.Warn("云枢 ASR 接收：缺少 callId 参数，拒绝连接", "remote", r.RemoteAddr)
+		http.Error(w, "Missing callId", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := s.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.Logger.Error("云枢 ASR 接收：WebSocket 升级失败", "error", err.Error())
+		return
+	}
+	defer conn.Close()
+
+	s.Logger.Info("云枢 ASR 接收：已成功握手 FreeSWITCH 语音推流连接", "remote", r.RemoteAddr, "path", r.URL.Path, "callId", callID)
 
 	var packetCount int
 	var totalBytes int64
@@ -202,10 +216,6 @@ func (s *ASRServer) handleASRStream(w http.ResponseWriter, r *http.Request) {
 		if msgType == websocket.BinaryMessage {
 			packetCount++
 			totalBytes += int64(len(data))
-
-			if callID == "" {
-				callID = "unknown-session"
-			}
 
 			// 能量计算 VAD
 			rms := s.calculateRMS(data)

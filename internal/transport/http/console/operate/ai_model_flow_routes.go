@@ -31,6 +31,7 @@ func RegisterAIModelFlowRoutes(r gin.IRoutes, service *operatedomain.AIModelFlow
 			{"ali", "阿里通义千问 Qwen", "☁️", "geekblue"},
 			{"tencent", "腾讯混元 Hunyuan", "🐧", "blue"},
 			{"volc", "火山引擎“豆包”大模型", "🌋", "orange"},
+			{"zhipu", "智谱AI GLM大模型", "🤖", "green"},
 			{"baidu", "百度文心千帆 ERNIE", "🐻", "red"},
 		}
 

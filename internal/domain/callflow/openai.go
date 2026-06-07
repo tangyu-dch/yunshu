@@ -270,3 +270,111 @@ func (e *OpenAILLMEngine) GenerateReply(ctx context.Context, systemPrompt, userM
 
 	return "", fmt.Errorf("OpenAI 物理接口返回空白 Choices")
 }
+
+// ============================================================================
+// 🌐 Zhipu AI (智谱AI GLM-4 / GLM-3-Turbo) 物理与仿真双模引擎实现
+// ============================================================================
+
+func init() {
+	// 注册 Zhipu AI ASR/TTS/LLM 引擎驱动
+	RegisterLLMEngine("zhipu", &ZhipuLLMEngine{})
+	RegisterLLMEngine("glm", &ZhipuLLMEngine{})
+	RegisterLLMEngine("zhipuai", &ZhipuLLMEngine{})
+}
+
+// ----------------------------------------------------------------------------
+// LLM (Zhipu AI ChatGLM) 物理与仿真驱动
+// ----------------------------------------------------------------------------
+
+type ZhipuLLMEngine struct{}
+
+// GenerateReply 发起 Zhipu AI GLM-4 物理调用，支持自定义 Endpoint。
+func (e *ZhipuLLMEngine) GenerateReply(ctx context.Context, systemPrompt, userMessage string, config map[string]any) (string, error) {
+	apiKey, _ := config["llmApiKey"].(string)
+	model, _ := config["llmModel"].(string)
+	endpoint, _ := config["llmEndpoint"].(string)
+	tempVal, _ := config["llmTemperature"].(float64)
+
+	if model == "" {
+		model = "glm-4"
+	}
+	if endpoint == "" {
+		endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+	}
+	if tempVal <= 0 {
+		tempVal = 0.7
+	}
+
+	// 1. 物理安全校验，无凭证直接报错
+	if apiKey == "" {
+		return "", fmt.Errorf("Zhipu AI API 密钥未配置，拒绝处理业务")
+	}
+
+	// 2. 生产物理环境：对接 Zhipu AI 兼容的大模型 API
+	type ChatMessage struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+
+	type ChatRequest struct {
+		Model       string        `json:"model"`
+		Messages    []ChatMessage `json:"messages"`
+		Temperature float64       `json:"temperature"`
+	}
+
+	reqBody := ChatRequest{
+		Model: model,
+		Messages: []ChatMessage{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userMessage},
+		},
+		Temperature: tempVal,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	reqCtx, reqCancel := context.WithTimeout(ctx, 15*time.Second)
+	defer reqCancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", endpoint, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := GlobalHTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Zhipu AI 物理 API 调用失败: %w", err)
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("Zhipu AI 物理大模型接口报错，状态码: %d，响应: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var res struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+
+	if len(res.Choices) > 0 {
+		return res.Choices[0].Message.Content, nil
+	}
+
+	return "", fmt.Errorf("Zhipu AI 物理接口返回空白 Choices")
+}

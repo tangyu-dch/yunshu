@@ -111,34 +111,50 @@ func (r *RedisReader) cleanStaleStatuses(ctx context.Context, logger *slog.Logge
 		return
 	}
 
-	cleaned := 0
+	// 收集需要检查 alive key 的分机，批量 Pipeline 检查避免 N+1
+	var checkExts []string
 	for ext, raw := range fields {
 		status, err := strconv.Atoi(raw)
 		if err != nil {
+			logger.Warn("分机状态 Hash 值格式异常", "extension", ext, "raw", raw)
 			continue
 		}
-		// 只检查非离线状态
 		if esl.ExtensionStatus(status) == esl.ExtensionStatusOffline {
 			continue
 		}
-
-		aliveKey := extensionAliveKeyPrefix + ext
-		exists, err := r.Client.Exists(ctx, aliveKey).Result()
-		if err != nil {
-			logger.Error("分机状态清理协程检查 alive key 失败", "extension", ext, "error", err.Error())
-			continue
-		}
-
-		if exists == 0 {
-			// alive key 已过期，重置为离线
-			r.Client.HSet(ctx, redisExtensionStatusKey, ext, int(esl.ExtensionStatusOffline))
-			r.Client.Del(ctx, aliveKey)
-			cleaned++
-			logger.Info("分机状态清理协程重置幽灵在线状态", "extension", ext, "previousStatus", status)
-		}
+		checkExts = append(checkExts, ext)
 	}
 
+	if len(checkExts) == 0 {
+		return
+	}
+
+	// Pipeline 批量 EXISTS
+	pipe := r.Client.Pipeline()
+	cmds := make([]*goredis.IntCmd, len(checkExts))
+	for i, ext := range checkExts {
+		cmds[i] = pipe.Exists(ctx, extensionAliveKeyPrefix+ext)
+	}
+	if _, err := pipe.Exec(ctx); err != nil {
+		logger.Error("分机状态清理协程 Pipeline EXISTS 失败", "error", err.Error())
+		return
+	}
+
+	// Pipeline 批量清理
+	cleaned := 0
+	cleanPipe := r.Client.Pipeline()
+	for i, ext := range checkExts {
+		if cmds[i].Val() == 0 {
+			cleanPipe.HSet(ctx, redisExtensionStatusKey, ext, int(esl.ExtensionStatusOffline))
+			cleanPipe.Del(ctx, extensionAliveKeyPrefix+ext)
+			cleaned++
+			logger.Info("分机状态清理协程重置幽灵在线状态", "extension", ext)
+		}
+	}
 	if cleaned > 0 {
+		if _, err := cleanPipe.Exec(ctx); err != nil {
+			logger.Error("分机状态清理协程 Pipeline 清理失败", "error", err.Error())
+		}
 		logger.Info("分机状态清理协程完成扫描", "total", len(fields), "cleaned", cleaned)
 	}
 }

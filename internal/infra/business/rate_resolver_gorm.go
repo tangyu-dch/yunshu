@@ -70,7 +70,7 @@ func (r *GormRateResolver) Resolve(ctx context.Context, merchantID int) (RateDec
 		if err != nil {
 			logger.Error("数据库查询商户费率失败，降级使用系统默认费率", "merchantId", merchantID, "error", err.Error())
 		} else if found {
-			r.writeRateCache(ctx, merchantID, decision)
+			r.writeRateCache(context.Background(), merchantID, decision)
 			logger.Info("商户费率已从数据库加载", "merchantId", merchantID, "rateId", decision.RateTemplateID, "cycle", decision.BillingCycle, "price", decision.BillingPrice)
 			return decision, nil
 		} else {

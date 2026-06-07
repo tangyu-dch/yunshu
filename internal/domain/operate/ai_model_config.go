@@ -68,6 +68,11 @@ func (s *AIModelConfigManagementService) Save(ctx context.Context, config AIMode
 			config.ModelName = "deepseek-chat"
 		} else if config.Provider == "OpenAI" {
 			config.ModelName = "gpt-4o"
+		} else if config.Provider == "Zhipu" || config.Provider == "智谱" || config.Provider == "glm" {
+			config.ModelName = "glm-4"
+			if config.Endpoint == "" {
+				config.Endpoint = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+			}
 		} else {
 			config.ModelName = "cloudshu-v1"
 		}

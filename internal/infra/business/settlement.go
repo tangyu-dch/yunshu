@@ -86,6 +86,9 @@ func (s *SettlementMemoryStore) DebitBalance(_ context.Context, merchantID int, 
 		return 0, 0, ErrBillingOverviewNotFound
 	}
 	after := before - amount
+	if after < 0 {
+		return 0, 0, fmt.Errorf("insufficient merchant billing balance")
+	}
 	s.Balance[merchantID] = after
 	return before, after, nil
 }
@@ -229,7 +232,7 @@ func (s *SettlementGormStore) SaveFromOutbox(ctx context.Context, entry Entry) (
 			"amount":            model.Amount,
 			"rate_per_min":      model.RatePerMin,
 			"last_error":        model.LastError,
-			"source_outbox_id":  model.SourceOutboxID,
+			"source_outbox_id":  model.SourceOutbox,
 			"raw_payload":       model.RawPayload,
 			"updated_at":        model.UpdatedAt,
 		}),

@@ -86,15 +86,15 @@ func (e *AIVoiceEngine) StartAIVoiceFlow(ctx context.Context, session *esl.CallS
 
 		// 发送 uuid_audio_stream 物理指令到 FreeSWITCH 媒体网关
 		cmd := telephony.NewCommand(
-			fmt.Sprintf("audio_stream:%s:start", callID),
-			"audio_stream", // 映射 FreeSWITCH ESL API: uuid_audio_stream <uuid> start
+			fmt.Sprintf("audio-stream:%s:start", callID),
+			"audio-stream", // 映射 FreeSWITCH ESL API: uuid_audio_stream <uuid> start
 			callID,
 			customerUUID,
 			fsAddr,
 			contracts.LegRoleCustomer,
 			contracts.CallFlowInbound,
 			map[string]any{
-				"action":       "start",
+				"control":      "start",
 				"url":          wsURL,
 				"mixType":      mixType,
 				"samplingRate": sampleRate,

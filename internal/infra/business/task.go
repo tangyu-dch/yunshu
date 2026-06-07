@@ -12,6 +12,8 @@ import (
 	operatedomain "yunshu/internal/domain/operate"
 
 	"gorm.io/gorm"
+
+	"math/rand"
 )
 
 const (
@@ -157,7 +159,7 @@ func (r *BatchRepository) ClaimNextPendingTel(ctx context.Context, taskID int, n
 }
 
 // GetIdleAgentFromSkillGroup 从技能组关联的坐席中寻找一个在线且空闲（ExtensionStatusIdle）的坐席，用于呼叫分配。
-func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error) {
+func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, merchantID, skillGroupID int) (int, string, error) {
 	r.logger().Info("开始在技能组中查找空闲坐席", "skillGroupId", skillGroupID)
 	var agents []struct {
 		UserID          int    `gorm:"column:user_id"`
@@ -168,7 +170,7 @@ func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillG
 		Select("ext.user_id, ext.extension_number").
 		Joins("INNER JOIN cc_res_extension ext ON usg.user_id = ext.user_id").
 		Where("usg.skill_group_id = ? AND ext.enable = ? AND ext.del_flag = ?", skillGroupID, true, false).
-		Order("RAND()").
+		Order("ext.id ASC").
 		Find(&agents).Error
 	if err != nil {
 		r.logger().Error("在技能组中联查坐席分机失败", "skillGroupId", skillGroupID, "error", err.Error())
@@ -179,6 +181,7 @@ func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillG
 		return 0, "", nil
 	}
 
+	rand.Shuffle(len(agents), func(i, j int) { agents[i], agents[j] = agents[j], agents[i] })
 	for _, agent := range agents {
 		if r.Statuses == nil {
 			r.logger().Warn("未注入 Statuses (ExtensionStatusReader)，跳过 Redis 状态检查", "extension", agent.ExtensionNumber)
@@ -294,25 +297,31 @@ func (r *BatchRepository) GetBatchTaskStats(ctx context.Context, taskID int) (ct
 		return cti.BatchTaskStats{}, err
 	}
 	var pendingCount, callingCount, completedCount, connectedCount int64
+	type statusCount struct {
+		CallStatus int   `gorm:"column:call_status"`
+		IsConnect  *bool `gorm:"column:connect_status"`
+		Cnt        int64
+	}
+	var counts []statusCount
 	if err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskListModel{}).
-		Where("task_id = ? AND call_status = ? AND del_flag = ? AND enable = ?", taskID, BatchTelNotCalled, false, true).
-		Count(&pendingCount).Error; err != nil {
+		Select("call_status, connect_status, count(*) as cnt").
+		Where("task_id = ? AND del_flag = ? AND enable = ?", taskID, false, true).
+		Group("call_status, connect_status").
+		Find(&counts).Error; err != nil {
 		return cti.BatchTaskStats{}, err
 	}
-	if err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskListModel{}).
-		Where("task_id = ? AND call_status = ? AND del_flag = ? AND enable = ?", taskID, BatchTelCalling, false, true).
-		Count(&callingCount).Error; err != nil {
-		return cti.BatchTaskStats{}, err
-	}
-	if err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskListModel{}).
-		Where("task_id = ? AND call_status = ? AND del_flag = ? AND enable = ?", taskID, BatchTelCompleted, false, true).
-		Count(&completedCount).Error; err != nil {
-		return cti.BatchTaskStats{}, err
-	}
-	if err := r.DB.WithContext(ctx).Model(&MerchantBatchCallTaskListModel{}).
-		Where("task_id = ? AND call_status = ? AND connect_status = ? AND del_flag = ? AND enable = ?", taskID, BatchTelCompleted, true, false, true).
-		Count(&connectedCount).Error; err != nil {
-		return cti.BatchTaskStats{}, err
+	for _, c := range counts {
+		switch c.CallStatus {
+		case BatchTelNotCalled:
+			pendingCount = c.Cnt
+		case BatchTelCalling:
+			callingCount = c.Cnt
+		case BatchTelCompleted:
+			completedCount += c.Cnt
+			if c.IsConnect != nil && *c.IsConnect {
+				connectedCount = c.Cnt
+			}
+		}
 	}
 	stats := cti.BatchTaskStats{
 		TaskID:         task.ID,
@@ -369,8 +378,21 @@ func (r *BatchRepository) ImportTels(ctx context.Context, taskID int, merchantID
 	}
 	now := time.Now().UTC()
 	err := r.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// 去重：排除该任务中已存在的号码
+		var existing []string
+		tx.Model(&MerchantBatchCallTaskListModel{}).
+			Where("task_id = ? AND del_flag = ?", taskID, false).
+			Pluck("tel", &existing)
+		existSet := make(map[string]struct{}, len(existing))
+		for _, t := range existing {
+			existSet[t] = struct{}{}
+		}
 		var list []MerchantBatchCallTaskListModel
 		for _, tel := range tels {
+			if _, dup := existSet[tel]; dup {
+				continue
+			}
+			existSet[tel] = struct{}{} // 防止同批内重复
 			list = append(list, MerchantBatchCallTaskListModel{
 				TaskID:        taskID,
 				MerchantID:    merchantID,

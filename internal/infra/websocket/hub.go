@@ -231,6 +231,7 @@ func (h *Hub) broadcast(message map[string]any) {
 		clients = append(clients, conn)
 	}
 	h.mu.Unlock()
+	h.writeMu.Lock()
 	for _, conn := range clients {
 		_ = conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
 		if err := conn.WriteJSON(message); err != nil {
@@ -239,6 +240,7 @@ func (h *Hub) broadcast(message map[string]any) {
 			_ = conn.Close()
 		}
 	}
+	h.writeMu.Unlock()
 }
 
 func (s subscription) matches(message map[string]any) bool {

@@ -72,7 +72,7 @@ type BatchTaskRepository interface {
 	CompleteBatchTel(ctx context.Context, taskID, telID int, connected bool, now time.Time) error
 	ReleaseBatchTel(ctx context.Context, taskID, telID int, now time.Time) error
 	CompleteBatchTaskIfDrained(ctx context.Context, taskID int, now time.Time) (bool, error)
-	GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error)
+	GetIdleAgentFromSkillGroup(ctx context.Context, merchantID, skillGroupID int) (int, string, error)
 	GetOnlineAgents(ctx context.Context, skillGroupID int) ([]int, error)
 	GetActiveCallCount(ctx context.Context, taskID int) (int, error)
 	GetAgentSkillGroups(ctx context.Context, userID int) ([]int, error)
@@ -162,7 +162,7 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 			}
 		} else { // 协同模式
 			var getAgentErr error
-			assignedUserID, assignedExtension, getAgentErr = s.Repository.GetIdleAgentFromSkillGroup(ctx, task.SkillGroupID)
+			assignedUserID, assignedExtension, getAgentErr = s.Repository.GetIdleAgentFromSkillGroup(ctx, task.MerchantID, task.SkillGroupID)
 			if getAgentErr != nil {
 				logger.Error("获取技能组空闲坐席失败", "taskId", taskID, "skillGroupId", task.SkillGroupID, "error", getAgentErr.Error())
 				return contracts.BatchCallReq{}, "", getAgentErr
@@ -183,6 +183,8 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 	// 运行时选号：为批量外呼分配主叫号码和网关（高并发原子占用）
 	var selectedCaller string
 	var selectedGatewayID string
+	var allocation *RuntimeAllocation
+	var selErr error
 	effectiveUserID := firstNonZero(assignedUserID, tel.UserID, task.UserID)
 	if s.Selector != nil && s.Candidates != nil && effectiveUserID > 0 {
 		candidates, candErr := s.Candidates.CandidatesForUser(ctx, effectiveUserID)
@@ -197,7 +199,7 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 				UserID:     effectiveUserID,
 				Candidates: candidates,
 			}
-			_, allocation, selErr := s.Selector.SelectAndClaim(ctx, selReq)
+			_, allocation, selErr = s.Selector.SelectAndClaim(ctx, selReq)
 			if selErr != nil {
 				logger.Error("批量外呼选号失败，释放号码并中止调度", "taskId", taskID, "telId", tel.ID, "callee", tel.Tel, "error", selErr.Error())
 				_ = s.Repository.ReleaseBatchTel(ctx, taskID, tel.ID, now)
@@ -255,6 +257,11 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 		}
 	}
 	if err := s.ESL.StartBatchOutbound(ctx, version, callID, req); err != nil {
+		if selectedCaller != "" && s.Selector != nil && s.Selector.Allocator != nil {
+			if relErr := s.Selector.Allocator.Release(ctx, *allocation); relErr != nil {
+				logger.Error("批量外呼 ESL 失败后释放选号槽失败", "callId", callID, "error", relErr.Error())
+			}
+		}
 		if releaseErr := s.Repository.ReleaseBatchTel(ctx, taskID, tel.ID, now); releaseErr != nil {
 			logger.Error("批量外呼调用 ESL 起呼失败且号码释放失败", "callId", callID, "taskId", taskID, "telId", tel.ID, "releaseError", releaseErr.Error())
 			return contracts.BatchCallReq{}, "", releaseErr
