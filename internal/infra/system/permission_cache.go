@@ -217,17 +217,24 @@ func (r *CachedPermissionRepository) InvalidateRouteCache(ctx context.Context) e
 		return nil
 	}
 
-	// 清除 Redis 中的所有路由权限缓存
-	keys, err := r.Redis.Keys(ctx, KeyConsoleRoutePermCachePrefix+"*").Result()
-	if err != nil && err != redis.Nil {
-		r.logger().Warn("查询 Redis 路由权限缓存键失败", "error", err.Error())
-		return err
-	}
-
-	if len(keys) > 0 {
-		if err := r.Redis.Del(ctx, keys...).Err(); err != nil {
-			r.logger().Warn("删除 Redis 路由权限缓存失败", "error", err.Error())
+	// 清除 Redis 中的所有路由权限缓存（使用 SCAN 避免 KEYS 阻塞）
+	var cursor uint64
+	for {
+		var keys []string
+		var err error
+		keys, cursor, err = r.Redis.Scan(ctx, cursor, KeyConsoleRoutePermCachePrefix+"*", 100).Result()
+		if err != nil && err != redis.Nil {
+			r.logger().Warn("SCAN Redis 路由权限缓存键失败", "error", err.Error())
 			return err
+		}
+		if len(keys) > 0 {
+			if err := r.Redis.Del(ctx, keys...).Err(); err != nil {
+				r.logger().Warn("删除 Redis 路由权限缓存失败", "error", err.Error())
+				return err
+			}
+		}
+		if cursor == 0 {
+			break
 		}
 	}
 

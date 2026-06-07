@@ -223,10 +223,17 @@ func (s *SettlementGormStore) SaveFromOutbox(ctx context.Context, entry Entry) (
 	model := settlementModelFromJob(job, s.now())
 	err := s.DB.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "call_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"merchant_id", "user_id", "amount", "rate_per_min", "status", "last_error",
-			"source_outbox_id", "raw_payload", "updated_at",
+		DoUpdates: clause.Assignments(map[string]any{
+			"merchant_id":       model.MerchantID,
+			"user_id":           model.UserID,
+			"amount":            model.Amount,
+			"rate_per_min":      model.RatePerMin,
+			"last_error":        model.LastError,
+			"source_outbox_id":  model.SourceOutboxID,
+			"raw_payload":       model.RawPayload,
+			"updated_at":        model.UpdatedAt,
 		}),
+		Where: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: "status", Value: StatusPending}}},
 	}).Create(&model).Error
 	if err != nil {
 		s.Logger.Error("结算任务落库失败", "outboxId", entry.ID, "callId", job.CallID, "error", err.Error())
@@ -264,7 +271,16 @@ func (s *SettlementGormStore) DebitBalance(ctx context.Context, merchantID int, 
 			return 0, 0, fmt.Errorf("insufficient merchant billing balance")
 		} else if debitResult == redisinfra.DebitResultSuccess {
 			// Redis 扣款成功，现在同步更新数据库
-			return s.debitBalanceOnlyDB(ctx, merchantID, amount)
+			before, after, err := s.debitBalanceOnlyDB(ctx, merchantID, amount)
+			if err != nil {
+				// DB 扣款失败，补偿 Redis：将扣减的金额加回
+				if compErr := s.BalanceCache.AtomicDebit(ctx, merchantID, -amount, billing.CreditLimit); compErr != nil {
+					s.Logger.Error("Redis 扣款补偿回滚失败，需人工介入", "merchantId", merchantID, "amount", amount, "compensateError", compErr.Error(), "originalError", err.Error())
+				} else {
+					s.Logger.Warn("Redis 扣款已补偿回滚", "merchantId", merchantID, "amount", amount, "originalError", err.Error())
+				}
+			}
+			return before, after, err
 		}
 		// 其他情况（Key 不存在）继续走数据库流程
 	}
@@ -321,7 +337,7 @@ func (s *SettlementGormStore) debitBalanceOnlyDB(ctx context.Context, merchantID
 // MarkSettled 标记结算完成。
 func (s *SettlementGormStore) MarkSettled(ctx context.Context, id string, before, after float64, settledAt time.Time) error {
 	result := s.DB.WithContext(ctx).Model(&SettlementJobModel{}).
-		Where("id = ?", id).
+		Where("id = ? AND status != ?", id, StatusSettled).
 		Updates(map[string]any{"status": StatusSettled, "balance_before": before, "balance_after": after, "settled_at": settledAt.UTC(), "updated_at": s.now(), "last_error": ""})
 	if result.Error != nil {
 		s.Logger.Error("结算任务标记完成失败", "jobId", id, "error", result.Error.Error())

@@ -84,6 +84,28 @@ func (s *MemorySessionStore) CountActive(_ context.Context) (int, error) {
 	return count, nil
 }
 
+// StartEviction 启动后台清理协程，定期移除已完成超过 maxAge 的会话。
+func (s *MemorySessionStore) StartEviction(ctx context.Context, interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case now := <-ticker.C:
+				s.mu.Lock()
+				for id, sess := range s.sessions {
+					if !sess.CompletedAt.IsZero() && now.Sub(sess.CompletedAt) > maxAge {
+						delete(s.sessions, id)
+					}
+				}
+				s.mu.Unlock()
+			}
+		}
+	}()
+}
+
 // SessionSniffer 用于在物理起呼事件中识别分机与 DID。
 type SessionSniffer interface {
 	// IsExtension 判断该号码是否为已注册的坐席分机。

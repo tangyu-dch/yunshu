@@ -70,7 +70,9 @@ if available < amount then
     return 0
 end
 
-redis.call('HINCRBYFLOAT', key, 'balance', -amount)
+-- 使用整数运算避免浮点精度漂移：金额乘以 10000 后取整，再除以 10000 恢复
+local rounded = math.floor(-amount * 10000 + 0.5) / 10000
+redis.call('HINCRBYFLOAT', key, 'balance', rounded)
 return 1
 `
 

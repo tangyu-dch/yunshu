@@ -159,12 +159,18 @@ func (d *OutboxDispatcher) lease() time.Duration {
 }
 
 func (d *OutboxDispatcher) retryDelayForAttempt(attempts int) time.Duration {
+	if attempts > 50 {
+		return 24 * time.Hour
+	}
 	base := d.RetryDelay
 	if base <= 0 {
 		base = time.Minute
 	}
-	// 指数退避: base * 2^attempts, 最大 1 小时
-	delay := base * (1 << uint(attempts))
+	shift := uint(attempts)
+	if shift > 30 {
+		shift = 30
+	}
+	delay := base * time.Duration(1<<shift)
 	if delay > time.Hour {
 		delay = time.Hour
 	}

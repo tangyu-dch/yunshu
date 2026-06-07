@@ -168,7 +168,7 @@ func (r *BatchRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillG
 		Select("ext.user_id, ext.extension_number").
 		Joins("INNER JOIN cc_res_extension ext ON usg.user_id = ext.user_id").
 		Where("usg.skill_group_id = ? AND ext.enable = ? AND ext.del_flag = ?", skillGroupID, true, false).
-		Order("ext.id ASC").
+		Order("RAND()").
 		Find(&agents).Error
 	if err != nil {
 		r.logger().Error("在技能组中联查坐席分机失败", "skillGroupId", skillGroupID, "error", err.Error())

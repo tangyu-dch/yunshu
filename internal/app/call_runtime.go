@@ -139,7 +139,9 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	fsNodes := fsNodeConfigs(nodes)
 	executor := esl.CommandExecutor(&esl.MemoryCommandExecutor{Logger: logger})
 	reliableOutbox := buildOutboxStore(gormDB, logger)
-	session := esl.NewSessionService(esl.NewMemorySessionStore(), reliableOutbox, logger)
+	memSession := esl.NewMemorySessionStore()
+	memSession.StartEviction(ctx, 5*time.Minute, 30*time.Minute)
+	session := esl.NewSessionService(memSession, reliableOutbox, logger)
 	session.Events = bus
 	callflow.RegisterProjectionConsumers(bus, reliableOutbox, logger)
 	var pool *fsesl.ConnectionPool

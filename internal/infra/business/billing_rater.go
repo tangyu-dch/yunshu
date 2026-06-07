@@ -49,6 +49,6 @@ func EstimateByMinute(durationSec int, ratePerMin float64) RatingResult {
 		return RatingResult{Amount: 0, RatePerMin: ratePerMin, Note: "zero_duration_or_rate"}
 	}
 	minutes := math.Ceil(float64(durationSec) / 60)
-	amount := math.Round(minutes*ratePerMin*100) / 100
+	amount := math.Round(minutes*ratePerMin*10000) / 10000
 	return RatingResult{Amount: amount, RatePerMin: ratePerMin, Note: "estimated_by_default_minute_rate"}
 }

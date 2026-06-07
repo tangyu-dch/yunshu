@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"yunshu/internal/contracts"
@@ -20,6 +21,10 @@ import (
 	"yunshu/pkg/telephony"
 	"yunshu/pkg/workflow"
 )
+
+// bridgeGuard 防止同一通话的 maybeBridge 被并发事件重复执行桥接命令。
+// key: callID, value: true。使用 sync.Map 的 LoadOrStore 实现原子 CAS。
+var bridgeGuard sync.Map
 
 // RegisterConsumers 注册 cc-call 内部事件消费者。
 // 当前消费者负责订阅事件总线，并在事件发生时提取上下文，向 CTI 或 ESL 引擎发送状态推进信号。
@@ -109,8 +114,11 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 		}
 
 		// 1.2 媒体编排器安全清理：通话挂断时停止 broadcastTime 定时器，防止 goroutine 泄漏
-		if eventName == string(esl.EventChannelHangupComplete) && mediaRegistry != nil {
-			mediaRegistry.Remove(event.AggregateID)
+		if eventName == string(esl.EventChannelHangupComplete) {
+			if mediaRegistry != nil {
+				mediaRegistry.Remove(event.AggregateID)
+			}
+			bridgeGuard.Delete(event.AggregateID)
 		}
 
 		// 2. 实时更新分机状态并处理排队分配
@@ -205,7 +213,8 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 									}
 									customerUUID, _ := custSession.Metadata["customerUuid"].(string)
 									if customerUUID == "" {
-										logger.Warn("ACW 后排队呼叫缺少 customerUuid，跳过", "callId", waitingCallID)
+										logger.Warn("ACW 后排队呼叫缺少 customerUuid，归还队列", "callId", waitingCallID)
+										queue.Push(bgCtx, capturedAgentMerchantID, sgID, waitingCallID)
 										continue
 									}
 
@@ -412,7 +421,9 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 		if boolFromMap(session.Metadata, "aiEnabled") {
 			var flow operate.AIModelFlow
 			if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
-				_ = json.Unmarshal([]byte(flowJSON), &flow)
+				if err := json.Unmarshal([]byte(flowJSON), &flow); err != nil {
+					logger.Error("解析 AI 话术流 JSON 失败", "error", err.Error())
+				}
 			}
 			if flow.FlowGraph != nil {
 				engine := NewAIVoiceEngine(lifetimeCtx, originate.CommandService, sessionService.Store, statusReader, logger)
@@ -433,7 +444,9 @@ func RegisterConsumers(lifetimeCtx context.Context, bus events.Bus, ctiRunner *w
 		if boolFromMap(session.Metadata, "aiEnabled") {
 			var flow operate.AIModelFlow
 			if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
-				_ = json.Unmarshal([]byte(flowJSON), &flow)
+				if err := json.Unmarshal([]byte(flowJSON), &flow); err != nil {
+					logger.Error("解析 AI 话术流 JSON 失败", "error", err.Error())
+				}
 			}
 			if flow.FlowGraph != nil {
 				engine := NewAIVoiceEngine(lifetimeCtx, originate.CommandService, sessionService.Store, statusReader, logger)
@@ -688,7 +701,7 @@ func handleAPIOutboundAgentProgress(ctx context.Context, event contracts.EventEn
 	// 保存外呼路由选择与状态
 	session.Metadata["customerOriginateSent"] = true
 	session.Metadata["selectedCaller"] = selectionResp.Phone
-	session.Metadata["selectedGatewayId"] = selectionResp.GatewayID
+	session.Metadata["selectedGatewayId"] = strconv.Itoa(selectionResp.GatewayID)
 	session.Metadata["selectedGatewayName"] = selectionResp.GatewayName
 	session.Metadata["selectedGatewayRegion"] = selectionResp.GatewayRegion
 	session.Metadata["selectedModel"] = selectionResp.Model
@@ -814,9 +827,14 @@ func handleAPIOutboundCustomerReady(ctx context.Context, event contracts.EventEn
 
 // maybeBridgeAPIOutbound 条件桥接。当主叫和被叫均完成应答后，向 FreeSWITCH 下发双腿桥接命令以合并通话媒体。
 func maybeBridgeAPIOutbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
-	if boolFromMap(session.Metadata, "apiBridgeSent") {
+	if _, loaded := bridgeGuard.LoadOrStore(session.CallID, true); loaded {
 		return nil
 	}
+	defer func() {
+		if !boolFromMap(session.Metadata, "apiBridgeSent") {
+			bridgeGuard.Delete(session.CallID)
+		}
+	}()
 	if !boolFromMap(session.Metadata, "customerOriginateSent") {
 		return nil
 	}
@@ -1490,9 +1508,14 @@ func handleBatchOutboundAgentReady(ctx context.Context, event contracts.EventEnv
 
 // maybeBridgeBatchOutbound 批量外呼桥接动作下发。
 func maybeBridgeBatchOutbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
-	if boolFromMap(session.Metadata, "batchBridgeSent") {
+	if _, loaded := bridgeGuard.LoadOrStore(session.CallID, true); loaded {
 		return nil
 	}
+	defer func() {
+		if !boolFromMap(session.Metadata, "batchBridgeSent") {
+			bridgeGuard.Delete(session.CallID)
+		}
+	}()
 	if !boolFromMap(session.Metadata, "agentOriginateSent") {
 		return nil
 	}
@@ -1627,7 +1650,7 @@ func handleDialpadAgentAnswer(ctx context.Context, event contracts.EventEnvelope
 
 	session.Metadata["customerOriginateSent"] = true
 	session.Metadata["selectedCaller"] = selectionResp.Phone
-	session.Metadata["selectedGatewayId"] = selectionResp.GatewayID
+	session.Metadata["selectedGatewayId"] = strconv.Itoa(selectionResp.GatewayID)
 	session.Metadata["selectedGatewayName"] = selectionResp.GatewayName
 	session.Metadata["selectedGatewayRegion"] = selectionResp.GatewayRegion
 	session.Metadata["selectedModel"] = selectionResp.Model
@@ -1815,9 +1838,14 @@ func handleDialpadCustomerReady(ctx context.Context, event contracts.EventEnvelo
 
 // maybeBridgeDialpadDirect 拨号盘直呼双腿桥接命令发送。
 func maybeBridgeDialpadDirect(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
-	if boolFromMap(session.Metadata, "apiBridgeSent") {
+	if _, loaded := bridgeGuard.LoadOrStore(session.CallID, true); loaded {
 		return nil
 	}
+	defer func() {
+		if !boolFromMap(session.Metadata, "apiBridgeSent") {
+			bridgeGuard.Delete(session.CallID)
+		}
+	}()
 	if !boolFromMap(session.Metadata, "customerOriginateSent") {
 		return nil
 	}
@@ -1858,7 +1886,9 @@ func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvel
 	if boolFromMap(session.Metadata, "aiEnabled") {
 		var flow operate.AIModelFlow
 		if flowJSON, ok := session.Metadata["aiFlowData"].(string); ok && flowJSON != "" {
-			_ = json.Unmarshal([]byte(flowJSON), &flow)
+			if err := json.Unmarshal([]byte(flowJSON), &flow); err != nil {
+					logger.Error("解析 AI 话术流 JSON 失败", "error", err.Error())
+				}
 		}
 
 		engine := NewAIVoiceEngine(ctx, originate.CommandService, sessionService.Store, statusReader, logger)
@@ -1880,7 +1910,8 @@ func handleInboundCustomerAnswer(ctx context.Context, event contracts.EventEnvel
 	merchantID := intFromMap(session.Metadata, "merchantId")
 	extension, _ := session.Metadata["extension"].(string)
 	if extension == "" {
-		extension = "1001" // 默认测试分机
+		logger.Warn("拨号盘桥接缺少坐席分机号，跳过", "callId", callID)
+		return nil
 	}
 	agentUUID := esl.NewDeterministicUUID("agent", callID)
 	customerUUID, _ := session.Metadata["customerUuid"].(string)
@@ -1934,9 +1965,14 @@ func handleInboundAgentReady(ctx context.Context, event contracts.EventEnvelope[
 
 // maybeBridgeInbound 客户呼入下双腿媒体桥接发送。
 func maybeBridgeInbound(ctx context.Context, session esl.CallSession, originate *esl.OriginateService, logger *slog.Logger, reason string) error {
-	if boolFromMap(session.Metadata, "inboundBridgeSent") {
+	if _, loaded := bridgeGuard.LoadOrStore(session.CallID, true); loaded {
 		return nil
 	}
+	defer func() {
+		if !boolFromMap(session.Metadata, "inboundBridgeSent") {
+			bridgeGuard.Delete(session.CallID)
+		}
+	}()
 	if !boolFromMap(session.Metadata, "agentOriginateSent") {
 		return nil
 	}

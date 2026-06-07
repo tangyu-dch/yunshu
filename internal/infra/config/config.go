@@ -5,6 +5,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -12,7 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config 顶层配置结构，包含服务发现、日志、数据库、缓存、消息队列和 FreeSWITCH 相关配置。
+// Config 顶层配置结构，包含服务发现、日志、数据库、缓存、消息队列、FreeSWITCH 和 AI/RAG 相关配置。
 // 各子配置可通过环境变量覆盖，用于容器部署和密钥注入。
 type Config struct {
 	Service    ServiceConfig    `yaml:"service"`
@@ -24,6 +25,51 @@ type Config struct {
 	Console    ConsoleConfig    `yaml:"console"`
 	Worker     WorkerConfig     `yaml:"worker"`
 	Tenant     TenantConfig     `yaml:"tenant"`
+	AI         AIConfig         `yaml:"ai"`
+}
+
+// AIConfig 定义 AI 相关配置，包括 RAG、嵌入、大语言模型等。
+type AIConfig struct {
+	// Enabled 是否启用 AI 功能
+	Enabled bool `yaml:"enabled"`
+	// Embedder 嵌入模型配置
+	Embedder EmbedderConfig `yaml:"embedder"`
+	// VectorDB 向量数据库配置
+	VectorDB VectorDBConfig `yaml:"vectorDB"`
+	// RAG 检索增强生成配置
+	RAG RAGConfig `yaml:"rag"`
+}
+
+// EmbedderConfig 嵌入模型配置
+type EmbedderConfig struct {
+	// Provider 嵌入服务提供商: "openai", "deepseek"
+	Provider string `yaml:"provider"`
+	// APIKey API 密钥
+	APIKey string `yaml:"apiKey"`
+	// Endpoint API 端点（可选，默认使用官方地址）
+	Endpoint string `yaml:"endpoint"`
+	// Model 嵌入模型名称
+	Model string `yaml:"model"`
+}
+
+// VectorDBConfig 向量数据库配置
+type VectorDBConfig struct {
+	// Type 向量数据库类型: "memory", "qdrant"
+	Type string `yaml:"type"`
+	// Address 向量数据库地址（Qdrant 等）
+	Address string `yaml:"address"`
+	// Collection 集合/索引名称
+	Collection string `yaml:"collection"`
+}
+
+// RAGConfig 检索增强生成配置
+type RAGConfig struct {
+	// TopK 返回最相关的 K 个文档
+	TopK int `yaml:"topK"`
+	// ScoreThreshold 相似度阈值（0-1，低于这个值的不会被使用）
+	ScoreThreshold float64 `yaml:"scoreThreshold"`
+	// MaxTokens 上下文最大 token 数
+	MaxTokens int `yaml:"maxTokens"`
 }
 
 // ServiceConfig 定义服务自身的基本信息，包括服务名称和监听地址。
@@ -213,7 +259,32 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	applyEnv(&cfg)
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// Validate 检查配置合法性，在加载和环境变量覆盖之后调用。
+func (c *Config) Validate() error {
+	if c.Service.Addr == "" {
+		return fmt.Errorf("config: service.addr is required")
+	}
+	if c.MySQL.DSN == "" {
+		return fmt.Errorf("config: mysql.dsn is required")
+	}
+	if len(c.Redis.Addrs) == 0 {
+		return fmt.Errorf("config: redis.addrs is required")
+	}
+	if c.FreeSwitch.EventLeaseTTL > 0 && c.FreeSwitch.EventLeaseTTL < time.Second {
+		return fmt.Errorf("config: freeswitch.eventLeaseTTL must be at least 1s")
+	}
+	if c.AI.Enabled {
+		if c.AI.Embedder.Provider != "" && c.AI.Embedder.APIKey == "" {
+			return fmt.Errorf("config: ai.embedder.apiKey is required when embedder provider is set")
+		}
+	}
+	return nil
 }
 
 // applyEnv 应用环境变量覆盖 YAML 配置中的对应字段。
@@ -311,6 +382,46 @@ func applyEnv(cfg *Config) {
 	if value := os.Getenv("TENANT_DEFAULT_MERCHANT_ID"); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
 			cfg.Tenant.DefaultMerchantID = parsed
+		}
+	}
+	// AI 配置
+	if value := os.Getenv("AI_ENABLED"); value == "true" {
+		cfg.AI.Enabled = true
+	}
+	if value := os.Getenv("AI_EMBEDDER_PROVIDER"); value != "" {
+		cfg.AI.Embedder.Provider = value
+	}
+	if value := os.Getenv("AI_EMBEDDER_API_KEY"); value != "" {
+		cfg.AI.Embedder.APIKey = value
+	}
+	if value := os.Getenv("AI_EMBEDDER_ENDPOINT"); value != "" {
+		cfg.AI.Embedder.Endpoint = value
+	}
+	if value := os.Getenv("AI_EMBEDDER_MODEL"); value != "" {
+		cfg.AI.Embedder.Model = value
+	}
+	if value := os.Getenv("AI_VECTORDB_TYPE"); value != "" {
+		cfg.AI.VectorDB.Type = value
+	}
+	if value := os.Getenv("AI_VECTORDB_ADDRESS"); value != "" {
+		cfg.AI.VectorDB.Address = value
+	}
+	if value := os.Getenv("AI_VECTORDB_COLLECTION"); value != "" {
+		cfg.AI.VectorDB.Collection = value
+	}
+	if value := os.Getenv("AI_RAG_TOP_K"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.AI.RAG.TopK = parsed
+		}
+	}
+	if value := os.Getenv("AI_RAG_SCORE_THRESHOLD"); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			cfg.AI.RAG.ScoreThreshold = parsed
+		}
+	}
+	if value := os.Getenv("AI_RAG_MAX_TOKENS"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil {
+			cfg.AI.RAG.MaxTokens = parsed
 		}
 	}
 }

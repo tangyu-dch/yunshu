@@ -71,15 +71,11 @@ for i = 0, n - 1 do
 
   -- 3. 满足条件则执行原子占用
   if eligible then
-    local current = redis.call("INCR", counter)
-    if current == 1 then
-      redis.call("PEXPIRE", counter, ttl)
-    end
+    redis.call("INCR", counter)
+    redis.call("PEXPIRE", counter, ttl)
     if gwLimit > 0 then
-      local gwCurrent = redis.call("INCR", gwCounter)
-      if gwCurrent == 1 then
-        redis.call("PEXPIRE", gwCounter, ttl)
-      end
+      redis.call("INCR", gwCounter)
+      redis.call("PEXPIRE", gwCounter, ttl)
     end
     redis.call("SET", idem, val, "PX", ttl)
     return {1, val, gwID, i + 1}
@@ -118,18 +114,14 @@ if gwLimit > 0 then
   end
 end
 
--- 4. 累加号码级并发计数器，并初始化 TTL 生存期
-current = redis.call("INCR", counter)
-if current == 1 then
-  redis.call("PEXPIRE", counter, ttl)
-end
+-- 4. 累加号码级并发计数器，并续约 TTL
+redis.call("INCR", counter)
+redis.call("PEXPIRE", counter, ttl)
 
--- 5. 累加网关级全局并发计数器，并初始化 TTL 生存期
+-- 5. 累加网关级全局并发计数器，并续约 TTL
 if gwLimit > 0 then
-  local gwCurrent = redis.call("INCR", gwCounter)
-  if gwCurrent == 1 then
-    redis.call("PEXPIRE", gwCounter, ttl)
-  end
+  redis.call("INCR", gwCounter)
+  redis.call("PEXPIRE", gwCounter, ttl)
 end
 
 -- 6. 标记幂等 Key，返回原子占用成功
