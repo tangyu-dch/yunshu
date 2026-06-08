@@ -4,15 +4,14 @@
 
   使用方法:
     sipp -sf inbound_uac.xml \
-         -s 01088886666 \            # 呼入 DID 号码
-         127.0.0.1:5080              # FreeSWITCH 外部 Profile
+         -s 01088886666 \
+         -i 192.168.107.0 \
+         -p 6070 \
+         -m 1 \
+         -nostdin \
+         192.168.107.6:5080
 
-  验证要点:
-    1. 向 DID 发起 INVITE
-    2. 收到 100 Trying + 180 Ringing (等待坐席接听)
-    3. 收到 200 OK (坐席接听)
-    4. 发送 ACK 进入通话
-    5. 客户挂机发送 BYE
+  信令: INVITE → 100 → 180/183 → 200 OK → ACK → 通话 → BYE → 200 OK
 -->
 <scenario name="inbound_uac">
   <!-- 发起 INVITE -->
@@ -26,7 +25,7 @@
       CSeq: [cseq] INVITE
       Contact: sip:sipp@[local_ip]:[local_port]
       Max-Forwards: 70
-      Subject: yunshu-inbound-test
+      Subject: yunshu-e2e-inbound-test
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -53,12 +52,7 @@
   <!-- 183 Session Progress -->
   <recv response="183" optional="true" />
 
-  <!-- 480/404/503 (无坐席/DID未配置 — 信令通路验证通过) -->
-  <recv response="480" optional="true" />
-  <recv response="404" optional="true" />
-  <recv response="503" optional="true" />
-
-  <!-- 200 OK (坐席接听) -->
+  <!-- 200 OK (坐席接听 / 系统桥接完成) -->
   <recv response="200" rtd="true" />
 
   <!-- ACK -->
@@ -71,18 +65,12 @@
       Call-ID: [call_id]
       CSeq: [cseq] ACK
       Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
       Content-Length: 0
     ]]>
   </send>
 
-  <!-- ACK (仅 200 OK 后发送) -->
-  <nop>
-    <action>
-      <exec int_cmd="set_test" value="sip_signal_ok" />
-    </action>
-  </nop>
-
-  <!-- 通话保持 5 秒 -->
+  <!-- 通话 5 秒 -->
   <pause milliseconds="5000" />
 
   <!-- 客户挂机 -->

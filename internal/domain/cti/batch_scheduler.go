@@ -183,8 +183,8 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 	// 运行时选号：为批量外呼分配主叫号码和网关（高并发原子占用）
 	var selectedCaller string
 	var selectedGatewayID string
+	var gatewayRegister bool = true
 	var allocation *RuntimeAllocation
-	var selErr error
 	effectiveUserID := firstNonZero(assignedUserID, tel.UserID, task.UserID)
 	if s.Selector != nil && s.Candidates != nil && effectiveUserID > 0 {
 		candidates, candErr := s.Candidates.CandidatesForUser(ctx, effectiveUserID)
@@ -199,7 +199,7 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 				UserID:     effectiveUserID,
 				Candidates: candidates,
 			}
-			_, allocation, selErr = s.Selector.SelectAndClaim(ctx, selReq)
+			selResult, allocation, selErr := s.Selector.SelectAndClaim(ctx, selReq)
 			if selErr != nil {
 				logger.Error("批量外呼选号失败，释放号码并中止调度", "taskId", taskID, "telId", tel.ID, "callee", tel.Tel, "error", selErr.Error())
 				_ = s.Repository.ReleaseBatchTel(ctx, taskID, tel.ID, now)
@@ -207,6 +207,12 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 			}
 			selectedCaller = allocation.Caller
 			selectedGatewayID = allocation.GatewayID
+			if selResult.Caller != nil && selResult.Caller.Model == 2 {
+				gatewayRegister = false
+				if selResult.Caller.GatewayRegion != "" {
+					selectedGatewayID = selResult.Caller.GatewayRegion
+				}
+			}
 			logger.Info("批量外呼运行时选号成功", "taskId", taskID, "telId", tel.ID, "caller", selectedCaller, "gatewayId", selectedGatewayID, "candidateIndex", allocation.CandidateIndex)
 		}
 	}
@@ -230,6 +236,7 @@ func (s *BatchSchedulerService) DispatchNext(ctx context.Context, version string
 		QueueEnable:     task.QueueEnable,
 		CallerNumber:    selectedCaller,
 		CallerGatewayID: selectedGatewayID,
+		GatewayRegister:   gatewayRegister,
 	}
 	if s.Events != nil {
 		if err := s.Events.Publish(ctx, contracts.NewEventEnvelope(

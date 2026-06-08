@@ -29,6 +29,7 @@ type BatchCallReq struct {
 	QueueEnable       bool           `json:"queueEnable,omitempty"`
 	CallerNumber      string         `json:"callerNumber,omitempty"`      // CTI 运行时选号分配的主叫号码
 	CallerGatewayID   string         `json:"callerGatewayId,omitempty"`   // CTI 运行时选号分配的网关标识
+	GatewayRegister   bool           `json:"gatewayRegister,omitempty"`   // true=sofia/gateway, false=sofia/external (Model=2 IP直连)
 }
 
 type BatchTaskState string

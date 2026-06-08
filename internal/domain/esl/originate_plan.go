@@ -194,7 +194,7 @@ func BuildBatchOutboundPlan(callID, version, fsAddr string, req contracts.BatchC
 		CustomerUUID:       customerUUID,
 		Destination:        req.Phone,
 		DomainOrGateway:    gateway,
-		Register:           true,
+		Register:           req.GatewayRegister,
 		SupplementRing:     supplementRing,
 		SupplementRingFile: supplementRingFile,
 		BroadcastTime:      broadcastTime,

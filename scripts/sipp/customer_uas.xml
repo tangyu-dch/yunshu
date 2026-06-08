@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  客户模拟器 - SIPp UAS 场景
+
+  用途: 模拟客户电话，接收系统外呼 INVITE (用于批量外呼/API外呼/拨号盘场景)
+  信令: INVITE → 100 → 183 Session Progress → 200 OK(SDP) → ACK → 通话 → BYE → 200 OK
+
+  使用方法:
+    sipp -sf customer_uas.xml -s 13800001111 -i 192.168.107.0 -p 6080 -m 1 -nostdin 192.168.107.6:5080
+-->
+<scenario name="customer_uas">
+  <!-- 收到 INVITE -->
+  <recv request="INVITE" />
+
+  <!-- 回复 100 Trying -->
+  <send>
+    <![CDATA[
+      SIP/2.0 100 Trying
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- 模拟振铃延迟 -->
+  <pause milliseconds="500" />
+
+  <!-- 回复 183 Session Progress (带早期媒体) -->
+  <send>
+    <![CDATA[
+      SIP/2.0 183 Session Progress
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 8 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 模拟接听延迟 2 秒 -->
+  <pause milliseconds="2000" />
+
+  <!-- 回复 200 OK (接听) -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:];tag=[call_number]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 0 8 101
+      a=rtpmap:0 PCMU/8000
+      a=rtpmap:8 PCMA/8000
+      a=rtpmap:101 telephone-event/8000
+      a=fmtp:101 0-16
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 收到 ACK -->
+  <recv request="ACK" />
+
+  <!-- 模拟通话 5 秒 -->
+  <pause milliseconds="5000" />
+
+  <!-- 收到 BYE (系统挂断) -->
+  <recv request="BYE" />
+
+  <!-- 回复 200 OK -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <timewait milliseconds="1000" />
+
+  <!-- 异常路径: 收到 CANCEL -->
+  <recv request="CANCEL" optional="true" />
+  <send optional="true">
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+</scenario>
