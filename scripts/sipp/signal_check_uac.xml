@@ -1,32 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  呼入 - SIPp UAC 场景 (模拟客户通过 DID 呼入)
+  SIP 信令通路检测 - SIPp UAC 场景
 
-  使用方法:
-    sipp -sf inbound_uac.xml \
-         -s 01088886666 \            # 呼入 DID 号码
-         127.0.0.1:5080              # FreeSWITCH 外部 Profile
-
-  验证要点:
-    1. 向 DID 发起 INVITE
-    2. 收到 100 Trying + 180 Ringing (等待坐席接听)
-    3. 收到 200 OK (坐席接听)
-    4. 发送 ACK 进入通话
-    5. 客户挂机发送 BYE
+  用途: 验证 SIP 信令通路是否通畅（不依赖坐席注册）
+  判定:
+    - 收到 100 Trying = SIP 传输层正常
+    - 收到 4xx/5xx/6xx = SIP 事务层正常（被叫不可达等业务拒绝）
+    - 收到 200 OK = 完整通话建立成功
+    - 超时无响应 = 信令不通
 -->
-<scenario name="inbound_uac">
+<scenario name="signal_check_uac">
   <!-- 发起 INVITE -->
   <send retrans="500">
     <![CDATA[
       INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
       To: [service] <sip:[service]@[remote_ip]:[remote_port]>
       Call-ID: [call_id]
       CSeq: [cseq] INVITE
       Contact: sip:sipp@[local_ip]:[local_port]
       Max-Forwards: 70
-      Subject: yunshu-inbound-test
+      Subject: yunshu-signal-check
       Content-Type: application/sdp
       Content-Length: [len]
 
@@ -44,53 +39,44 @@
     ]]>
   </send>
 
-  <!-- 100 Trying -->
+  <!-- 100 Trying (传输层确认) -->
   <recv response="100" optional="true" />
 
-  <!-- 180 Ringing (等待坐席) -->
+  <!-- 任意 1xx 临时响应 -->
   <recv response="180" optional="true" />
-
-  <!-- 183 Session Progress -->
   <recv response="183" optional="true" />
 
-  <!-- 480/404/503 (无坐席/DID未配置 — 信令通路验证通过) -->
-  <recv response="480" optional="true" />
-  <recv response="404" optional="true" />
-  <recv response="503" optional="true" />
-
-  <!-- 200 OK (坐席接听) -->
-  <recv response="200" rtd="true" />
+  <!-- 成功: 200 OK -->
+  <recv response="200" rtd="true">
+    <action>
+      <exec int_cmd="set_test" value="call_established" />
+    </action>
+  </recv>
 
   <!-- ACK -->
   <send>
     <![CDATA[
       ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
       To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: [cseq] ACK
       Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
       Content-Length: 0
     ]]>
   </send>
 
-  <!-- ACK (仅 200 OK 后发送) -->
-  <nop>
-    <action>
-      <exec int_cmd="set_test" value="sip_signal_ok" />
-    </action>
-  </nop>
+  <!-- 通话 3 秒 -->
+  <pause milliseconds="3000" />
 
-  <!-- 通话保持 5 秒 -->
-  <pause milliseconds="5000" />
-
-  <!-- 客户挂机 -->
+  <!-- 挂机 -->
   <send retrans="500">
     <![CDATA[
       BYE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: caller <sip:13900001234@[local_ip]:[local_port]>;tag=[call_number]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
       To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
       CSeq: [cseq] BYE
@@ -100,6 +86,13 @@
   </send>
 
   <recv response="200" />
+
+  <!-- 定义: 4xx/5xx/6xx 业务拒绝路径 -->
+  <label name="rejected" />
+  <recv response="404" optional="true" />
+  <recv response="480" optional="true" />
+  <recv response="486" optional="true" />
+  <recv response="503" optional="true" />
 
   <timewait milliseconds="1000" />
 </scenario>

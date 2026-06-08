@@ -20,14 +20,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SIPP_DIR="$SCRIPT_DIR"
 
 # 配置参数（根据实际环境修改）
-FS_HOST="${FS_HOST:-127.0.0.1}"
+# Docker 内网 IP（绕过 Docker NAT，直连容器）
+FS_HOST="${FS_HOST:-192.168.107.6}"
 FS_SIP_PORT="${FS_SIP_PORT:-5080}"
-KAMAILIO_HOST="${KAMAILIO_HOST:-127.0.0.1}"
+KAMAILIO_HOST="${KAMAILIO_HOST:-192.168.107.6}"
 KAMAILIO_PORT="${KAMAILIO_PORT:-5060}"
 CALLER_NUMBER="${CALLER_NUMBER:-01012345678}"
 CALLEE_NUMBER="${CALLEE_NUMBER:-13800001111}"
 AGENT_EXT="${AGENT_EXT:-2001}"
 DID_NUMBER="${DID_NUMBER:-01088886666}"
+# 本机在 Docker 网络上的 IP（FS/Kamailio 回包地址）
+LOCAL_SIP_IP="${LOCAL_SIP_IP:-192.168.107.0}"
 
 # 测试结果统计
 PASS=0
@@ -70,6 +73,7 @@ run_test() {
     local log_file="/tmp/sipp_${name}_$(date +%s).log"
 
     if sipp -sf "$scenario_file" $sipp_args \
+        -i "$LOCAL_SIP_IP" \
         -trace_err -error_file "/tmp/sipp_${name}_err.log" \
         -screen_file "$log_file" \
         -timeout 30s -timeout_error \
