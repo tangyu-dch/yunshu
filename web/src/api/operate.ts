@@ -624,7 +624,7 @@ function typeLabel(type?: number) {
 }
 
 // ----------------------------------------------------
-// 以下为补全的运营/商户管理端 API 接口定义
+// 以下为补全的运营/商户管理端 API 接口
 // ----------------------------------------------------
 
 export async function fetchAccounts(pageNumber = 1, pageSize = 20, username = '', accountType = '') {
@@ -1208,6 +1208,135 @@ export async function triggerInstallDeploy() {
   return data
 }
 
+// ----------------------------------------------------
+// 向量知识库管理 API 接口
+// ----------------------------------------------------
+
+export interface KnowledgeBase {
+  id?: string
+  name: string
+  description: string
+  createdAt?: string
+  updatedAt?: string
+  metadata?: any
+}
+
+export interface KnowledgeBaseDocument {
+  id?: string
+  kbId: string
+  title: string
+  content: string
+  embedding?: number[]
+  createdAt?: string
+  updatedAt?: string
+  metadata?: any
+}
+
+export interface SearchResult {
+  id: string
+  score: number
+  text: string
+  metadata: any
+}
+
+export async function fetchKnowledgeBases() {
+  const { data } = await http.get<KnowledgeBase[]>('/merchant/knowledge-base/list')
+  return data
+}
+
+export async function saveKnowledgeBase(payload: KnowledgeBase) {
+  const path = payload.id ? '/merchant/knowledge-base/update' : '/merchant/knowledge-base/add'
+  const method = payload.id ? 'post' : 'put'
+  const { data } = await http[method](path, payload)
+  return data
+}
+
+export async function deleteKnowledgeBase(id: string) {
+  const { data } = await http.post('/merchant/knowledge-base/delete', { id })
+  return data
+}
+
+export async function fetchKnowledgeBaseDocuments(kbId: string) {
+  const { data } = await http.get<KnowledgeBaseDocument[]>(`/merchant/knowledge-base/${kbId}/documents`)
+  return data
+}
+
+export async function saveKnowledgeBaseDocument(payload: KnowledgeBaseDocument) {
+  const path = payload.id ? '/merchant/knowledge-base/document/update' : '/merchant/knowledge-base/document/add'
+  const method = payload.id ? 'post' : 'put'
+  const { data } = await http[method](path, payload)
+  return data
+}
+
+export async function deleteKnowledgeBaseDocument(kbId: string, docId: string) {
+  const { data } = await http.post('/merchant/knowledge-base/document/delete', { kbId, docId })
+  return data
+}
+
+export async function searchKnowledgeBase(kbId: string, query: string, topK: number = 3, scoreThreshold: number = 0.7) {
+  const { data } = await http.post<SearchResult[]>('/merchant/knowledge-base/search', { kbId, query, topK, scoreThreshold })
+  return data
+}
+
+// ----------------------------------------------------
+// ASR/TTS 配置 API 接口
+// ----------------------------------------------------
+
+export interface ASRConfig {
+  id?: string
+  name: string
+  provider: string
+  apiKey: string
+  endpoint?: string
+  language?: string
+  enabled: boolean
+}
+
+export interface TTSConfig {
+  id?: string
+  name: string
+  provider: string
+  apiKey: string
+  endpoint?: string
+  voiceType?: string
+  speed?: number
+  enabled: boolean
+}
+
+export async function fetchASRConfigs() {
+  const { data } = await http.get<ASRConfig[]>('/merchant/asr-config/list')
+  return data
+}
+
+export async function saveASRConfig(payload: ASRConfig) {
+  const path = payload.id ? '/merchant/asr-config/update' : '/merchant/asr-config/add'
+  const method = payload.id ? 'post' : 'put'
+  const { data } = await http[method](path, payload)
+  return data
+}
+
+export async function deleteASRConfig(id: string) {
+  const { data } = await http.post('/merchant/asr-config/delete', { id })
+  return data
+}
+
+export async function fetchTTSConfigs() {
+  const { data } = await http.get<TTSConfig[]>('/merchant/tts-config/list')
+  return data
+}
+
+export async function saveTTSConfig(payload: TTSConfig) {
+  const path = payload.id ? '/merchant/tts-config/update' : '/merchant/tts-config/add'
+  const method = payload.id ? 'post' : 'put'
+  const { data } = await http[method](path, payload)
+  return data
+}
+
+export async function deleteTTSConfig(id: string) {
+  const { data } = await http.post('/merchant/tts-config/delete', { id })
+  return data
+}
+
 export async function fetchInstallDeployStatus() {
   const { data } = await http.get('/api/install/deploy/status')
   return data
@@ -1524,4 +1653,164 @@ export async function lookupIPAddress(ip: string) {
   return data
 }
 
+// ----------------------------------------------------
+// 客户画像管理 API 接口
+// ----------------------------------------------------
 
+export interface CustomerProfile {
+  id?: number
+  phoneNumber: string
+  merchantId?: number
+  name?: string
+  gender?: string
+  age?: number
+  province?: string
+  city?: string
+  tags?: string
+  customFields?: any
+  source?: string
+  firstContact?: string
+  lastContact?: string
+  totalCalls?: number
+  connectedCalls?: number
+  avgDuration?: number
+  status?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface CustomerProfileTag {
+  id?: number
+  merchantId?: number
+  name: string
+  color?: string
+  description?: string
+  category?: string
+  enable?: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ProfileWorkflow {
+  id?: number
+  merchantId?: number
+  name: string
+  description?: string
+  config?: string
+  status?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ProfileWorkflowExecution {
+  id?: number
+  workflowId?: number
+  customerId?: number
+  merchantId?: number
+  status?: string
+  executionResult?: string
+  errorMessage?: string
+  startTime?: string
+  endTime?: string
+  createdAt?: string
+}
+
+export interface ProfileQueryRequest {
+  merchantId?: number
+  phoneNumber?: string
+  name?: string
+  tags?: string[]
+  status?: string
+  page?: number
+  pageSize?: number
+}
+
+export async function createCustomerProfile(profile: CustomerProfile) {
+  const { data } = await http.post<CustomerProfile>('/operate/customer-profile/create', profile)
+  return data
+}
+
+export async function updateCustomerProfile(profile: CustomerProfile) {
+  const { data } = await http.post<CustomerProfile>('/operate/customer-profile/update', profile)
+  return data
+}
+
+export async function getCustomerProfile(id: number) {
+  const { data } = await http.get<CustomerProfile>(`/operate/customer-profile/detail/${id}`)
+  return data
+}
+
+export async function queryCustomerProfiles(req: ProfileQueryRequest) {
+  const { data } = await http.post<{ records: CustomerProfile[], total: number, page: number, pageSize: number }>('/operate/customer-profile/query', req)
+  return data
+}
+
+export async function batchUpdateCustomerProfiles(merchantId: number, req: { ids: number[], tags?: string[], status?: string, customFields?: any }) {
+  const { data } = await http.post('/operate/customer-profile/batch-update', { merchantId, ...req })
+  return data
+}
+
+export async function deleteCustomerProfile(id: number, merchantId: number) {
+  const { data } = await http.post('/operate/customer-profile/delete', { id, merchantId })
+  return data
+}
+
+export async function getCustomerProfileStatistics(merchantId?: number) {
+  const { data } = await http.get<{ total: number, active: number, inactive: number, blacklist: number }>('/operate/customer-profile/statistics', { params: { merchantId } })
+  return data
+}
+
+export async function createCustomerProfileTag(tag: CustomerProfileTag) {
+  const { data } = await http.post<CustomerProfileTag>('/operate/customer-profile/tag/create', tag)
+  return data
+}
+
+export async function updateCustomerProfileTag(tag: CustomerProfileTag) {
+  const { data } = await http.post<CustomerProfileTag>('/operate/customer-profile/tag/update', tag)
+  return data
+}
+
+export async function deleteCustomerProfileTag(id: number, merchantId: number) {
+  const { data } = await http.post('/operate/customer-profile/tag/delete', { id, merchantId })
+  return data
+}
+
+export async function listCustomerProfileTags(merchantId?: number) {
+  const { data } = await http.get<CustomerProfileTag[]>('/operate/customer-profile/tags', { params: { merchantId } })
+  return data
+}
+
+export async function batchCustomerProfileTagOperation(merchantId: number, req: { tagIds: number[], customerIds: number[], operation: string }) {
+  const { data } = await http.post('/operate/customer-profile/tag/batch-operation', { merchantId, ...req })
+  return data
+}
+
+export async function createProfileWorkflow(workflow: ProfileWorkflow) {
+  const { data } = await http.post<ProfileWorkflow>('/operate/customer-profile/workflow/create', workflow)
+  return data
+}
+
+export async function updateProfileWorkflow(workflow: ProfileWorkflow) {
+  const { data } = await http.post<ProfileWorkflow>('/operate/customer-profile/workflow/update', workflow)
+  return data
+}
+
+export async function deleteProfileWorkflow(id: number, merchantId: number) {
+  const { data } = await http.post('/operate/customer-profile/workflow/delete', { id, merchantId })
+  return data
+}
+
+export async function listProfileWorkflows(merchantId?: number) {
+  const { data } = await http.get<ProfileWorkflow[]>('/operate/customer-profile/workflows', { params: { merchantId } })
+  return data
+}
+
+export async function executeProfileWorkflow(workflowId: number, customerIds: number[], merchantId?: number) {
+  const { data } = await http.post('/operate/customer-profile/workflow/execute', { workflowId, customerIds, merchantId })
+  return data
+}
+
+export async function listProfileWorkflowExecutions(workflowId: number, page?: number, pageSize?: number) {
+  const { data } = await http.get<{ records: ProfileWorkflowExecution[], total: number, page: number, pageSize: number }>(`/operate/customer-profile/workflow/executions/${workflowId}`, { params: { page, pageSize } })
+  return data
+}

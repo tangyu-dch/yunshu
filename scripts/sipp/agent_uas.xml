@@ -5,6 +5,10 @@
   用途: 模拟坐席 SIP 电话，接收系统 INVITE
   信令: INVITE → 100 → 180 Ringing → 200 OK(SDP) → ACK → 通话 → BYE → 200 OK
 
+  支持双向挂机:
+    - 优先等待对端 BYE (客户先挂)
+    - 超时 8 秒后坐席主动挂机
+
   使用方法:
     sipp -sf agent_uas.xml -s 1001 -i 192.168.107.0 -p 6060 -m 1 -nostdin 192.168.107.6:5060
 -->
@@ -75,10 +79,30 @@
   <!-- 收到 ACK -->
   <recv request="ACK" />
 
-  <!-- 模拟通话 5 秒 -->
-  <pause milliseconds="5000" />
+  <!-- 通话中: 等待对端 BYE，超时 8 秒后坐席主动挂机 -->
+  <recv request="BYE" timeout="8000" ontimeout="agent_hangup" />
 
-  <!-- 坐席主动挂机 -->
+  <!-- 对端先挂: 回复 200 OK -->
+  <send>
+    <![CDATA[
+      SIP/2.0 200 OK
+      [last_Via:]
+      [last_From:]
+      [last_To:]
+      [last_Call-ID:]
+      [last_CSeq:]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <nop>
+    <action>
+      <exec int_cmd="stop_now" />
+    </action>
+  </nop>
+
+  <!-- 坐席主动挂机路径 -->
+  <label id="agent_hangup" />
   <send retrans="500">
     <![CDATA[
       BYE sip:[service]@[local_ip]:[local_port] SIP/2.0
@@ -92,23 +116,7 @@
     ]]>
   </send>
 
-  <!-- 收到 200 OK -->
   <recv response="200" />
-
-  <!-- 定义: 收到对方 BYE (对方先挂) -->
-  <label name="peer_bye" />
-  <recv request="BYE" optional="true" />
-  <send optional="true">
-    <![CDATA[
-      SIP/2.0 200 OK
-      [last_Via:]
-      [last_From:]
-      [last_To:]
-      [last_Call-ID:]
-      [last_CSeq:]
-      Content-Length: 0
-    ]]>
-  </send>
 
   <timewait milliseconds="1000" />
 </scenario>

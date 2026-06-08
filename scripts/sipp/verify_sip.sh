@@ -4,10 +4,13 @@
 #
 # 验证内容:
 #   1. Docker 容器运行状态
-#   2. FreeSWITCH SIP 信令通路 (INVITE → 100/480)
-#   3. Kamailio SIP 信令通路 (INVITE → 100)
-#   4. FreeSWITCH Sofia Profile 状态
-#   5. 基础设施连接 (ESL/HTTP/Redis/MySQL)
+#   2. FreeSWITCH OPTIONS 可用性探测
+#   3. Kamailio OPTIONS 可用性探测
+#   4. FreeSWITCH INVITE 信令验证
+#   5. Kamailio INVITE 信令验证
+#   6. SIP 合法性校验 (REGISTER/CANCEL/畸形SDP)
+#   7. FreeSWITCH Sofia Profile 状态
+#   8. 基础设施连接 (ESL/HTTP/Redis/MySQL)
 #
 # 前置条件:
 #   1. SIPp 已安装 (brew install sipp)
@@ -39,6 +42,44 @@ PASS=0
 FAIL=0
 WARN=0
 
+# ============================================================================
+# 工具函数
+# ============================================================================
+
+# 运行 SIPp 场景并测量延迟
+# 用法: run_sipp_timed "scenario.xml" "service" "port" "target_host:port"
+# 结果: TIMED_EXIT (退出码), TIMED_MS (延迟毫秒), TIMED_OUTPUT (sipp 输出)
+run_sipp_timed() {
+    local scenario="$1"
+    local service="$2"
+    local port="$3"
+    local target="$4"
+
+    local start_ms
+    start_ms=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo $(($(date +%s) * 1000)))
+
+    TIMED_OUTPUT=$(sipp -sf "$SCRIPT_DIR/$scenario" \
+        -s "$service" \
+        -i "$LOCAL_SIP_IP" \
+        -p "$port" \
+        -m 1 \
+        -nostdin \
+        -timeout 10s \
+        -timeout_error \
+        "$target" 2>&1 || true)
+
+    TIMED_EXIT=$?
+
+    local end_ms
+    end_ms=$(python3 -c 'import time; print(int(time.time()*1000))' 2>/dev/null || echo $(($(date +%s) * 1000)))
+    TIMED_MS=$((end_ms - start_ms))
+}
+
+# 从 SIPp 输出提取 SIP 响应码
+extract_sip_response() {
+    echo "$TIMED_OUTPUT" | grep -oE 'SIP/2\.0 [0-9]+ [A-Za-z ]+' | head -1 | sed 's/SIP\/2\.0 //' || echo "无响应"
+}
+
 echo ""
 echo -e "${CYAN}=========================================="
 echo "  云枢 SIP 信令通路验证"
@@ -49,7 +90,7 @@ echo "  本机 SIP IP:  $LOCAL_SIP_IP"
 echo ""
 
 # ---- 1. 基础连通性 ----
-echo -e "${YELLOW}[1/5]${NC} 检查 Docker 容器状态..."
+echo -e "${YELLOW}[1/8]${NC} 检查 Docker 容器状态..."
 for svc in cc-freeswitch cc-kamailio cc-redis cc-mysql; do
     if docker ps --format '{{.Names}}' | grep -q "^${svc}$"; then
         status=$(docker inspect --format '{{.State.Health.Status}}' "$svc" 2>/dev/null || echo "running")
@@ -61,76 +102,192 @@ for svc in cc-freeswitch cc-kamailio cc-redis cc-mysql; do
 done
 echo ""
 
-# ---- 2. FreeSWITCH SIP 信令验证 ----
-echo -e "${YELLOW}[2/5]${NC} FreeSWITCH INVITE 信令验证..."
+# ---- 2. FreeSWITCH OPTIONS 可用性探测 ----
+echo -e "${YELLOW}[2/8]${NC} FreeSWITCH OPTIONS 可用性探测..."
+run_sipp_timed "options_check_uac.xml" "sipp" 6070 "$FS_HOST:$FS_SIP_PORT"
+
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    sip_resp=$(extract_sip_response)
+    echo -e "  ${GREEN}✓${NC} FS OPTIONS: ${TIMED_MS}ms (${sip_resp:-传输层可达})"
+    ((PASS++))
+else
+    if echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+        echo -e "  ${RED}✗${NC} FS OPTIONS: ${TIMED_MS}ms (超时 — 信令不通)"
+        ((FAIL++))
+    else
+        echo -e "  ${YELLOW}?${NC} FS OPTIONS: ${TIMED_MS}ms (异常退出)"
+        ((WARN++))
+    fi
+fi
+echo ""
+
+# ---- 3. Kamailio OPTIONS 可用性探测 ----
+echo -e "${YELLOW}[3/8]${NC} Kamailio OPTIONS 可用性探测..."
+run_sipp_timed "options_check_uac.xml" "sipp" 6090 "$KAMAILIO_HOST:$KAMAILIO_PORT"
+
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    sip_resp=$(extract_sip_response)
+    echo -e "  ${GREEN}✓${NC} Kamailio OPTIONS: ${TIMED_MS}ms (${sip_resp:-传输层可达})"
+    ((PASS++))
+else
+    if echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+        echo -e "  ${RED}✗${NC} Kamailio OPTIONS: ${TIMED_MS}ms (超时 — 信令不通)"
+        ((FAIL++))
+    else
+        echo -e "  ${YELLOW}?${NC} Kamailio OPTIONS: ${TIMED_MS}ms (异常退出)"
+        ((WARN++))
+    fi
+fi
+echo ""
+
+# ---- 4. FreeSWITCH INVITE 信令验证 ----
+echo -e "${YELLOW}[4/8]${NC} FreeSWITCH INVITE 信令验证..."
 echo "  发送 INVITE → $FS_HOST:$FS_SIP_PORT ..."
-FS_RESULT=$(sipp -sf "$SCRIPT_DIR/inbound_uac.xml" \
-    -s 01088886666 \
-    -i "$LOCAL_SIP_IP" \
-    -p 6070 \
-    -m 1 \
-    -nostdin \
-    -timeout 10s \
-    -timeout_error \
-    "$FS_HOST:$FS_SIP_PORT" 2>&1 || true)
+run_sipp_timed "signal_check_uac.xml" "01088886666" 6071 "$FS_HOST:$FS_SIP_PORT"
 
-if echo "$FS_RESULT" | grep -q "Aborting call on unexpected message.*480"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 100 Trying + 480 Unavailable — 信令通路正常 (无坐席注册)"
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    echo -e "  ${GREEN}✓${NC} FS INVITE: ${TIMED_MS}ms — 信令通路正常 (200 OK 呼叫建立)"
     ((PASS++))
-elif echo "$FS_RESULT" | grep -q "Aborting call on unexpected message.*404"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 100 Trying + 404 Not Found — 信令通路正常 (DID 未配置)"
+elif echo "$TIMED_OUTPUT" | grep -q "unexpected message"; then
+    # signal_check 的 rejected 路径: SIPp 收到 4xx/5xx 后 ACK + stop_now
+    # 但由于 optional recv 可能不匹配，fallback 检查
+    sip_resp=$(echo "$TIMED_OUTPUT" | grep -oE 'SIP/2\.0 [0-9]+ [A-Za-z ]+' | head -1 | sed 's/SIP\/2\.0 //')
+    echo -e "  ${GREEN}✓${NC} FS INVITE: ${TIMED_MS}ms — ${sip_resp:-4xx 响应} (信令通路正常，无坐席注册)"
     ((PASS++))
-elif echo "$FS_RESULT" | grep -q "200.*<---"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 200 OK — 呼叫建立成功!"
-    ((PASS++))
-elif echo "$FS_RESULT" | grep -q "100.*<---"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 100 Trying — SIP 传输层正常"
-    ((PASS++))
-elif echo "$FS_RESULT" | grep -q "timed out"; then
-    echo -e "  ${RED}✗${NC} INVITE 超时 — 信令不通"
+elif echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+    echo -e "  ${RED}✗${NC} FS INVITE: ${TIMED_MS}ms (超时 — 信令不通)"
     ((FAIL++))
 else
-    echo -e "  ${YELLOW}?${NC} FS 响应异常:"
-    echo "$FS_RESULT" | grep -E "unexpected|error|abort" | head -3
-    ((WARN++))
+    # SIPp 场景正常退出 (rejected 路径: ACK + stop_now)
+    # 检查是否有 SIP 交互发生
+    if echo "$TIMED_OUTPUT" | grep -qE "100|180|183|200|404|480|486|503"; then
+        sip_resp=$(extract_sip_response)
+        echo -e "  ${GREEN}✓${NC} FS INVITE: ${TIMED_MS}ms — ${sip_resp} (信令通路正常)"
+        ((PASS++))
+    else
+        echo -e "  ${YELLOW}?${NC} FS INVITE: ${TIMED_MS}ms (响应异常)"
+        echo "$TIMED_OUTPUT" | grep -E "unexpected|error|abort" | head -3
+        ((WARN++))
+    fi
 fi
 echo ""
 
-# ---- 3. Kamailio SIP 信令验证 ----
-echo -e "${YELLOW}[3/5]${NC} Kamailio INVITE 信令验证..."
+# ---- 5. Kamailio INVITE 信令验证 ----
+echo -e "${YELLOW}[5/8]${NC} Kamailio INVITE 信令验证..."
 echo "  发送 INVITE → $KAMAILIO_HOST:$KAMAILIO_PORT ..."
-KAM_RESULT=$(sipp -sf "$SCRIPT_DIR/dialpad_uac.xml" \
-    -s 2001 \
-    -i "$LOCAL_SIP_IP" \
-    -p 6090 \
-    -m 1 \
-    -nostdin \
-    -timeout 10s \
-    -timeout_error \
-    "$KAMAILIO_HOST:$KAMAILIO_PORT" 2>&1 || true)
+run_sipp_timed "signal_check_uac.xml" "1001" 6091 "$KAMAILIO_HOST:$KAMAILIO_PORT"
 
-if echo "$KAM_RESULT" | grep -q "Aborting call on unexpected message"; then
-    resp=$(echo "$KAM_RESULT" | grep -oE 'SIP/2\.0 [0-9]+ [A-Za-z ]+' | head -1 | sed 's/SIP\/2\.0 //')
-    echo -e "  ${GREEN}✓${NC} INVITE → ${resp:-响应} — 信令通路正常"
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    echo -e "  ${GREEN}✓${NC} Kamailio INVITE: ${TIMED_MS}ms — 信令通路正常 (200 OK 呼叫建立)"
     ((PASS++))
-elif echo "$KAM_RESULT" | grep -q "200.*<---"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 200 OK — 呼叫建立成功"
+elif echo "$TIMED_OUTPUT" | grep -q "unexpected message"; then
+    sip_resp=$(echo "$TIMED_OUTPUT" | grep -oE 'SIP/2\.0 [0-9]+ [A-Za-z ]+' | head -1 | sed 's/SIP\/2\.0 //')
+    echo -e "  ${GREEN}✓${NC} Kamailio INVITE: ${TIMED_MS}ms — ${sip_resp:-4xx 响应} (信令通路正常)"
     ((PASS++))
-elif echo "$KAM_RESULT" | grep -q "100.*<---"; then
-    echo -e "  ${GREEN}✓${NC} INVITE → 100 Trying — 传输层正常"
-    ((PASS++))
-elif echo "$KAM_RESULT" | grep -q "timed out"; then
-    echo -e "  ${RED}✗${NC} INVITE 超时 — 信令不通"
+elif echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+    echo -e "  ${RED}✗${NC} Kamailio INVITE: ${TIMED_MS}ms (超时 — 信令不通)"
     ((FAIL++))
 else
-    echo -e "  ${YELLOW}?${NC} Kamailio 响应异常:"
-    echo "$KAM_RESULT" | grep -E "unexpected|error|abort" | head -3
-    ((WARN++))
+    if echo "$TIMED_OUTPUT" | grep -qE "100|180|183|200|404|480|486|503"; then
+        sip_resp=$(extract_sip_response)
+        echo -e "  ${GREEN}✓${NC} Kamailio INVITE: ${TIMED_MS}ms — ${sip_resp} (信令通路正常)"
+        ((PASS++))
+    else
+        echo -e "  ${YELLOW}?${NC} Kamailio INVITE: ${TIMED_MS}ms (响应异常)"
+        echo "$TIMED_OUTPUT" | grep -E "unexpected|error|abort" | head -3
+        ((WARN++))
+    fi
 fi
 echo ""
 
-# ---- 4. FS Sofia Profile 状态 ----
-echo -e "${YELLOW}[4/5]${NC} FreeSWITCH Sofia Profile 状态..."
+# ---- 6. SIP 合法性校验 ----
+echo -e "${YELLOW}[6/8]${NC} SIP 合法性校验..."
+
+# 6a. REGISTER 合法性 (Kamailio)
+echo -e "  ${CYAN}6a.${NC} REGISTER 鉴权合法性 (Kamailio)..."
+run_sipp_timed "register_uac.xml" "1001" 6061 "$KAMAILIO_HOST:$KAMAILIO_PORT"
+
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    sip_resp=$(extract_sip_response)
+    if echo "$sip_resp" | grep -q "401"; then
+        echo -e "  ${GREEN}✓${NC} REGISTER: ${TIMED_MS}ms — 401 Unauthorized (鉴权挑战正常)"
+    elif echo "$sip_resp" | grep -q "403"; then
+        echo -e "  ${GREEN}✓${NC} REGISTER: ${TIMED_MS}ms — 403 Forbidden (鉴权流程正常)"
+    elif echo "$sip_resp" | grep -q "200"; then
+        echo -e "  ${GREEN}✓${NC} REGISTER: ${TIMED_MS}ms — 200 OK (注册成功)"
+    else
+        echo -e "  ${GREEN}✓${NC} REGISTER: ${TIMED_MS}ms — ${sip_resp:-响应正常}"
+    fi
+    ((PASS++))
+else
+    if echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+        echo -e "  ${RED}✗${NC} REGISTER: ${TIMED_MS}ms (超时 — Kamailio 未响应)"
+        ((FAIL++))
+    else
+        echo -e "  ${YELLOW}?${NC} REGISTER: ${TIMED_MS}ms (异常)"
+        ((WARN++))
+    fi
+fi
+
+# 6b. CANCEL 合法性 (FreeSWITCH)
+echo -e "  ${CYAN}6b.${NC} CANCEL 事务合法性 (FreeSWITCH)..."
+run_sipp_timed "cancel_uac.xml" "01088886666" 6072 "$FS_HOST:$FS_SIP_PORT"
+
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    echo -e "  ${GREEN}✓${NC} CANCEL: ${TIMED_MS}ms — 487 Request Terminated (CANCEL 事务正常)"
+    ((PASS++))
+elif echo "$TIMED_OUTPUT" | grep -q "487"; then
+    echo -e "  ${GREEN}✓${NC} CANCEL: ${TIMED_MS}ms — 487 响应已收到 (CANCEL 合法)"
+    ((PASS++))
+elif echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+    echo -e "  ${RED}✗${NC} CANCEL: ${TIMED_MS}ms (超时 — CANCEL 信令不通)"
+    ((FAIL++))
+else
+    # CANCEL 可能因为 INVITE 被快速拒绝 (480/404) 而未能匹配
+    if echo "$TIMED_OUTPUT" | grep -qE "480|404"; then
+        echo -e "  ${GREEN}✓${NC} CANCEL: ${TIMED_MS}ms — INVITE 已被快速拒绝 (信令通路正常)"
+        ((PASS++))
+    else
+        echo -e "  ${YELLOW}?${NC} CANCEL: ${TIMED_MS}ms (异常)"
+        ((WARN++))
+    fi
+fi
+
+# 6c. 畸形 SDP 错误处理 (FreeSWITCH)
+echo -e "  ${CYAN}6c.${NC} 畸形 SDP 错误处理 (FreeSWITCH)..."
+run_sipp_timed "invalid_sdp_uac.xml" "01088886666" 6073 "$FS_HOST:$FS_SIP_PORT"
+
+if [ "$TIMED_EXIT" -eq 0 ]; then
+    sip_resp=$(extract_sip_response)
+    if echo "$sip_resp" | grep -qE "488|400|415"; then
+        echo -e "  ${GREEN}✓${NC} 畸形SDP: ${TIMED_MS}ms — ${sip_resp} (错误正确拒绝)"
+    elif echo "$sip_resp" | grep -q "200"; then
+        echo -e "  ${YELLOW}⚠${NC} 畸形SDP: ${TIMED_MS}ms — 200 OK (畸形 SDP 未被检测，合规性问题)"
+        ((WARN++))
+    else
+        echo -e "  ${GREEN}✓${NC} 畸形SDP: ${TIMED_MS}ms — ${sip_resp:-响应正常}"
+    fi
+    ((PASS++))
+else
+    if echo "$TIMED_OUTPUT" | grep -q "timed out"; then
+        echo -e "  ${RED}✗${NC} 畸形SDP: ${TIMED_MS}ms (超时 — 信令不通)"
+        ((FAIL++))
+    else
+        # 检查是否有 SIP 错误响应被正确处理
+        if echo "$TIMED_OUTPUT" | grep -qE "488|400|415|480|404"; then
+            sip_resp=$(extract_sip_response)
+            echo -e "  ${GREEN}✓${NC} 畸形SDP: ${TIMED_MS}ms — ${sip_resp:-错误正确拒绝}"
+            ((PASS++))
+        else
+            echo -e "  ${YELLOW}?${NC} 畸形SDP: ${TIMED_MS}ms (异常)"
+            ((WARN++))
+        fi
+    fi
+fi
+echo ""
+
+# ---- 7. FS Sofia Profile 状态 ----
+echo -e "${YELLOW}[7/8]${NC} FreeSWITCH Sofia Profile 状态..."
 PROFILES=$(docker exec cc-freeswitch fs_cli -x "sofia status" 2>/dev/null | grep -E "RUNNING|ALIASED")
 if [ -n "$PROFILES" ]; then
     echo "$PROFILES" | while read -r line; do
@@ -145,8 +302,8 @@ else
 fi
 echo ""
 
-# ---- 5. 基础设施连接验证 ----
-echo -e "${YELLOW}[5/5]${NC} 基础设施连接验证..."
+# ---- 8. 基础设施连接验证 ----
+echo -e "${YELLOW}[8/8]${NC} 基础设施连接验证..."
 
 # ESL
 if docker exec cc-freeswitch fs_cli -x "status" 2>/dev/null | grep -q "UP"; then

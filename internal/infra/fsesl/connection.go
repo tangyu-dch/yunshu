@@ -236,8 +236,11 @@ func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Con
 		return nil, err
 	}
 
+	p.logger.Info("[DEBUG] claimLease 成功，开始注册事件监听", "fsAddr", fsAddr)
+
 	// 事件监听使用独立的 context，不受 Connect 调用方 context 生命周期影响
 	eventCtx, eventCancel := context.WithCancel(context.Background())
+	// NOTE: Connect 已持有 p.mu 写锁，此处直接操作 map（与 Connect 同一 goroutine，安全）
 	if existing := p.eventCancels[fsAddr]; existing != nil {
 		existing()
 	}
@@ -245,6 +248,10 @@ func (p *ConnectionPool) Connect(ctx context.Context, fsAddr string) (*eslgo.Con
 
 	conn.RegisterEventListener(eslgo.EventListenAll, func(event *eslgo.Event) {
 		eventName := event.Headers.Get("Event-Name")
+		// [DEBUG] 临时记录所有非 HEARTBEAT 事件
+		if eventName != "HEARTBEAT" {
+			p.logger.Info("[DEBUG-RAW] 收到FS事件", "eventName", eventName, "dest", event.Headers.Get("Caller-Destination-Number"))
+		}
 		if eventName == "CUSTOM" {
 			subclass := event.Headers.Get("Event-Subclass")
 			if subclass == "sofia::register" || subclass == "sofia::unregister" || subclass == "sofia::expire" {
@@ -380,12 +387,12 @@ func (p *ConnectionPool) startLeaseRenewal(fsAddr string) {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p.mu.Lock()
+	// NOTE: 从 Connect() 调用时已持有 p.mu 写锁，不可再 Lock。
+	// 外部调用者也应确保已持有锁。直接操作 map（同一 goroutine 安全）。
 	if existing := p.leaseCancels[fsAddr]; existing != nil {
 		existing()
 	}
 	p.leaseCancels[fsAddr] = cancel
-	p.mu.Unlock()
 	interval := p.leaseRenewInterval()
 	go func() {
 		ticker := time.NewTicker(interval)

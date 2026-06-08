@@ -1,0 +1,21 @@
+<!--
+  云枢入站呼叫捕获规则
+
+  用途: 捕获所有来自 external profile (port 5080) 的入站 INVITE
+  机制: park() 保持通道存活，等待 yunshu Go 应用通过 ESL 事件接管呼叫流程
+        yunshu SessionSniffer 检测 CHANNEL_CREATE 事件，识别 DID/分机后自动编排呼叫
+
+  匹配规则:
+    - destination_number 匹配中国大陆固话/手机号格式 (010xxx, 1[3-9]xxx)
+    - 其他号码: 使用 continue="true" 让后续规则继续处理
+-->
+<include>
+  <!-- 入站 DID 呼叫: 固话 (010/02x/0xx) 或手机 (1[3-9]开头) -->
+  <extension name="yunshu_inbound_did" continue="false">
+    <condition field="destination_number" expression="^(0\d{2,3}\d{7,8}|1[3-9]\d{9})$">
+      <action application="set" data="call_direction=inbound" />
+      <action application="set" data="outside_call=true" />
+      <action application="park" />
+    </condition>
+  </extension>
+</include>

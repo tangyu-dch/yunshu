@@ -95,7 +95,8 @@ export function AiModelFlowPage() {
     { value: 'openai', label: 'OpenAI 兼容接口', emoji: '🌐', color: 'purple', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'ali', label: '阿里通义千问 Qwen', emoji: '☁️', color: 'geekblue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
     { value: 'tencent', label: '腾讯混元 Hunyuan', emoji: '🐧', color: 'blue', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
-    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true }
+    { value: 'volc', label: '火山引擎“豆包”大模型', emoji: '🌋', color: 'orange', implemented: true, supportAsr: true, supportTts: true, supportLlm: true },
+    { value: 'zhipu', label: '智谱AI GLM大模型', emoji: '🤖', color: 'green', implemented: true, supportAsr: false, supportTts: false, supportLlm: true }
   ], [])
 
   const providers = providersList || DEFAULT_PROVIDERS
@@ -837,7 +838,13 @@ export function AiModelFlowPage() {
                 )
               }
 
-
+              if (provider === 'zhipu') {
+                return (
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3 text-slate-500 text-xs bg-slate-50 dark:bg-slate-900/40 p-4 rounded-xl leading-relaxed">
+                    💡 <strong>智谱AI 厂商专属提示</strong>：智谱AI 提供 GLM 系列大语言模型推理能力，默认使用 glm-4 模型，API 地址为 https://open.bigmodel.cn/api/paas/v4/chat/completions。语音识别 (ASR) 与合成 (TTS) 服务，建议您在连线流图画布中级联绑定其他服务商的语音服务进行混合推流。此处无需额外配置专属语音参数。
+                  </div>
+                )
+              }
 
               return null
             }}

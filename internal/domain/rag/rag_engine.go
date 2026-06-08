@@ -4,16 +4,20 @@ import (
 	"context"
 	"fmt"
 	"strings"
-
-	"yunshu/internal/domain/callflow"
 )
+
+// LLM 定义 RAG 引擎所需的大语言模型能力。
+// 与 callflow.LLMEngine 签名一致，由调用方注入具体实现以避免循环依赖。
+type LLM interface {
+	GenerateReply(ctx context.Context, systemPrompt, userMessage string, config map[string]any) (string, error)
+}
 
 // RAGEngine 是检索增强生成引擎
 type RAGEngine struct {
-	embedder   Embedder
+	embedder    Embedder
 	vectorStore VectorStore
-	llm        callflow.LLMEngine
-	config     RAGConfig
+	llm         LLM
+	config      RAGConfig
 }
 
 // RAGConfig RAG 配置
@@ -33,7 +37,7 @@ func DefaultRAGConfig() RAGConfig {
 }
 
 // NewRAGEngine 创建一个新的 RAG 引擎
-func NewRAGEngine(embedder Embedder, vectorStore VectorStore, llm callflow.LLMEngine, config RAGConfig) *RAGEngine {
+func NewRAGEngine(embedder Embedder, vectorStore VectorStore, llm LLM, config RAGConfig) *RAGEngine {
 	if config.TopK <= 0 {
 		config = DefaultRAGConfig()
 	}

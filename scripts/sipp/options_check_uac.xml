@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SIP OPTIONS 可用性检测 - SIPp UAC 场景
+
+  用途: 轻量级 SIP OPTIONS 探测，验证 SIP 传输层可用性（无呼叫状态）
+  判定:
+    - SIPp exit=0 → 200 OK, Sofia Profile 存活
+    - SIPp exit≠0 + "unexpected message" → 收到非 200 响应, 传输层可达
+    - SIPp exit≠0 + "timed out" → 传输层不可达
+  注: FS Sofia 必定对 OPTIONS 回复 200 OK, 故 200 为必需 recv
+
+  使用方法:
+    sipp -sf options_check_uac.xml -s sipp -i 192.168.107.0 -p 6070 -m 1 -nostdin 192.168.107.6:5080
+-->
+<scenario name="options_check_uac">
+  <!-- 发送 OPTIONS -->
+  <send retrans="500">
+    <![CDATA[
+      OPTIONS sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: sipp <sip:sipp@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: [cseq] OPTIONS
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: yunshu-options-check
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- FS Sofia 必定回复 200 OK -->
+  <recv response="200" />
+
+  <timewait milliseconds="500" />
+</scenario>

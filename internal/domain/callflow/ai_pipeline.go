@@ -27,9 +27,6 @@ type AIPipeline struct {
 	config          AIPipelineConfig
 	sessions        map[string]*AISession
 	sessionsMu      sync.RWMutex
-	llmManager      *LLMEngineManager
-	asrManager      *ASRPipelineManager
-	ttsManager      *TTSPipelineManager
 	ragEngine       *rag.RAGEngine
 	eventChan       chan contracts.StreamEvent
 	conversationMgr *ConversationManager
@@ -59,9 +56,6 @@ func NewAIPipeline(config AIPipelineConfig) *AIPipeline {
 	return &AIPipeline{
 		config:          config,
 		sessions:        make(map[string]*AISession),
-		llmManager:      GetLLMEngineManager(),
-		asrManager:      GetASRPipelineManager(),
-		ttsManager:      GetTTSPipelineManager(),
 		eventChan:       make(chan contracts.StreamEvent, 1000),
 		conversationMgr: GetConversationManager(),
 		logger:          slog.Default(),
@@ -200,20 +194,16 @@ func (p *AIPipeline) ProcessAudioChunk(ctx context.Context, sessionID string, ch
 	}
 
 	session.mu.Lock()
-	asrID := session.asrID
-	session.mu.Unlock()
-
-	if asrEngine, ok := p.asrManager.GetEngine(asrID); ok {
-		_ = asrEngine
-		// TODO: 实现实时音频流 ASR 处理
-	}
+		session.mu.Lock()
+		_ = session.asrID // TODO: 实现实时音频流 ASR 处理
+		session.mu.Unlock()
 
 	return nil
 }
 
 // ProcessASRText 处理 ASR 文本
 func (p *AIPipeline) ProcessASRText(ctx context.Context, sessionID string, text string, isFinal bool) error {
-	session, err := p.getSession(sessionID)
+	_, err := p.getSession(sessionID)
 	if err != nil {
 		return err
 	}
@@ -254,7 +244,7 @@ func (p *AIPipeline) processFinalText(ctx context.Context, sessionID string, tex
 	sessionIDCopy := session.sessionID
 	llmID := session.llmID
 	ragEnabled := session.ragEnabled
-	ragThreshold := session.ragThreshold
+	_ = session.ragThreshold // TODO: 使用 ragThreshold 做相似度过滤
 	ttsID := session.ttsID
 	session.mu.Unlock()
 
@@ -287,7 +277,7 @@ func (p *AIPipeline) processFinalText(ctx context.Context, sessionID string, tex
 		}
 	}
 
-	if llmEngine, ok := p.llmManager.GetEngine(llmID); ok {
+	if llmEngine := GetLLMEngine(llmID); llmEngine != nil {
 		systemPrompt := ""
 		if ragContext != "" {
 			systemPrompt = fmt.Sprintf("请根据以下知识库内容回答用户问题：\n%s", ragContext)
@@ -322,7 +312,7 @@ func (p *AIPipeline) processFinalText(ctx context.Context, sessionID string, tex
 		Timestamp: time.Now(),
 	})
 
-	if ttsEngine, ok := p.ttsManager.GetEngine(ttsID); ok {
+	if ttsEngine := GetTTSEngine(ttsID); ttsEngine != nil {
 		audioData, err := ttsEngine.Synthesize(ctx, response, nil)
 		if err == nil {
 			p.publishEvent(contracts.StreamEvent{

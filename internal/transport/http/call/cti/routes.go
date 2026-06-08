@@ -367,7 +367,12 @@ func RegisterRoutes(
 	})
 
 	// --- Kamailio Webhook 端点：使用共享密钥鉴权，防止未授权请求枚举 SIP 域名和分机 ---
-	kamailioGroup := r.(*gin.RouterGroup).Group("", middleware.KamailioWebhookAuth())
+		var kamailioGroup gin.IRoutes
+		if rg, ok := r.(*gin.RouterGroup); ok {
+			kamailioGroup = rg.Group("", middleware.KamailioWebhookAuth())
+		} else {
+			kamailioGroup = r
+		}
 
 	kamailioGroup.POST("/cti/kamailio/subscriber/register-status", func(c *gin.Context) {
 		var req struct {

@@ -4,10 +4,13 @@
 
   用途: 验证 SIP 信令通路是否通畅（不依赖坐席注册）
   判定:
-    - 收到 100 Trying = SIP 传输层正常
-    - 收到 4xx/5xx/6xx = SIP 事务层正常（被叫不可达等业务拒绝）
-    - 收到 200 OK = 完整通话建立成功
-    - 超时无响应 = 信令不通
+    - SIPp exit=0 → 200 OK 收到, 完整通话建立成功
+    - SIPp exit≠0 + "unexpected message" → 收到 4xx/5xx, 信令通路正常 (无坐席)
+    - SIPp exit≠0 + "timed out" → 信令不通
+  注: FS 对 INVITE 必定先发 100 Trying, 故 100 为必需 recv
+
+  使用方法:
+    sipp -sf signal_check_uac.xml -s 01088886666 -i 192.168.107.0 -p 6070 -m 1 -nostdin 192.168.107.6:5080
 -->
 <scenario name="signal_check_uac">
   <!-- 发起 INVITE -->
@@ -39,14 +42,14 @@
     ]]>
   </send>
 
-  <!-- 100 Trying (传输层确认) -->
-  <recv response="100" optional="true" />
+  <!-- 100 Trying (FS 必发, 作为必需 recv) -->
+  <recv response="100" />
 
   <!-- 任意 1xx 临时响应 -->
   <recv response="180" optional="true" />
   <recv response="183" optional="true" />
 
-  <!-- 成功: 200 OK -->
+  <!-- 200 OK → 完整通话 -->
   <recv response="200" rtd="true">
     <action>
       <exec int_cmd="set_test" value="call_established" />
@@ -87,12 +90,5 @@
 
   <recv response="200" />
 
-  <!-- 定义: 4xx/5xx/6xx 业务拒绝路径 -->
-  <label name="rejected" />
-  <recv response="404" optional="true" />
-  <recv response="480" optional="true" />
-  <recv response="486" optional="true" />
-  <recv response="503" optional="true" />
-
-  <timewait milliseconds="1000" />
+  <timewait milliseconds="500" />
 </scenario>

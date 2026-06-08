@@ -13,10 +13,15 @@ import (
 )
 
 // RegisterCustomerProfileRoutes 注册客户画像相关路由
-func RegisterCustomerProfileRoutes(group *gin.RouterGroup, db *gorm.DB) {
+func RegisterCustomerProfileRoutes(r gin.IRoutes, db *gorm.DB) {
 	service := operate.NewCustomerProfileService(db)
 	
-	routes := group.Group("/customer-profile")
+	var routes gin.IRoutes
+	if rg, ok := r.(*gin.RouterGroup); ok {
+		routes = rg.Group("/customer-profile")
+	} else {
+		routes = r
+	}
 	{
 		// 客户画像路由
 		routes.POST("/create", createProfileHandler(service))
@@ -54,16 +59,16 @@ func createProfileHandler(service *operate.CustomerProfileService) gin.HandlerFu
 	return func(c *gin.Context) {
 		var profile operate.CustomerProfile
 		if err := c.ShouldBindJSON(&profile); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.CreateProfile(&profile); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, profile)
+		c.JSON(http.StatusOK, contracts.OK(profile))
 	}
 }
 
@@ -72,16 +77,16 @@ func updateProfileHandler(service *operate.CustomerProfileService) gin.HandlerFu
 	return func(c *gin.Context) {
 		var profile operate.CustomerProfile
 		if err := c.ShouldBindJSON(&profile); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.UpdateProfile(&profile); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, profile)
+		c.JSON(http.StatusOK, contracts.OK(profile))
 	}
 }
 
@@ -91,17 +96,17 @@ func getProfileHandler(service *operate.CustomerProfileService) gin.HandlerFunc 
 		idStr := c.Param("id")
 		id, err := strconv.ParseUint(idStr, 10, 64)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, "无效的ID")
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "无效的ID"))
 			return
 		}
 
 		profile, err := service.GetProfileByID(id)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusNotFound, "客户画像不存在")
+			c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeBadRequest, "客户画像不存在"))
 			return
 		}
 
-		contracts.SuccessJSON(c, profile)
+		c.JSON(http.StatusOK, contracts.OK(profile))
 	}
 }
 
@@ -110,7 +115,7 @@ func queryProfilesHandler(service *operate.CustomerProfileService) gin.HandlerFu
 	return func(c *gin.Context) {
 		var req operate.ProfileQueryRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
@@ -123,11 +128,11 @@ func queryProfilesHandler(service *operate.CustomerProfileService) gin.HandlerFu
 
 		profiles, total, err := service.QueryProfiles(req)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"records": profiles,
 			"total":   total,
 			"page":    req.Page,
@@ -144,16 +149,16 @@ func batchUpdateProfilesHandler(service *operate.CustomerProfileService) gin.Han
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.BatchUpdateProfiles(req.MerchantID, req.ProfileBatchUpdateRequest); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -165,16 +170,16 @@ func deleteProfileHandler(service *operate.CustomerProfileService) gin.HandlerFu
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.DeleteProfile(req.ID, req.MerchantID); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -189,11 +194,11 @@ func getProfileStatisticsHandler(service *operate.CustomerProfileService) gin.Ha
 
 		stats, err := service.GetProfileStatistics(merchantID)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, stats)
+		c.JSON(http.StatusOK, contracts.OK(stats))
 	}
 }
 
@@ -202,16 +207,16 @@ func createTagHandler(service *operate.CustomerProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tag operate.CustomerProfileTag
 		if err := c.ShouldBindJSON(&tag); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.CreateTag(&tag); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, tag)
+		c.JSON(http.StatusOK, contracts.OK(tag))
 	}
 }
 
@@ -220,16 +225,16 @@ func updateTagHandler(service *operate.CustomerProfileService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tag operate.CustomerProfileTag
 		if err := c.ShouldBindJSON(&tag); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.UpdateTag(&tag); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, tag)
+		c.JSON(http.StatusOK, contracts.OK(tag))
 	}
 }
 
@@ -241,16 +246,16 @@ func deleteTagHandler(service *operate.CustomerProfileService) gin.HandlerFunc {
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.DeleteTag(req.ID, req.MerchantID); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -265,11 +270,11 @@ func listTagsHandler(service *operate.CustomerProfileService) gin.HandlerFunc {
 
 		tags, err := service.ListTags(merchantID)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, tags)
+		c.JSON(http.StatusOK, contracts.OK(tags))
 	}
 }
 
@@ -281,16 +286,16 @@ func batchTagOperationHandler(service *operate.CustomerProfileService) gin.Handl
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.BatchTagOperation(req.MerchantID, req.ProfileTagBatchRequest); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -299,16 +304,16 @@ func createWorkflowHandler(service *operate.CustomerProfileService) gin.HandlerF
 	return func(c *gin.Context) {
 		var workflow operate.ProfileWorkflow
 		if err := c.ShouldBindJSON(&workflow); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.CreateWorkflow(&workflow); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, workflow)
+		c.JSON(http.StatusOK, contracts.OK(workflow))
 	}
 }
 
@@ -317,16 +322,16 @@ func updateWorkflowHandler(service *operate.CustomerProfileService) gin.HandlerF
 	return func(c *gin.Context) {
 		var workflow operate.ProfileWorkflow
 		if err := c.ShouldBindJSON(&workflow); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.UpdateWorkflow(&workflow); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, workflow)
+		c.JSON(http.StatusOK, contracts.OK(workflow))
 	}
 }
 
@@ -338,16 +343,16 @@ func deleteWorkflowHandler(service *operate.CustomerProfileService) gin.HandlerF
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.DeleteWorkflow(req.ID, req.MerchantID); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -362,11 +367,11 @@ func listWorkflowsHandler(service *operate.CustomerProfileService) gin.HandlerFu
 
 		workflows, err := service.ListWorkflows(merchantID)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, workflows)
+		c.JSON(http.StatusOK, contracts.OK(workflows))
 	}
 }
 
@@ -379,16 +384,16 @@ func executeWorkflowHandler(service *operate.CustomerProfileService) gin.Handler
 			MerchantID  uint64   `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
 		if err := service.ExecuteWorkflow(req.WorkflowID, req.CustomerIDs, req.MerchantID); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, nil)
+		c.JSON(http.StatusOK, contracts.OK(nil))
 	}
 }
 
@@ -398,7 +403,7 @@ func listWorkflowExecutionsHandler(service *operate.CustomerProfileService) gin.
 		idStr := c.Param("id")
 		id, err := strconv.ParseUint(idStr, 10, 64)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, "无效的ID")
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, "无效的ID"))
 			return
 		}
 
@@ -413,11 +418,11 @@ func listWorkflowExecutionsHandler(service *operate.CustomerProfileService) gin.
 
 		executions, total, err := service.ListWorkflowExecutions(id, page, pageSize)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"records": executions,
 			"total":   total,
 			"page":    page,
@@ -431,7 +436,7 @@ func vectorSimilaritySearchHandler(service *operate.CustomerProfileService) gin.
 	return func(c *gin.Context) {
 		var req operate.VectorSimilarityRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
@@ -441,11 +446,11 @@ func vectorSimilaritySearchHandler(service *operate.CustomerProfileService) gin.
 
 		result, err := service.VectorSimilaritySearch(req)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, result)
+		c.JSON(http.StatusOK, contracts.OK(result))
 	}
 }
 
@@ -457,7 +462,7 @@ func updateProfileEmbeddingHandler(service *operate.CustomerProfileService) gin.
 			MerchantID uint64 `json:"merchantId"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
@@ -467,16 +472,16 @@ func updateProfileEmbeddingHandler(service *operate.CustomerProfileService) gin.
 
 		profile, err := service.GetProfileByID(req.ProfileID)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusNotFound, "客户画像不存在")
+			c.JSON(http.StatusNotFound, contracts.Fail(contracts.CodeBadRequest, "客户画像不存在"))
 			return
 		}
 
 		if err := service.UpdateProfileEmbedding(profile); err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, profile)
+		c.JSON(http.StatusOK, contracts.OK(profile))
 	}
 }
 
@@ -485,7 +490,7 @@ func batchUpdateEmbeddingsHandler(service *operate.CustomerProfileService) gin.H
 	return func(c *gin.Context) {
 		var req operate.UpdateProfileEmbeddingRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
-			contracts.ErrorJSON(c, http.StatusBadRequest, err.Error())
+			c.JSON(http.StatusBadRequest, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
@@ -495,11 +500,11 @@ func batchUpdateEmbeddingsHandler(service *operate.CustomerProfileService) gin.H
 
 		successCount, err := service.BatchUpdateEmbeddings(req)
 		if err != nil {
-			contracts.ErrorJSON(c, http.StatusInternalServerError, err.Error())
+			c.JSON(http.StatusInternalServerError, contracts.Fail(contracts.CodeBadRequest, err.Error()))
 			return
 		}
 
-		contracts.SuccessJSON(c, gin.H{
+		c.JSON(http.StatusOK, gin.H{
 			"successCount": successCount,
 		})
 	}

@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  畸形 SDP 错误处理检测 - SIPp UAC 场景
+
+  用途: 验证 SIP 服务端对畸形 SDP 的错误处理合规性
+  判定:
+    - SIPp exit=0 → 488/400/415, 错误正确拒绝
+    - SIPp exit≠0 + "unexpected message" → 收到其他响应
+    - SIPp exit≠0 + "timed out" → 信令不通
+  注: FS 对畸形 SDP 的 INVITE 必发 100 Trying 后回复 4xx/5xx
+
+  使用方法:
+    sipp -sf invalid_sdp_uac.xml -s 01088886666 -i 192.168.107.0 -p 6070 -m 1 -nostdin 192.168.107.6:5080
+-->
+<scenario name="invalid_sdp_uac">
+  <!-- 发送 INVITE with 故意畸形的 SDP -->
+  <send retrans="500">
+    <![CDATA[
+      INVITE sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>
+      Call-ID: [call_id]
+      CSeq: [cseq] INVITE
+      Contact: sip:sipp@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Subject: yunshu-invalid-sdp-check
+      Content-Type: application/sdp
+      Content-Length: [len]
+
+      v=0
+      o=user1 53655765 2353687637 IN IP[local_ip_type] [local_ip]
+      s=-
+      c=IN IP[media_ip_type] [media_ip]
+      t=0 0
+      m=audio [media_port] RTP/AVP 999
+      a=rtpmap:999 INVALID-CODEC/99999
+      a=sendrecv
+    ]]>
+  </send>
+
+  <!-- 100 Trying (FS 必发) -->
+  <recv response="100" />
+
+  <!-- FS 回复错误码 (最常见: 488 Not Acceptable Here) -->
+  <recv response="488" />
+
+  <!-- ACK for error response -->
+  <send>
+    <![CDATA[
+      ACK sip:[service]@[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:sipp@[local_ip]:[local_port]>;tag=[call_number]
+      To: [service] <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] ACK
+      Max-Forwards: 70
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <timewait milliseconds="500" />
+</scenario>

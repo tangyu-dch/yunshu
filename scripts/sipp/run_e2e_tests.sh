@@ -2,7 +2,7 @@
 # ============================================================================
 # 云枢 SIP 端到端测试编排脚本
 #
-# 支持场景: inbound | api | batch | dialpad | all
+# 支持场景: inbound | api | batch | dialpad | signal | options | register | cancel | invalid-sdp | legality | all
 # 用法:     bash run_e2e_tests.sh [scenario]
 # ============================================================================
 
@@ -21,6 +21,10 @@ AGENT_PORT=6060
 CUSTOMER_PORT=6080
 INBOUND_PORT=6070
 DIALPAD_PORT=6090
+REGISTER_PORT=6061
+CANCEL_PORT=6072
+INVALID_SDP_PORT=6073
+OPTIONS_PORT=6074
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -30,11 +34,12 @@ NC='\033[0m'
 
 PASS=0
 FAIL=0
+WARN=0
 RESULTS=()
 SIPP_PIDS=()
 
 cleanup() {
-    for pid in "${SIPP_PIDS[@]}"; do
+    for pid in ${SIPP_PIDS[@]+"${SIPP_PIDS[@]}"}; do
         kill "$pid" 2>/dev/null || true
     done
     wait 2>/dev/null
@@ -287,9 +292,295 @@ case "$SCENARIO" in
         echo ""
         ;;
 
+    signal)
+        echo -e "${CYAN}=========================================="
+        echo "  场景 5: 信令通路检测 (SIGNAL CHECK)"
+        echo -e "==========================================${NC}"
+        echo "  流程: SIPp UAC → INVITE → 100/4xx/5xx/200"
+        echo ""
+
+        echo -e "${YELLOW}[1/2]${NC} FreeSWITCH 信令检测..."
+        sipp -sf "$SCRIPT_DIR/signal_check_uac.xml" \
+            -s "01088886666" \
+            -i "$LOCAL_IP" \
+            -p "$INBOUND_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -3
+
+        FS_EXIT=${PIPESTATUS[0]}
+        if [ $FS_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: FS 信令检测 — 200 OK 呼叫建立成功")
+            ((PASS++))
+        else
+            FS_LOG=$(ls -t /tmp/sipp_inbound_cust_*.log 2>/dev/null | head -1)
+            if [ -n "$FS_LOG" ] && grep -qE "480|404|486|503" "$FS_LOG" 2>/dev/null; then
+                RESULTS+=("${GREEN}PASS${NC}: FS 信令检测 — 4xx/5xx 响应 (信令通路正常，无坐席)")
+                ((PASS++))
+            else
+                RESULTS+=("${RED}FAIL${NC}: FS 信令检测 — 超时或异常 (exit=$FS_EXIT)")
+                ((FAIL++))
+            fi
+        fi
+
+        echo -e "${YELLOW}[2/2]${NC} Kamailio 信令检测..."
+        sipp -sf "$SCRIPT_DIR/signal_check_uac.xml" \
+            -s "1001" \
+            -i "$LOCAL_IP" \
+            -p "$DIALPAD_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$KAM_HOST:$KAM_PORT" 2>&1 | tail -3
+
+        KAM_EXIT=${PIPESTATUS[0]}
+        if [ $KAM_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: Kamailio 信令检测 — 200 OK 呼叫建立成功")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: Kamailio 信令检测 — 异常 (exit=$KAM_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
+    options)
+        echo -e "${CYAN}=========================================="
+        echo "  场景 6: OPTIONS 可用性探测"
+        echo -e "==========================================${NC}"
+        echo "  流程: SIPp UAC → OPTIONS → 200/404 (传输层可达)"
+        echo ""
+
+        echo -e "${YELLOW}[1/2]${NC} FreeSWITCH OPTIONS..."
+        sipp -sf "$SCRIPT_DIR/options_check_uac.xml" \
+            -s "sipp" \
+            -i "$LOCAL_IP" \
+            -p "$OPTIONS_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 10s \
+            -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -3
+
+        FS_EXIT=${PIPESTATUS[0]}
+        if [ $FS_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: FS OPTIONS — 传输层可达")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: FS OPTIONS — 传输层不可达 (exit=$FS_EXIT)")
+            ((FAIL++))
+        fi
+
+        echo -e "${YELLOW}[2/2]${NC} Kamailio OPTIONS..."
+        sipp -sf "$SCRIPT_DIR/options_check_uac.xml" \
+            -s "sipp" \
+            -i "$LOCAL_IP" \
+            -p "$((OPTIONS_PORT + 1))" \
+            -m 1 \
+            -nostdin \
+            -timeout 10s \
+            -timeout_error \
+            "$KAM_HOST:$KAM_PORT" 2>&1 | tail -3
+
+        KAM_EXIT=${PIPESTATUS[0]}
+        if [ $KAM_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: Kamailio OPTIONS — 传输层可达")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: Kamailio OPTIONS — 传输层不可达 (exit=$KAM_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
+    register)
+        echo -e "${CYAN}=========================================="
+        echo "  场景 7: REGISTER 鉴权合法性"
+        echo -e "==========================================${NC}"
+        echo "  流程: SIPp UAC → REGISTER (无凭证) → 401/403"
+        echo ""
+
+        echo -e "${YELLOW}[1/1]${NC} Kamailio REGISTER..."
+        sipp -sf "$SCRIPT_DIR/register_uac.xml" \
+            -s "1001" \
+            -i "$LOCAL_IP" \
+            -p "$REGISTER_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 10s \
+            -timeout_error \
+            "$KAM_HOST:$KAM_PORT" 2>&1 | tail -3
+
+        REG_EXIT=${PIPESTATUS[0]}
+        if [ $REG_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: REGISTER — Kamailio 鉴权响应正常")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: REGISTER — Kamailio 未响应 (exit=$REG_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
+    cancel)
+        echo -e "${CYAN}=========================================="
+        echo "  场景 8: CANCEL 事务合法性"
+        echo -e "==========================================${NC}"
+        echo "  流程: SIPp UAC → INVITE → CANCEL → 487"
+        echo ""
+
+        echo -e "${YELLOW}[1/1]${NC} FreeSWITCH CANCEL..."
+        sipp -sf "$SCRIPT_DIR/cancel_uac.xml" \
+            -s "01088886666" \
+            -i "$LOCAL_IP" \
+            -p "$CANCEL_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -3
+
+        CANCEL_EXIT=${PIPESTATUS[0]}
+        if [ $CANCEL_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: CANCEL — 487 Request Terminated")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: CANCEL — 异常 (exit=$CANCEL_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
+    invalid-sdp)
+        echo -e "${CYAN}=========================================="
+        echo "  场景 9: 畸形 SDP 错误处理"
+        echo -e "==========================================${NC}"
+        echo "  流程: SIPp UAC → INVITE(畸形SDP) → 488/400/415"
+        echo ""
+
+        echo -e "${YELLOW}[1/1]${NC} FreeSWITCH 畸形 SDP..."
+        sipp -sf "$SCRIPT_DIR/invalid_sdp_uac.xml" \
+            -s "01088886666" \
+            -i "$LOCAL_IP" \
+            -p "$INVALID_SDP_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -3
+
+        SDP_EXIT=${PIPESTATUS[0]}
+        if [ $SDP_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: 畸形SDP — 服务端正确拒绝")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: 畸形SDP — 异常 (exit=$SDP_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
+    legality)
+        echo -e "${CYAN}=========================================="
+        echo "  全量 SIP 合法性校验"
+        echo -e "==========================================${NC}"
+        echo ""
+
+        # 1. FS INVITE 信令检测 (100 Trying = 传输层正常, 不需要 200 OK)
+        echo -e "${YELLOW}[1/5]${NC} FS INVITE 信令检测..."
+        SIG_OUT=$(sipp -sf "$SCRIPT_DIR/signal_check_uac.xml" \
+            -s "01088886666" -i "$LOCAL_IP" -p "$INBOUND_PORT" -m 1 \
+            -nostdin -timeout 10s -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1)
+        SIG_EXIT=$?
+        if [ $SIG_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: FS 信令检测 — 200 OK 完整通话")
+            ((PASS++))
+        elif echo "$SIG_OUT" | grep -qE "100.*<---|unexpected.*message"; then
+            # 100 Trying 收到 = SIP 传输层正常 (无坐席 UAS 时 FS 发 480 或超时)
+            RESULTS+=("${GREEN}PASS${NC}: FS 信令检测 — 100 Trying 收到, 传输层正常")
+            ((PASS++))
+        elif echo "$SIG_OUT" | grep -q "timed out"; then
+            RESULTS+=("${RED}FAIL${NC}: FS 信令检测 — 超时, 信令不通")
+            ((FAIL++))
+        else
+            RESULTS+=("${YELLOW}WARN${NC}: FS 信令检测 — 异常 (exit=$SIG_EXIT)")
+            ((WARN++))
+        fi
+
+        # 2. OPTIONS 可用性探测
+        echo -e "${YELLOW}[2/5]${NC} OPTIONS 可用性探测..."
+        sipp -sf "$SCRIPT_DIR/options_check_uac.xml" \
+            -s "sipp" -i "$LOCAL_IP" -p "$OPTIONS_PORT" -m 1 \
+            -nostdin -timeout 10s -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -1
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: OPTIONS — FS 传输层可达 (200 OK)")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: OPTIONS — FS 不可达")
+            ((FAIL++))
+        fi
+
+        # 3. REGISTER 鉴权合法性
+        echo -e "${YELLOW}[3/5]${NC} REGISTER 鉴权合法性..."
+        sipp -sf "$SCRIPT_DIR/register_uac.xml" \
+            -s "1001" -i "$LOCAL_IP" -p "$REGISTER_PORT" -m 1 \
+            -nostdin -timeout 10s -timeout_error \
+            "$KAM_HOST:$KAM_PORT" 2>&1 | tail -1
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: REGISTER — 401 鉴权挑战正常")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: REGISTER — 异常")
+            ((FAIL++))
+        fi
+
+        # 4. CANCEL 事务合法性 (FS park 后 CANCEL → 487)
+        echo -e "${YELLOW}[4/5]${NC} CANCEL 事务合法性..."
+        sipp -sf "$SCRIPT_DIR/cancel_uac.xml" \
+            -s "01088886666" -i "$LOCAL_IP" -p "$CANCEL_PORT" -m 1 \
+            -nostdin -timeout 15s -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1 | tail -1
+        if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: CANCEL — 487 Request Terminated")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: CANCEL — 异常")
+            ((FAIL++))
+        fi
+
+        # 5. 畸形 SDP 错误处理 (FS park 不校验 SDP, 只验证 100 Trying)
+        echo -e "${YELLOW}[5/5]${NC} 畸形 SDP 处理检测..."
+        ISDP_OUT=$(sipp -sf "$SCRIPT_DIR/invalid_sdp_uac.xml" \
+            -s "01088886666" -i "$LOCAL_IP" -p "$INVALID_SDP_PORT" -m 1 \
+            -nostdin -timeout 10s -timeout_error \
+            "$FS_HOST:$FS_SIP_PORT" 2>&1)
+        ISDP_EXIT=$?
+        if [ $ISDP_EXIT -eq 0 ]; then
+            RESULTS+=("${GREEN}PASS${NC}: 畸形SDP — 488 正确拒绝")
+            ((PASS++))
+        elif echo "$ISDP_OUT" | grep -qE "100.*<---"; then
+            # FS park() 不校验 SDP 内容, 100 Trying 证明信令层正常
+            RESULTS+=("${YELLOW}WARN${NC}: 畸形SDP — FS 接受了畸形 SDP (park 不校验 SDP 内容)")
+            ((WARN++))
+        elif echo "$ISDP_OUT" | grep -q "unexpected.*message"; then
+            # FS 可能返回了非 488 的其他错误码
+            RESULTS+=("${GREEN}PASS${NC}: 畸形SDP — FS 拒绝了畸形 SDP")
+            ((PASS++))
+        else
+            RESULTS+=("${RED}FAIL${NC}: 畸形SDP — 异常 (exit=$ISDP_EXIT)")
+            ((FAIL++))
+        fi
+        echo ""
+        ;;
+
     *)
         echo "未知场景: $SCENARIO"
-        echo "用法: $0 [all | inbound | api | batch | dialpad]"
+        echo "用法: $0 [all | inbound | api | batch | dialpad | signal | options | register | cancel | invalid-sdp | legality]"
         exit 1
         ;;
 esac

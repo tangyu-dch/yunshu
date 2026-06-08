@@ -30,6 +30,7 @@ type Hub struct {
 	upgrader websocket.Upgrader
 
 	mu      sync.Mutex
+	writeMu sync.Mutex
 	clients map[*websocket.Conn]subscription
 }
 

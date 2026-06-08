@@ -147,6 +147,11 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	memSession.StartEviction(ctx, 5*time.Minute, 30*time.Minute)
 	session := esl.NewSessionService(memSession, reliableOutbox, logger)
 	session.Events = bus
+	// 注入 SessionSniffer: 识别 CHANNEL_CREATE 事件中的分机/DID，自动创建呼入/直呼会话
+	if gormDB != nil {
+		session.Sniffer = resource.NewGormSessionSniffer(gormDB, logger)
+		logger.Info("SessionSniffer 已注入，支持自动识别呼入/直呼会话")
+	}
 	callflow.RegisterProjectionConsumers(bus, reliableOutbox, logger)
 	var pool *fsesl.ConnectionPool
 	if len(fsNodes) > 0 {
@@ -222,7 +227,14 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 
 	mediaRegistry := callflow.NewMediaRegistry()
 
-	callflow.RegisterConsumers(ctx, bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, mediaRegistry, logger)
+	// 构建呼入坐席动态分配器: 根据 DID 号码查找技能组关联的空闲坐席
+	var inboundAgentResolver callflow.InboundAgentResolver
+	if gormDB != nil && redisClient != nil {
+		inboundAgentResolver = resource.NewInboundAgentResolver(gormDB, extensionstatus.NewRedisReader(redisClient), logger)
+		logger.Info("呼入坐席动态分配器已启用")
+	}
+
+	callflow.RegisterConsumers(ctx, bus, ctiRunner, eslRunner, session, originate, runtimeSelector, candidateSource, extensionstatus.NewRedisReader(redisClient), batchRepo, callQueue, mediaRegistry, inboundAgentResolver, logger)
 	var batchScheduler *cti.BatchSchedulerService
 	if gormDB != nil {
 		batchScheduler = &cti.BatchSchedulerService{

@@ -1,0 +1,154 @@
+{
+  "llmProviders": {
+    "openai-gpt4": {
+      "id": "openai-gpt4",
+      "name": "OpenAI GPT-4",
+      "provider": "openai",
+      "enabled": false,
+      "apiKey": "your-openai-api-key",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-4",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "openai-gpt35": {
+      "id": "openai-gpt35",
+      "name": "OpenAI GPT-3.5 Turbo",
+      "provider": "openai",
+      "enabled": false,
+      "apiKey": "your-openai-api-key",
+      "endpoint": "https://api.openai.com/v1/chat/completions",
+      "model": "gpt-3.5-turbo",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "deepseek": {
+      "id": "deepseek",
+      "name": "DeepSeek AI",
+      "provider": "deepseek",
+      "enabled": false,
+      "apiKey": "your-deepseek-api-key",
+      "endpoint": "https://api.deepseek.com/v1/chat/completions",
+      "model": "deepseek-chat",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "volc-doubao": {
+      "id": "volc-doubao",
+      "name": "火山引擎豆包",
+      "provider": "volc",
+      "enabled": false,
+      "apiKey": "your-volc-api-key",
+      "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+      "model": "ep-20241231120000-abcde",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "qwen": {
+      "id": "qwen",
+      "name": "通义千问",
+      "provider": "qwen",
+      "enabled": false,
+      "apiKey": "your-qwen-api-key",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+      "model": "qwen-plus",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "zhipu-glm4": {
+      "id": "zhipu-glm4",
+      "name": "智谱AI GLM-4",
+      "provider": "zhipu",
+      "enabled": true,
+      "apiKey": "your-zhipu-api-key",
+      "endpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "model": "glm-4",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "zhipu-glm3": {
+      "id": "zhipu-glm3",
+      "name": "智谱AI GLM-3-Turbo",
+      "provider": "zhipu",
+      "enabled": false,
+      "apiKey": "your-zhipu-api-key",
+      "endpoint": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+      "model": "glm-3-turbo",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    },
+    "mock": {
+      "id": "mock",
+      "name": "Mock LLM (测试用)",
+      "provider": "mock",
+      "enabled": true,
+      "apiKey": "",
+      "endpoint": "",
+      "model": "mock-model",
+      "temperature": 0.7,
+      "maxTokens": 2000,
+      "extra": {}
+    }
+  },
+  "defaultLLMId": "mock",
+
+  "asrProviders": {
+    "volc-asr": {
+      "id": "volc-asr",
+      "name": "火山引擎 ASR",
+      "provider": "volc",
+      "enabled": false,
+      "apiKey": "your-volc-api-key",
+      "endpoint": "",
+      "language": "zh-CN",
+      "extra": {}
+    },
+    "mock": {
+      "id": "mock",
+      "name": "Mock ASR (测试用)",
+      "provider": "mock",
+      "enabled": true,
+      "apiKey": "",
+      "endpoint": "",
+      "language": "zh-CN",
+      "extra": {}
+    }
+  },
+  "defaultASRId": "mock",
+
+  "ttsProviders": {
+    "volc-tts": {
+      "id": "volc-tts",
+      "name": "火山引擎 TTS",
+      "provider": "volc",
+      "enabled": false,
+      "apiKey": "your-volc-api-key",
+      "endpoint": "",
+      "voiceType": "zh_female_qingxin",
+      "speed": 1.0,
+      "extra": {}
+    },
+    "mock": {
+      "id": "mock",
+      "name": "Mock TTS (测试用)",
+      "provider": "mock",
+      "enabled": true,
+      "apiKey": "",
+      "endpoint": "",
+      "voiceType": "default",
+      "speed": 1.0,
+      "extra": {}
+    }
+  },
+  "defaultTTSId": "mock",
+
+  "enableStream": true,
+  "bufferSize": 4096
+}

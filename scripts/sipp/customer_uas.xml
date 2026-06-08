@@ -5,6 +5,10 @@
   用途: 模拟客户电话，接收系统外呼 INVITE (用于批量外呼/API外呼/拨号盘场景)
   信令: INVITE → 100 → 183 Session Progress → 200 OK(SDP) → ACK → 通话 → BYE → 200 OK
 
+  支持双向挂机:
+    - 优先等待系统 BYE (系统先挂)
+    - 超时 10 秒后客户主动挂机
+
   使用方法:
     sipp -sf customer_uas.xml -s 13800001111 -i 192.168.107.0 -p 6080 -m 1 -nostdin 192.168.107.6:5080
 -->
@@ -88,13 +92,10 @@
   <!-- 收到 ACK -->
   <recv request="ACK" />
 
-  <!-- 模拟通话 5 秒 -->
-  <pause milliseconds="5000" />
+  <!-- 通话中: 等待系统 BYE，超时 10 秒后客户主动挂机 -->
+  <recv request="BYE" timeout="10000" ontimeout="customer_hangup" />
 
-  <!-- 收到 BYE (系统挂断) -->
-  <recv request="BYE" />
-
-  <!-- 回复 200 OK -->
+  <!-- 系统先挂: 回复 200 OK -->
   <send>
     <![CDATA[
       SIP/2.0 200 OK
@@ -107,19 +108,28 @@
     ]]>
   </send>
 
-  <timewait milliseconds="1000" />
+  <nop>
+    <action>
+      <exec int_cmd="stop_now" />
+    </action>
+  </nop>
 
-  <!-- 异常路径: 收到 CANCEL -->
-  <recv request="CANCEL" optional="true" />
-  <send optional="true">
+  <!-- 客户主动挂机路径 -->
+  <label id="customer_hangup" />
+  <send retrans="500">
     <![CDATA[
-      SIP/2.0 200 OK
-      [last_Via:]
-      [last_From:]
-      [last_To:]
-      [last_Call-ID:]
-      [last_CSeq:]
+      BYE sip:[service]@[local_ip]:[local_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: [service] <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
+      To: sipp <sip:[service]@[remote_ip]:[remote_port]>[peer_tag_param]
+      Call-ID: [call_id]
+      CSeq: [cseq] BYE
+      Max-Forwards: 70
       Content-Length: 0
     ]]>
   </send>
+
+  <recv response="200" />
+
+  <timewait milliseconds="1000" />
 </scenario>

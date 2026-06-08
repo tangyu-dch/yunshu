@@ -23,7 +23,13 @@ import {
   saveAiFlow,
   fetchAiModelConfigs,
   fetchAiProviders,
-  AiProviderItem
+  AiProviderItem,
+  fetchKnowledgeBases,
+  fetchASRConfigs,
+  fetchTTSConfigs,
+  type KnowledgeBase,
+  type ASRConfig,
+  type TTSConfig
 } from '@/api/operate'
 
 const { Title, Text, Paragraph } = Typography
@@ -71,6 +77,14 @@ export type AIFlowNode = {
     llmApiKey?: string
     llmTemperature?: number
     llmSystemPrompt?: string
+    // 向量知识库相关配置
+    knowledgeBaseEnabled?: boolean
+    knowledgeBaseId?: string
+    knowledgeBaseTopK?: number
+    knowledgeBaseScoreThreshold?: number
+    // ASR/TTS引擎配置
+    asrConfigId?: string
+    ttsConfigId?: string
   }
 }
 
@@ -133,7 +147,11 @@ const defaultSampleGraph: AIFlowGraph = {
         llmEndpoint: '',
         llmApiKey: '',
         llmTemperature: 0.7,
-        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。'
+        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。',
+        // 向量知识库默认配置
+        knowledgeBaseEnabled: false,
+        knowledgeBaseTopK: 3,
+        knowledgeBaseScoreThreshold: 0.7
       }
     },
     {
@@ -405,6 +423,24 @@ export function AiModelFlowDesigner() {
   ], [])
 
   const providers = providersList || DEFAULT_PROVIDERS
+
+  // 查询知识库列表
+  const { data: knowledgeBases } = useQuery({
+    queryKey: ['merchant', 'knowledge-bases'],
+    queryFn: () => fetchKnowledgeBases(),
+  })
+
+  // 查询ASR配置列表
+  const { data: asrConfigs } = useQuery({
+    queryKey: ['merchant', 'asr-configs'],
+    queryFn: () => fetchASRConfigs(),
+  })
+
+  // 查询TTS配置列表
+  const { data: ttsConfigs } = useQuery({
+    queryKey: ['merchant', 'tts-configs'],
+    queryFn: () => fetchTTSConfigs(),
+  })
 
   const currentFlow = useMemo(() => {
     if (isNew || !flowsData) return null
@@ -713,7 +749,10 @@ export function AiModelFlowDesigner() {
         llmEndpoint: '',
         llmApiKey: '',
         llmTemperature: 0.7,
-        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。'
+        llmSystemPrompt: '您是云枢智能话务员，请根据用户的提问礼貌回答，如果用户想要查话费请引导他说查话费，如果想要转接人工请引导他说转人工。',
+        knowledgeBaseEnabled: false,
+        knowledgeBaseTopK: 3,
+        knowledgeBaseScoreThreshold: 0.7
       }
     } else if (type === 'intent') {
       label = '🤖 新意图路由'
@@ -2033,6 +2072,52 @@ export function AiModelFlowDesigner() {
                     </Form.Item>
                     <Form.Item name="llmSystemPrompt" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">全局 System Prompt 角色提示词</span>}>
                       <Input.TextArea rows={4} placeholder="您是云枢智能话务员，请根据用户的提问礼貌回答..." />
+                    </Form.Item>
+                  </div>
+
+                  {/* 向量知识库配置 */}
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🔍 向量知识库配置 (RAG)</span>
+                    <Form.Item name="knowledgeBaseEnabled" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">启用向量知识库检索</span>} valuePropName="checked">
+                      <Switch />
+                    </Form.Item>
+                    <Form.Item name="knowledgeBaseId" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">选择知识库</span>}>
+                      <Select style={{ width: '100%' }} placeholder="选择要使用的向量知识库">
+                        {knowledgeBases?.map((kb: KnowledgeBase) => (
+                          <Select.Option key={kb.id} value={kb.id}>
+                            📚 {kb.name}
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="knowledgeBaseTopK" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">返回相关文档数量 (Top-K)</span>}>
+                      <InputNumber min={1} max={10} style={{ width: '100%' }} defaultValue={3} />
+                    </Form.Item>
+                    <Form.Item name="knowledgeBaseScoreThreshold" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">相似度阈值</span>}>
+                      <Slider min={0.0} max={1.0} step={0.05} defaultValue={0.7} />
+                    </Form.Item>
+                  </div>
+
+                  {/* ASR/TTS 配置 */}
+                  <div className="border-t border-slate-200 dark:border-slate-800/80 my-4 pt-3">
+                    <span className="text-slate-800 dark:text-slate-200 font-bold text-xs block mb-3">🎙️ ASR/TTS 配置</span>
+                    <Form.Item name="asrConfigId" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">选择 ASR 配置</span>}>
+                      <Select style={{ width: '100%' }} placeholder="选择语音识别配置">
+                        {asrConfigs?.filter((c: ASRConfig) => c.enabled).map((c: ASRConfig) => (
+                          <Select.Option key={c.id} value={c.id}>
+                            🎙️ {c.name} ({c.provider})
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </Form.Item>
+                    <Form.Item name="ttsConfigId" label={<span className="text-slate-600 dark:text-slate-400 font-semibold text-xs">选择 TTS 配置</span>}>
+                      <Select style={{ width: '100%' }} placeholder="选择语音合成配置">
+                        {ttsConfigs?.filter((c: TTSConfig) => c.enabled).map((c: TTSConfig) => (
+                          <Select.Option key={c.id} value={c.id}>
+                            🔊 {c.name} ({c.provider})
+                          </Select.Option>
+                        ))}
+                      </Select>
                     </Form.Item>
                   </div>
                 </>

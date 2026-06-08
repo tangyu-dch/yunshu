@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SIP REGISTER 合法性检测 - SIPp UAC 场景
+
+  用途: 验证 SIP REGISTER 信令流程合法性
+  判定:
+    - SIPp exit=0 → 401 Unauthorized, Kamailio 鉴权挑战正常
+    - SIPp exit≠0 + "unexpected message" → 收到其他响应 (403/200 等)
+    - SIPp exit≠0 + "timed out" → REGISTER 信令不通
+  注: Kamailio 对无凭证 REGISTER 必定回复 401, 故 401 为必需 recv
+
+  使用方法:
+    sipp -sf register_uac.xml -s 1001 -i 192.168.107.0 -p 6060 -m 1 -nostdin 192.168.107.6:5060
+-->
+<scenario name="register_uac">
+  <!-- 发送 REGISTER (无鉴权凭证) -->
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:[remote_ip]:[remote_port] SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: sipp <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
+      To: sipp <sip:[service]@[local_ip]:[local_port]>
+      Call-ID: [call_id]
+      CSeq: [cseq] REGISTER
+      Contact: sip:[service]@[local_ip]:[local_port]
+      Max-Forwards: 70
+      Expires: 3600
+      Subject: yunshu-register-check
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <!-- Kamailio 对无凭证 REGISTER 必定回复 401 -->
+  <recv response="401" />
+
+  <timewait milliseconds="500" />
+</scenario>

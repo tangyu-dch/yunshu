@@ -72,6 +72,8 @@ services:
     image: yunshu/freeswitch:latest
     container_name: cc-freeswitch
     restart: always
+    volumes:
+      - ./docker/freeswitch/conf/dialplan:/usr/local/freeswitch/conf/dialplan:ro
     ports:
       - "5080:5080/udp"                # FreeSWITCH 内网/Trunk 监听端口
       - "8021:8021"                    # FreeSWITCH ESL 控制命令面接口

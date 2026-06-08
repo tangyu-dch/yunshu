@@ -637,6 +637,8 @@ func (s *OriginateService) BridgeBatchOutbound(ctx context.Context, req APIBridg
 }
 
 // StartDialpadCustomerOutbound 在拨号盘直呼中为客户腿发起 originate。
+// 注意：本函数只执行 originate 命令和发布事件，不做 session load/save。
+// Session 生命周期由调用方 handleDialpadAgentAnswer 统一管理，避免重复 load-modify-save 写覆盖。
 func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req APICustomerOriginateRequest) error {
 	logger := s.Logger
 	if logger == nil {
@@ -758,18 +760,9 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 		logger.Error("拨号盘直呼客户腿起呼命令执行失败", "callId", req.CallID, "agentUuid", agentUUID, "customerUuid", customerUUID, "error", err.Error())
 		return err
 	}
+	// 注册客户腿 UUID 到会话（由调用方统一保存，避免重复 load-modify-save 写覆盖）
 	if err := s.SessionService.CreateFromOriginate(ctx, cmd); err != nil {
-		logger.Error("拨号盘直呼客户腿会话回写失败", "callId", req.CallID, "error", err.Error())
-		return err
-	}
-	session.Metadata["customerOriginateSent"] = true
-	session.Metadata["selectedCaller"] = req.Selection.Phone
-	session.Metadata["selectedGatewayId"] = req.Selection.GatewayID
-	session.Metadata["selectedGatewayName"] = req.Selection.GatewayName
-	session.Metadata["selectedGatewayRegion"] = req.Selection.GatewayRegion
-	session.Metadata["selectedModel"] = req.Selection.Model
-	if err := s.SessionService.Store.Save(ctx, session); err != nil {
-		logger.Error("拨号盘直呼客户腿会话状态保存失败", "callId", req.CallID, "error", err.Error())
+		logger.Error("拨号盘直呼客户腿会话UUID注册失败", "callId", req.CallID, "error", err.Error())
 		return err
 	}
 	if s.Events != nil {
