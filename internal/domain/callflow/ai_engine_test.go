@@ -90,10 +90,10 @@ func TestAIVoiceEngineStartFlowAndAudioStream(t *testing.T) {
 	hasAudioStream := false
 	hasPlayback := false
 	for _, cmd := range executor.Commands {
-		if cmd.Command == "audio_stream" {
+		if cmd.Command == "audio-stream" {
 			hasAudioStream = true
 			if cmd.Payload["url"] != "ws://10.0.0.1:8080/asr" {
-				t.Errorf("Unexpected audio_stream url: %v", cmd.Payload["url"])
+				t.Errorf("Unexpected audio-stream url: %v", cmd.Payload["url"])
 			}
 		}
 		if cmd.Command == "playback" {

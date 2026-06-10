@@ -9,6 +9,24 @@ import (
 	"yunshu/internal/contracts"
 )
 
+func TestEventFromESLFallsBackToUniqueIDForPhysicalInbound(t *testing.T) {
+	t.Parallel()
+
+	event := &eslgo.Event{Headers: textproto.MIMEHeader{}}
+	event.Headers.Set("Event-Name", "CHANNEL_CREATE")
+	event.Headers.Set("Event-Sequence", "7")
+	event.Headers.Set("Unique-ID", "physical-uuid-1")
+	event.Headers.Set("Caller-Destination-Number", "01088886666")
+
+	domainEvent := EventFromESL("10.0.0.1:8021", event)
+	if domainEvent.CallID != "physical-uuid-1" {
+		t.Fatalf("expected Unique-ID fallback call id, got %+v", domainEvent)
+	}
+	if domainEvent.UUID != "physical-uuid-1" {
+		t.Fatalf("expected event uuid from Unique-ID, got %+v", domainEvent)
+	}
+}
+
 func TestEventFromESLResolvesBusinessFields(t *testing.T) {
 	t.Parallel()
 
@@ -31,5 +49,23 @@ func TestEventFromESLResolvesBusinessFields(t *testing.T) {
 	}
 	if domainEvent.Headers["q850"] != 16 {
 		t.Fatalf("unexpected q850: %+v", domainEvent.Headers)
+	}
+}
+
+func TestEventFromESLAddsCallerCalleeAliases(t *testing.T) {
+	t.Parallel()
+
+	event := &eslgo.Event{Headers: textproto.MIMEHeader{}}
+	event.Headers.Set("Event-Name", "CHANNEL_CREATE")
+	event.Headers.Set("Unique-ID", "uuid-alias")
+	event.Headers.Set("Caller-Caller-ID-Number", "1001")
+	event.Headers.Set("Caller-Destination-Number", "13800003333")
+
+	domainEvent := EventFromESL("10.0.0.1:8021", event)
+	if domainEvent.Headers["callerNumber"] != "1001" {
+		t.Fatalf("expected callerNumber alias, headers=%+v", domainEvent.Headers)
+	}
+	if domainEvent.Headers["calleeNumber"] != "13800003333" {
+		t.Fatalf("expected calleeNumber alias, headers=%+v", domainEvent.Headers)
 	}
 }

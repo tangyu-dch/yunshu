@@ -1,0 +1,50 @@
+<svg width="960" height="520" viewBox="0 0 960 520" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#06111f"/><stop offset="1" stop-color="#101827"/></linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0ea5e9"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+    <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000" flood-opacity="0.35"/></filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#67e8f9"/></marker>
+  </defs>
+  <rect width="960" height="520" rx="24" fill="url(#bg)"/>
+  <text x="480" y="48" text-anchor="middle" fill="#e0f2fe" font-size="28" font-family="Inter,Arial" font-weight="700">云枢声讯呼叫中心 Architecture</text>
+
+  <g font-family="Inter,Arial" font-size="16" fill="#e5e7eb" text-anchor="middle" filter="url(#shadow)">
+    <rect x="60" y="110" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="140" y="142" font-weight="700">云枢声讯</text><text x="140" y="166" fill="#93c5fd">SIP Client</text>
+
+    <rect x="300" y="110" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="380" y="142" font-weight="700">Kamailio</text><text x="380" y="166" fill="#93c5fd">REGISTER / Dispatcher</text>
+
+    <rect x="540" y="110" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="620" y="142" font-weight="700">FreeSWITCH</text><text x="620" y="166" fill="#93c5fd">Media / ESL</text>
+
+    <rect x="760" y="110" width="140" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="830" y="142" font-weight="700">RTPEngine</text><text x="830" y="166" fill="#93c5fd">RTP Proxy</text>
+
+    <rect x="300" y="270" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="380" y="302" font-weight="700">cc-call</text><text x="380" y="326" fill="#93c5fd">CTI / ESL / Workflow</text>
+
+    <rect x="60" y="270" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="140" y="302" font-weight="700">cc-console</text><text x="140" y="326" fill="#93c5fd">Admin / Merchant</text>
+
+    <rect x="540" y="270" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="620" y="302" font-weight="700">cc-worker</text><text x="620" y="326" fill="#93c5fd">Outbox / CDR</text>
+
+    <rect x="200" y="405" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="280" y="437" font-weight="700">MySQL</text><text x="280" y="461" fill="#93c5fd">Business Data</text>
+
+    <rect x="480" y="405" width="160" height="72" rx="14" fill="#0f172a" stroke="url(#box)" stroke-width="2"/>
+    <text x="560" y="437" font-weight="700">Redis</text><text x="560" y="461" fill="#93c5fd">State / Queue</text>
+  </g>
+
+  <g stroke="#67e8f9" stroke-width="3" fill="none" marker-end="url(#arrow)" opacity="0.9">
+    <path d="M220 146H300"/>
+    <path d="M460 146H540"/>
+    <path d="M700 146H760"/>
+    <path d="M620 182V270"/>
+    <path d="M460 306H540"/>
+    <path d="M300 306H220"/>
+    <path d="M380 342L300 405"/>
+    <path d="M460 342L540 405"/>
+  </g>
+</svg>

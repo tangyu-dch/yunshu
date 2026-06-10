@@ -1,0 +1,19 @@
+{
+  "name": "yunshu-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "云枢声讯呼叫中心 documentation site powered by dumi",
+  "scripts": {
+    "dev": "dumi dev",
+    "start": "dumi dev",
+    "build": "dumi build",
+    "preview": "dumi preview"
+  },
+  "dependencies": {
+    "dumi": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.0.0",
+    "typescript": "^5.0.0"
+  }
+}

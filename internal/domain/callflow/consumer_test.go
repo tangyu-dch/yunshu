@@ -2,6 +2,7 @@ package callflow
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -305,7 +306,7 @@ func (r *terminalBatchRepository) CompleteBatchTaskIfDrained(context.Context, in
 	return true, nil
 }
 
-func (r *terminalBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int) (int, string, error) {
+func (r *terminalBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int, int) (int, string, error) {
 	return 0, "", nil
 }
 
@@ -791,6 +792,67 @@ func (s testSessionSniffer) IsMerchantDID(ctx context.Context, number string) (b
 	return false, 0, nil
 }
 
+type testInboundAgentResolver struct {
+	extension esl.Extension
+}
+
+func (r testInboundAgentResolver) ResolveForDID(ctx context.Context, did string, merchantID int) (*esl.Extension, error) {
+	return &r.extension, nil
+}
+
+type memoryCallQueue struct {
+	mu     sync.Mutex
+	queues map[[2]int][]string
+}
+
+func newMemoryCallQueue() *memoryCallQueue {
+	return &memoryCallQueue{queues: map[[2]int][]string{}}
+}
+
+func (q *memoryCallQueue) Push(_ context.Context, merchantID, skillGroupID int, callID string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	key := [2]int{merchantID, skillGroupID}
+	q.queues[key] = append(q.queues[key], callID)
+	return nil
+}
+
+func (q *memoryCallQueue) Pop(_ context.Context, merchantID, skillGroupID int) (string, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	key := [2]int{merchantID, skillGroupID}
+	if len(q.queues[key]) == 0 {
+		return "", nil
+	}
+	callID := q.queues[key][0]
+	q.queues[key] = q.queues[key][1:]
+	return callID, nil
+}
+
+func (q *memoryCallQueue) Len(_ context.Context, merchantID, skillGroupID int) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.queues[[2]int{merchantID, skillGroupID}]), nil
+}
+
+func (q *memoryCallQueue) Remove(_ context.Context, merchantID, skillGroupID int, callID string) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	key := [2]int{merchantID, skillGroupID}
+	items := q.queues[key]
+	kept := items[:0]
+	var removed int64
+	for _, item := range items {
+		if item == callID {
+			removed++
+			continue
+		}
+		kept = append(kept, item)
+	}
+	q.queues[key] = kept
+	return removed, nil
+}
+
 func TestDialpadDirectCallSymmetricFlow(t *testing.T) {
 	t.Parallel()
 
@@ -993,6 +1055,12 @@ func TestCustomerInboundCallSymmetricFlow(t *testing.T) {
 	session := esl.NewSessionService(esl.NewMemorySessionStore(), business.NewOutboxMemoryStore(), nil)
 	session.Events = bus
 	sniffer := testSessionSniffer{
+		extension: esl.Extension{
+			ID:              11,
+			UserID:          7,
+			MerchantID:      88,
+			ExtensionNumber: "2002",
+		},
 		didMatch:      true,
 		didMerchantID: 88,
 	}
@@ -1002,9 +1070,12 @@ func TestCustomerInboundCallSymmetricFlow(t *testing.T) {
 		CommandService: command,
 		SessionService: session,
 		Events:         bus,
+		Extensions:     apiOutboundTestExtensionResolver{extension: sniffer.extension},
 	}
 
-	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil, nil, nil)
+	agentResolver := testInboundAgentResolver{extension: sniffer.extension}
+
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, nil, nil, nil, agentResolver, nil)
 
 	ctx := context.Background()
 
@@ -1135,6 +1206,85 @@ func TestCustomerInboundCallSymmetricFlow(t *testing.T) {
 	}
 	if ctiInst.State != "ended" {
 		t.Fatalf("expected CTI state ended, got %s", ctiInst.State)
+	}
+}
+
+func TestCustomerInboundQueuesWhenNoIdleAgent(t *testing.T) {
+	t.Parallel()
+
+	bus := events.NewMemoryBus(nil)
+	ctiEngine, err := workflow.NewEngine(cti.WorkflowDefinitions()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eslEngine, err := workflow.NewEngine(esl.WorkflowDefinitions()...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctiRunner := workflow.NewRunner(ctiEngine, workflow.NewMemoryInstanceStore(), nil)
+	eslRunner := workflow.NewRunner(eslEngine, workflow.NewMemoryInstanceStore(), nil)
+	executor := &esl.MemoryCommandExecutor{}
+	command := esl.NewCommandService(idempotency.NewMemoryStore(), executor, nil)
+	session := esl.NewSessionService(esl.NewMemorySessionStore(), business.NewOutboxMemoryStore(), nil)
+	session.Events = bus
+	session.Sniffer = testSessionSniffer{didMatch: true, didMerchantID: 88}
+	originate := &esl.OriginateService{CommandService: command, SessionService: session, Events: bus}
+	queue := newMemoryCallQueue()
+	repo := &terminalBatchRepository{}
+	agentResolver := testInboundAgentResolver{extension: esl.Extension{MerchantID: 88, SkillGroupID: 1}}
+	RegisterConsumers(context.Background(), bus, ctiRunner, eslRunner, session, originate, nil, nil, nil, repo, queue, nil, agentResolver, nil)
+
+	ctx := context.Background()
+	_, err = session.ApplyEvent(ctx, contracts.TelephonyEvent{
+		EventID:   "evt-inbound-q-1",
+		EventName: "CHANNEL_CREATE",
+		CallID:    "inbound-queue-call-1",
+		UUID:      "customer-uuid-q-1",
+		LegRole:   contracts.LegRoleCustomer,
+		FSAddr:    "127.0.0.1:8021",
+		Headers: map[string]any{
+			"callerNumber": "13800138000",
+			"calleeNumber": "88888888",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = session.ApplyEvent(ctx, contracts.TelephonyEvent{
+		EventID:   "evt-inbound-q-2",
+		EventName: "CHANNEL_ANSWER",
+		CallID:    "inbound-queue-call-1",
+		UUID:      "customer-uuid-q-1",
+		LegRole:   contracts.LegRoleCustomer,
+		FSAddr:    "127.0.0.1:8021",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if executor.Count() != 1 {
+		t.Fatalf("expected queue wait playback command, got %d", executor.Count())
+	}
+	cmd := executor.Commands[0]
+	if cmd.Command != "playback" || cmd.LegRole != contracts.LegRoleCustomer {
+		t.Fatalf("expected customer playback command, got %+v", cmd)
+	}
+	queued, err := queue.Len(ctx, 88, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Fatalf("expected one queued inbound call, got %d", queued)
+	}
+	sess, err := session.Store.Get(ctx, "inbound-queue-call-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !boolFromMap(sess.Metadata, "inQueue") || !boolFromMap(sess.Metadata, "queueWaitPlaying") {
+		t.Fatalf("expected inbound session queued with wait music, metadata=%v", sess.Metadata)
+	}
+	if intFromMap(sess.Metadata, "skillGroupId") != 1 {
+		t.Fatalf("expected skillGroupId 1, metadata=%v", sess.Metadata)
 	}
 }
 
@@ -1272,25 +1422,11 @@ func TestDialpadDirectHangupAgentOnNumberSelectionFailure(t *testing.T) {
 		},
 	}
 	_, err = session.ApplyEvent(ctx, evt1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// 2. Physical agent answers (CHANNEL_ANSWER) -> 触发选号 -> 由于没有 candidates 导致选号失败
-	evt2 := contracts.TelephonyEvent{
-		EventID:   "evt-2",
-		EventName: "CHANNEL_ANSWER",
-		CallID:    "direct-hangup-fail-1",
-		UUID:      "agent-uuid-1",
-		LegRole:   contracts.LegRoleAgent,
-		FSAddr:    "127.0.0.1:8021",
-	}
-	_, err = session.ApplyEvent(ctx, evt2)
 	if err == nil {
 		t.Fatal("expected ErrNoAvailableNumber error")
 	}
 
-	// 3. 验证是否向 agent 自动下发了挂机 hangup 指令
+	// 2. 验证是否向 agent 自动下发了挂机 hangup 指令（选号失败在 CHANNEL_CREATE 时触发）
 	foundHangup := false
 	for _, cmd := range executor.Commands {
 		if cmd.Command == "hangup" && cmd.LegRole == contracts.LegRoleAgent {

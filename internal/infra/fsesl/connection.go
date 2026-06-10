@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -290,11 +291,29 @@ func (p *ConnectionPool) SendAPI(ctx context.Context, fsAddr, commandName, args 
 	}
 	p.logger.Info("发送 FreeSWITCH API 命令", "fsAddr", fsAddr, "command", commandName, "background", background)
 	_, err = conn.SendCommand(ctx, command.API{Command: commandName, Arguments: args, Background: background})
-	if err != nil {
-		p.logger.Error("FreeSWITCH API 命令发送失败", "fsAddr", fsAddr, "command", commandName, "error", err.Error())
+	if err == nil {
+		p.logger.Info("FreeSWITCH API 命令发送成功", "fsAddr", fsAddr, "command", commandName)
+		return nil
+	}
+	p.logger.Error("FreeSWITCH API 命令发送失败", "fsAddr", fsAddr, "command", commandName, "error", err.Error())
+	if !isConnectionWriteError(err) {
 		return err
 	}
-	p.logger.Info("FreeSWITCH API 命令发送成功", "fsAddr", fsAddr, "command", commandName)
+	p.dropConnection(fsAddr, conn)
+	p.logger.Warn("FreeSWITCH API 命令连接失效，已清理连接并尝试重连重发", "fsAddr", fsAddr, "command", commandName, "error", err.Error())
+	retryConn, retryErr := p.Connect(ctx, fsAddr)
+	if retryErr != nil {
+		return retryErr
+	}
+	_, retryErr = retryConn.SendCommand(ctx, command.API{Command: commandName, Arguments: args, Background: background})
+	if retryErr != nil {
+		p.logger.Error("FreeSWITCH API 命令重发失败", "fsAddr", fsAddr, "command", commandName, "error", retryErr.Error())
+		if isConnectionWriteError(retryErr) {
+			p.dropConnection(fsAddr, retryConn)
+		}
+		return retryErr
+	}
+	p.logger.Info("FreeSWITCH API 命令重发成功", "fsAddr", fsAddr, "command", commandName)
 	return nil
 }
 
@@ -309,6 +328,9 @@ func (p *ConnectionPool) QueryChannels(ctx context.Context, fsAddr string) (stri
 	resp, err := conn.SendCommand(ctx, command.API{Command: "show", Arguments: "channels", Background: false})
 	if err != nil {
 		p.logger.Error("向 FreeSWITCH 查询活跃通道失败", "fsAddr", fsAddr, "error", err.Error())
+		if isConnectionWriteError(err) {
+			p.dropConnection(fsAddr, conn)
+		}
 		return "", err
 	}
 	return string(resp.Body), nil
@@ -432,6 +454,37 @@ func (p *ConnectionPool) closeForLeaseFailure(fsAddr string) {
 	if conn != nil {
 		conn.ExitAndClose()
 	}
+}
+
+func (p *ConnectionPool) dropConnection(fsAddr string, expected *eslgo.Conn) {
+	p.mu.Lock()
+	conn := p.conns[fsAddr]
+	if expected != nil && conn != expected {
+		p.mu.Unlock()
+		return
+	}
+	delete(p.conns, fsAddr)
+	p.stopLeaseRenewalLocked(fsAddr)
+	if cancel := p.eventCancels[fsAddr]; cancel != nil {
+		cancel()
+		delete(p.eventCancels, fsAddr)
+	}
+	p.mu.Unlock()
+	if conn != nil {
+		conn.Close()
+	}
+	p.releaseLease(fsAddr)
+}
+
+func isConnectionWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "broken pipe") ||
+		strings.Contains(text, "connection reset") ||
+		strings.Contains(text, "use of closed network connection") ||
+		strings.Contains(text, "eof")
 }
 
 func (p *ConnectionPool) releaseLease(fsAddr string) {

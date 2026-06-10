@@ -62,6 +62,38 @@ func TestBuildOriginateArgsCustomerFirstGateway(t *testing.T) {
 	}
 }
 
+func TestBuildOriginateArgsCustomerFirstExternalExtension(t *testing.T) {
+	t.Parallel()
+
+	cmd := contracts.TelephonyCommand{
+		CommandID: "originate:agent-leg",
+		Command:   "originate",
+		CallID:    "call-1",
+		UUID:      "uuid-agent",
+		LegRole:   contracts.LegRoleAgent,
+		Payload: map[string]any{
+			"originateMode":   contracts.OriginateModeCustomerFirst,
+			"destination":     "1001",
+			"domainOrGateway": "127.0.0.1:5060",
+			"register":        false,
+			"options": map[string]any{
+				"sip_h_X-Internal-Call": true,
+			},
+		},
+	}
+
+	args := BuildOriginateArgs(cmd)
+	if !strings.Contains(args, "sofia/external/1001@127.0.0.1:5060 &park()") {
+		t.Fatalf("expected agent leg to route via sofia/external Kamailio, got: %s", args)
+	}
+	if strings.Contains(args, "sofia/gateway") {
+		t.Fatalf("agent leg must not route through sofia/gateway: %s", args)
+	}
+	if !strings.Contains(args, "sip_h_X-Internal-Call=true") {
+		t.Fatalf("expected X-Internal-Call header in args: %s", args)
+	}
+}
+
 func TestBuildOriginateArgsAgentFirstUserProtocol(t *testing.T) {
 	t.Parallel()
 

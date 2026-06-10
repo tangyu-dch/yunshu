@@ -12,7 +12,7 @@ console:
 freeswitch:
     commandTimeout: 5s
     eventLeaseTTL: 30s
-    kamailioAddr: "127.0.0.1:5060"
+    kamailioAddr: "192.168.107.2:5060"
     kamailioWSPort: 5066
     sipDomain: "sip.yunshu.local"
     nodes: []

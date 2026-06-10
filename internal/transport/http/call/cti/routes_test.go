@@ -314,7 +314,7 @@ func (testBatchRepository) CompleteBatchTaskIfDrained(context.Context, int, time
 	return false, nil
 }
 
-func (testBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int) (int, string, error) {
+func (testBatchRepository) GetIdleAgentFromSkillGroup(context.Context, int, int) (int, string, error) {
 	return 0, "", nil
 }
 

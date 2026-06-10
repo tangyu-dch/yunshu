@@ -252,30 +252,33 @@ ORDER BY u.id ASC
 | **关键入口函数** | `handleDialpadAgentAnswer()` | `handleInboundCustomerAnswer()` |
 | **桥接函数** | `maybeBridgeDialpadDirect()` | `maybeBridgeInbound()` |
 | **补振铃音** | ✅ 完整（MediaOrchestrator + broadcastTime） | ✅ 回铃音（`handleInboundAgentProgress`） |
-| **无坐席处理** | N/A（单次呼出） | ✅ 播放提示音 + 安全挂断 |
-| **ACW 冷却** | ✅ 5s + 排队拉取 | ⚠️ 5s 冷却有，但无法拉取呼入排队 |
+| **无坐席处理** | N/A（单次呼出） | ✅ 入队等待 / 超时挂断 / 降级安全挂断 |
+| **ACW 冷却** | ✅ 5s + 排队拉取 | ✅ 5s + 拉取呼入排队客户 |
 
 ---
 
-## 5. 已修复与待完善项
+## 5. 已修复项
 
-### 5.1 ✅ 已修复 — 呼入：无可用坐席时客户安全挂断
+### 5.1 ✅ 已修复 — 呼入：无空闲坐席时进入排队，超时安全挂断
 
-**原问题：** `handleInboundCustomerAnswer` 中，当 `InboundAgentResolver` 找不到可用坐席时，客户被无限 park，听到死寂直到自己主动挂断。
+**原问题：** `handleInboundCustomerAnswer` 中，当 `InboundAgentResolver` 找不到可用坐席时，客户被无限 park 或只能被立即忙音挂断。
 
-**修复方案：** 在 `extension == ""` 分支中增加安全收口逻辑：
-1. 向客户播放忙音提示（`tone_stream://%(500,250,480,620);loops=2`）
-2. 异步等待 3 秒后下发 `hangup` 命令自动挂断客户腿
-3. 使用 `go func()` + `time.After` 避免阻塞事件处理
+**修复方案：**
+1. `InboundAgentResolver` 查询 DID 关联坐席时同步返回 `skillGroupId`。
+2. 无空闲坐席但存在技能组时，复用现有 `cti.CallQueue`：`queue.Push(merchantId, skillGroupId, callId)`。
+3. 向客户腿播放等待音（默认 `local_stream://default`）。
+4. 设置 `inQueue=true`、`queueWaitPlaying=true`、`skillGroupId`，使客户中途挂机清理和 ACW 后拉取逻辑自动生效。
+5. 30 秒仍未被坐席拉取时，使用 `queue.Remove()` 原子确认仍在队列中，然后自动挂断客户腿。
+6. 如果队列不可用或 DID 没有关联技能组，则降级为播放忙音提示并安全挂断。
 
 ### 5.2 ✅ 已修复 — 呼入：客户等待坐席接听时播放回铃音
 
 **原问题：** 呼入 consumer 只处理了 `CHANNEL_ANSWER` 事件，坐席振铃时客户侧无任何声音提示。
 
 **修复方案：**
-1. 在呼入事件路由中增加 `CHANNEL_PROGRESS` / `CHANNEL_PROGRESS_MEDIA` 的坐席侧事件处理
-2. 新增 `handleInboundAgentProgress()` 函数：通过 `MediaOrchestrator` 向客户腿播放标准北美回铃音（`tone_stream://%(1000,4000,440,480);loops=-1`）
-3. 更新 `handleInboundAgentReady()` 增加 `mediaRegistry` 参数：坐席接听时通过编排器停止回铃音
+1. 在呼入事件路由中增加 `CHANNEL_PROGRESS` / `CHANNEL_PROGRESS_MEDIA` 的坐席侧事件处理。
+2. 新增 `handleInboundAgentProgress()` 函数：通过 `MediaOrchestrator` 向客户腿播放标准回铃音（`tone_stream://%(1000,4000,440,480);loops=-1`）。
+3. 更新 `handleInboundAgentReady()` 增加 `mediaRegistry` 参数：坐席接听时停止回铃音。
 
 ### 5.3 ✅ 已修复 — Session 重复 load-modify-save 写覆盖消除
 
@@ -286,35 +289,11 @@ ORDER BY u.id ASC
 - 保留 `CreateFromOriginate()` 仅用于注册客户腿 UUID 到 session UUIDs 映射
 - session 的 metadata 字段（`customerOriginateSent`、`selectedCaller` 等）由 `handleDialpadAgentAnswer` 统一设置并一次性保存
 
-`handleDialpadAgentAnswer()` 和 `StartDialpadCustomerOutbound()` 都对同一个 session 执行了 load-modify-save 操作：
+### 5.4 ✅ 已修复 — 呼入：坐席 ACW 后自动拉取呼入排队客户
 
-```text
-handleDialpadAgentAnswer:
-  1. Store.Get(callID) → session S1        // 加载
-  2. S1.Metadata["agentAnswered"] = true     // 修改
-  3. StartDialpadCustomerOutbound():
-       a. Store.Get(callID) → session S2     // 重新加载
-       b. 修改 S2 并 Store.Save(S2)          // 保存
-  4. S1.Metadata["customerOriginateSent"] = true
-  5. Store.Save(S1)                          // 保存（可能覆盖步骤 b 的修改）
-```
+**原问题：** ACW 5s 冷却后的 `queue.Pop()` 使用的是批量外呼的多租户队列，但呼入客户从未 `queue.Push()`，所以坐席空闲后拉不到呼入客户。
 
-**当前状态：** `MemorySessionStore` 因为 Go map 引用语义不会丢数据，但迁移到 Redis/DB 后会出现写覆盖。
-
-**修复方向：**
-- 统一在 `handleDialpadAgentAnswer` 中一次性修改所有字段后再保存
-- 或在 `StartDialpadCustomerOutbound` 内部不再做 session save，由调用方统一保存
-- 或使用 Redis `HSET` 字段级更新避免全量覆盖
-
-### 5.4 🟠 MEDIUM — 呼入：坐席挂断后无法拉取呼入排队客户（待完善）
-
-**位置：** `consumer.go:176-284`（ACW 冷却后的排队拉取逻辑）
-
-ACW 5s 冷却后的 `queue.Pop()` 使用的是批量外呼的多租户队列（`queue.Pop(merchantId, skillGroupId)`），但呼入的客户呼叫从未被 `queue.Push()` 推入这个队列。因此 ACW 后的排队拉取对于呼入场景无效。
-
-**修复方向：**
-- 呼入场景引入独立的排队队列
-- 或复用现有队列，在无坐席时将呼入客户推入队列
+**修复方案：** 呼入无空闲坐席时复用同一个队列键 `(merchantId, skillGroupId)` 入队。已有 ACW 逻辑在坐席冷却结束后调用 `batchRepo.GetAgentSkillGroups()` 和 `queue.Pop()`，因此可自然拉取呼入排队客户、停止等待音并起呼坐席腿。
 
 ---
 
@@ -329,7 +308,7 @@ ACW 5s 冷却后的 `queue.Pop()` 使用的是批量外呼的多租户队列（`
 | 批量预测外呼 | `esl_batch_predictive` | Customer-First | 批量调度器 + 排队队列 | ✅ 完整 |
 | 批量协同外呼 | `esl_batch_synergy` | Customer-First（振铃即起呼坐席） | 批量调度器 | ✅ 完整 |
 | 拨号盘直呼 | `esl_dialpad_direct` | Agent-First | yunshu-phone 拨号 | ✅ 完整 |
-| 客户呼入 | `esl_inbound` | Customer-First | 外部客户拨打 DID | ✅ 核心已闭环（排队待完善） |
+| 客户呼入 | `esl_inbound` | Customer-First | 外部客户拨打 DID | ✅ 完整 |
 
 ---
 

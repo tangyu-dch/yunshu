@@ -1,0 +1,48 @@
+<svg width="960" height="460" viewBox="0 0 960 460" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#07111f"/><stop offset="1" stop-color="#111827"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#22d3ee"/></marker>
+  </defs>
+  <rect width="960" height="460" rx="24" fill="url(#bg)"/>
+  <text x="480" y="42" text-anchor="middle" fill="#e0f2fe" font-size="26" font-weight="700" font-family="Inter,Arial">云枢声讯呼叫流程</text>
+
+  <g font-family="Inter,Arial" font-size="15" fill="#e5e7eb" text-anchor="middle">
+    <rect x="60" y="90" width="150" height="64" rx="12" fill="#0f172a" stroke="#38bdf8"/>
+    <text x="135" y="117" font-weight="700">入口</text><text x="135" y="140" fill="#93c5fd">Phone / API / DID</text>
+
+    <rect x="270" y="90" width="150" height="64" rx="12" fill="#0f172a" stroke="#38bdf8"/>
+    <text x="345" y="117" font-weight="700">FreeSWITCH</text><text x="345" y="140" fill="#93c5fd">CHANNEL_CREATE</text>
+
+    <rect x="480" y="90" width="150" height="64" rx="12" fill="#0f172a" stroke="#38bdf8"/>
+    <text x="555" y="117" font-weight="700">SessionSniffer</text><text x="555" y="140" fill="#93c5fd">识别 profile</text>
+
+    <rect x="690" y="90" width="150" height="64" rx="12" fill="#0f172a" stroke="#38bdf8"/>
+    <text x="765" y="117" font-weight="700">Workflow</text><text x="765" y="140" fill="#93c5fd">状态推进</text>
+
+    <rect x="165" y="245" width="170" height="64" rx="12" fill="#0f172a" stroke="#a78bfa"/>
+    <text x="250" y="272" font-weight="700">选号/坐席分配</text><text x="250" y="295" fill="#c4b5fd">CTI / Resolver</text>
+
+    <rect x="395" y="245" width="170" height="64" rx="12" fill="#0f172a" stroke="#a78bfa"/>
+    <text x="480" y="272" font-weight="700">ESL Command</text><text x="480" y="295" fill="#c4b5fd">originate / bridge</text>
+
+    <rect x="625" y="245" width="170" height="64" rx="12" fill="#0f172a" stroke="#a78bfa"/>
+    <text x="710" y="272" font-weight="700">通话中</text><text x="710" y="295" fill="#c4b5fd">answered / bridged</text>
+
+    <rect x="300" y="360" width="170" height="64" rx="12" fill="#0f172a" stroke="#34d399"/>
+    <text x="385" y="387" font-weight="700">挂断</text><text x="385" y="410" fill="#86efac">HANGUP_COMPLETE</text>
+
+    <rect x="535" y="360" width="170" height="64" rx="12" fill="#0f172a" stroke="#34d399"/>
+    <text x="620" y="387" font-weight="700">CDR Outbox</text><text x="620" y="410" fill="#86efac">通话记录必达</text>
+  </g>
+
+  <g stroke="#22d3ee" stroke-width="3" fill="none" marker-end="url(#arrow)">
+    <path d="M210 122H270"/>
+    <path d="M420 122H480"/>
+    <path d="M630 122H690"/>
+    <path d="M765 154C765 205 250 195 250 245"/>
+    <path d="M335 277H395"/>
+    <path d="M565 277H625"/>
+    <path d="M710 309C710 350 385 325 385 360"/>
+    <path d="M470 392H535"/>
+  </g>
+</svg>

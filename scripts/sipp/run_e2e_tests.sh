@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Docker 内网 IP
 FS_HOST="${FS_HOST:-192.168.107.6}"
-KAM_HOST="${KAM_HOST:-192.168.107.6}"
+KAM_HOST="${KAM_HOST:-192.168.107.2}"
 LOCAL_IP="${LOCAL_IP:-192.168.107.0}"
 FS_SIP_PORT=5080
 KAM_PORT=5060
@@ -37,14 +37,32 @@ FAIL=0
 WARN=0
 RESULTS=()
 SIPP_PIDS=()
+SIPP_CONTAINERS=()
+SIPP_UAS_MODE="${SIPP_UAS_MODE:-auto}"
+SIPP_IMAGE="${SIPP_IMAGE:-yunshu-sipp:local}"
+SIPP_DOCKER_NETWORK="${SIPP_DOCKER_NETWORK:-callcenter_net}"
 
 cleanup() {
     for pid in ${SIPP_PIDS[@]+"${SIPP_PIDS[@]}"}; do
         kill "$pid" 2>/dev/null || true
     done
+    for name in ${SIPP_CONTAINERS[@]+"${SIPP_CONTAINERS[@]}"}; do
+        docker rm -f "$name" >/dev/null 2>&1 || true
+    done
     wait 2>/dev/null
 }
 trap cleanup EXIT
+
+ensure_sipp_image() {
+    if docker image inspect "$SIPP_IMAGE" >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ "$SIPP_UAS_MODE" = "host" ]; then
+        return 1
+    fi
+    echo -e "${YELLOW}[准备]${NC} 构建 SIPp Docker 镜像 $SIPP_IMAGE ..." >&2
+    docker build -t "$SIPP_IMAGE" "$SCRIPT_DIR" >/tmp/yunshu_sipp_docker_build.log 2>&1
+}
 
 start_uas() {
     local name="$1"
@@ -53,6 +71,20 @@ start_uas() {
     local port="$4"
     local target="$5"
     local log="/tmp/sipp_${name}_$(date +%s).log"
+
+    if [ "$SIPP_UAS_MODE" != "host" ] && ensure_sipp_image; then
+        local container="sipp_${name}_$(date +%s)_$$"
+        docker run -d \
+            --name "$container" \
+            --network "$SIPP_DOCKER_NETWORK" \
+            -v "$SCRIPT_DIR:/scenarios:ro" \
+            --entrypoint sh \
+            "$SIPP_IMAGE" \
+            -lc "ip=\$(hostname -I | awk '{print \$1}'); exec sipp -sf /scenarios/$scenario -s '$service' -i \"\$ip\" -p '$port' -m 1 -nostdin -timeout 60s -timeout_error '$target'" >/dev/null
+        SIPP_CONTAINERS+=("$container")
+        echo "docker:$container"
+        return 0
+    fi
 
     sipp -sf "$SCRIPT_DIR/$scenario" \
         -s "$service" \
@@ -76,11 +108,29 @@ wait_sipp() {
     local name="$2"
     local timeout=45
 
+    if [[ "$pid" == docker:* ]]; then
+        local container="${pid#docker:}"
+        while [ $timeout -gt 0 ]; do
+            if ! docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
+                docker logs "$container" >/tmp/sipp_${name}_docker.log 2>/tmp/sipp_${name}_err.log || true
+                local exit_code
+                exit_code=$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo 255)
+                docker rm -f "$container" >/dev/null 2>&1 || true
+                return "$exit_code"
+            fi
+            sleep 1
+            ((timeout--))
+        done
+        docker logs "$container" >/tmp/sipp_${name}_docker.log 2>/tmp/sipp_${name}_err.log || true
+        docker rm -f "$container" >/dev/null 2>&1 || true
+        return 255
+    fi
+
     while [ $timeout -gt 0 ]; do
         if ! kill -0 "$pid" 2>/dev/null; then
-            wait "$pid"
-            local exit_code=$?
-            return $exit_code
+            # start_uas 通过命令替换返回 PID，实际进程可能不是当前 shell 的直接子进程，不能可靠 wait。
+            # 这里以进程正常退出作为完成信号；具体 SIP 信令结果由调用方结合日志/错误文件判断。
+            return 0
         fi
         sleep 1
         ((timeout--))
@@ -140,11 +190,22 @@ case "$SCENARIO" in
         echo "  流程: SIPp UAC(客户) → FS → yunshu → SIPp UAS(坐席)"
         echo ""
 
-        echo -e "${YELLOW}[1/2]${NC} 启动坐席 UAS (port=$AGENT_PORT)..."
+        echo -e "${YELLOW}[1/3]${NC} 坐席 1001 向 Kamailio 注册 (port=$AGENT_PORT)..."
+        sipp -sf "$SCRIPT_DIR/register_auth_uac.xml" \
+            -s "1001" \
+            -i "$LOCAL_IP" \
+            -p "$AGENT_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$KAM_HOST:$KAM_PORT" >/tmp/sipp_inbound_register.log 2>/tmp/sipp_inbound_register_err.log || true
+
+        echo -e "${YELLOW}[2/3]${NC} 启动坐席 UAS (port=$AGENT_PORT)..."
         AGENT_PID=$(start_uas "inbound_agent" "agent_uas.xml" "1001" "$AGENT_PORT" "$KAM_HOST:$KAM_PORT")
         sleep 1
 
-        echo -e "${YELLOW}[2/2]${NC} 发起呼入 INVITE (DID=01088886666)..."
+        echo -e "${YELLOW}[3/3]${NC} 发起呼入 INVITE (DID=01088886666)..."
         sipp -sf "$SCRIPT_DIR/inbound_uac.xml" \
             -s "01088886666" \
             -i "$LOCAL_IP" \
@@ -187,10 +248,14 @@ case "$SCENARIO" in
         sleep 1
 
         echo -e "${YELLOW}[3/3]${NC} 通过 API 发起外呼..."
+        API_USER_ID=$(docker exec cc-mysql mysql -uroot -pdb123456 yunshu --default-character-set=utf8mb4 -N -e "SELECT user_id FROM cc_res_extension WHERE extension_number='1001' AND enable=1 AND del_flag=0 ORDER BY id DESC LIMIT 1" 2>/dev/null || echo "")
+        if [ -z "$API_USER_ID" ]; then
+            API_USER_ID=2001
+        fi
         HTTP_CODE=$(curl -s -o /tmp/api_call_resp.json -w "%{http_code}" \
-            -X POST "http://127.0.0.1:8080/cti/callTask/call" \
+            -X POST "http://127.0.0.1:8082/cti/callTask/call?callId=api-e2e-$(date +%s)" \
             -H "Content-Type: application/json" \
-            -d '{"userId":2001,"callee":"13800001111"}' 2>/dev/null || echo "000")
+            -d "{\"userId\":${API_USER_ID},\"callee\":\"13800001111\"}" 2>/dev/null || echo "000")
 
         if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "202" ]; then
             echo -e "  ${GREEN}✓${NC} API 响应: HTTP $HTTP_CODE"
@@ -236,7 +301,7 @@ case "$SCENARIO" in
         sleep 1
 
         echo -e "  ${CYAN}请通过 console 或 API 创建批量任务并启动，SIPp 已就绪等待 INVITE${NC}"
-        echo -e "  提示: curl -X POST http://127.0.0.1:8080/cti/batch-call-task/dispatch -d '{\"taskId\":1}'"
+        echo -e "  提示: curl -X POST http://127.0.0.1:8082/cti/batch-call-task/dispatch -d '{\"taskId\":1}'"
 
         # 等待 SIPp 完成 (更长超时)
         echo -e "  等待客户 UAS 完成 (最多 45s)..."
@@ -262,11 +327,22 @@ case "$SCENARIO" in
         echo "  流程: SIPp UAC(坐席摘机) → Kamailio → FS → yunshu → SIPp UAS(客户)"
         echo ""
 
-        echo -e "${YELLOW}[1/2]${NC} 启动客户 UAS (port=$CUSTOMER_PORT)..."
+        echo -e "${YELLOW}[1/3]${NC} 启动客户 UAS (port=$CUSTOMER_PORT)..."
         CUST_PID=$(start_uas "dialpad_customer" "customer_uas.xml" "13800003333" "$CUSTOMER_PORT" "$FS_HOST:$FS_SIP_PORT")
         sleep 1
 
-        echo -e "${YELLOW}[2/2]${NC} 坐席发起 INVITE (模拟拨号盘直呼)..."
+        echo -e "${YELLOW}[2/3]${NC} 坐席 1001 向 Kamailio 注册 (port=$DIALPAD_PORT)..."
+        sipp -sf "$SCRIPT_DIR/register_auth_uac.xml" \
+            -s "1001" \
+            -i "$LOCAL_IP" \
+            -p "$DIALPAD_PORT" \
+            -m 1 \
+            -nostdin \
+            -timeout 15s \
+            -timeout_error \
+            "$KAM_HOST:$KAM_PORT" >/tmp/sipp_dialpad_register.log 2>/tmp/sipp_dialpad_register_err.log || true
+
+        echo -e "${YELLOW}[3/3]${NC} 坐席发起 INVITE (模拟拨号盘直呼)..."
         sipp -sf "$SCRIPT_DIR/dialpad_uac.xml" \
             -s "1001" \
             -i "$LOCAL_IP" \

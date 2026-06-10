@@ -54,9 +54,9 @@ type riskControlMerchantModel struct {
 	Enable     bool `gorm:"column:enable"`      // 绑定关系是否启用
 }
 
-// TableName 指定 riskControlMerchantModel 对应的物理表名为 `cc_sec_risk_merchant`。
+// TableName 指定 riskControlMerchantModel 对应的物理表名为 `cc_sec_risk_control_merchant`。
 func (riskControlMerchantModel) TableName() string {
-	return "cc_sec_risk_merchant"
+	return "cc_sec_risk_control_merchant"
 }
 
 // phoneAttributionModel 映射号码归属地索引表。

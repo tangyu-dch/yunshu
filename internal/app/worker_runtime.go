@@ -44,6 +44,20 @@ func NewWorkerRuntimeWithConfig(cfg config.Config, logger *slog.Logger) (*Worker
 	if err != nil {
 		return nil, err
 	}
+	if gormDB != nil {
+		if err := gormDB.AutoMigrate(
+			&business.RecordModel{},
+			&business.LedgerModel{},
+			&business.SettlementJobModel{},
+			&business.RecordingJobModel{},
+			&business.ReportProjectionModel{},
+			&business.PushJobModel{},
+		); err != nil {
+			logger.Error("cc-worker 数据库自动迁移失败", "error", err.Error())
+			return nil, err
+		}
+		logger.Info("cc-worker 数据库自动迁移处理完成")
+	}
 	outboxStore := buildOutboxStore(gormDB, logger)
 	cdrStore := buildCDRStore(gormDB, logger)
 	billingStore := buildBillingStore(gormDB, logger)

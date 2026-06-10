@@ -282,7 +282,7 @@ func (r *MemoryBatchTaskRepository) GetDetails(_ context.Context, taskID int) ([
 	return r.details[taskID], nil
 }
 
-func (r *MemoryBatchTaskRepository) GetIdleAgentFromSkillGroup(ctx context.Context, skillGroupID int) (int, string, error) {
+func (r *MemoryBatchTaskRepository) GetIdleAgentFromSkillGroup(ctx context.Context, merchantID, skillGroupID int) (int, string, error) {
 	return 0, "", nil
 }
 

@@ -650,13 +650,13 @@ Yunshu is actively refactoring legacy call center logic into the high-performanc
 *   ✅ **Dynamic RBAC Schema**: Outlined console permission mappings and routes database models.
 *   ✅ **RBAC Middleware Filters**: Two-level caching (local memory + Redis) for route permission resolution with Pub/Sub cross-instance invalidation and warm-up on startup.
 
-### Phase 6: Inbound Call Flow Hardening & Dialpad Direct Validation [In Progress 🔧]
+### Phase 6: Inbound Call Flow Hardening & Dialpad Direct Validation [100% Completed]
 *   ✅ **Dialpad Direct Outbound (Full Loop)**: Agent dials → Sniffer identifies extension → Agent answer triggers number selection → Customer leg originate → Supplement ring orchestrator → Bridge → ACW cooldown.
-*   ✅ **Inbound Agent Dynamic Resolution (InboundAgentResolver)**: DID → skill group → user skill group → Redis IDLE status filtering.
+*   ✅ **Inbound Agent Dynamic Resolution (InboundAgentResolver)**: DID → skill group → user skill group → Redis IDLE status filtering, returning skill-group context for queuing when no idle agent exists.
 *   ✅ **Inbound AI Voice Flow Degradation**: When AI is enabled, starts Voice Engine; on failure, automatically falls back to human agent assignment.
-*   🔧 **Inbound No-Agent Safe Cleanup**: Play apology prompt and auto-hangup customer when no idle agent is available, preventing indefinite park (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.1).
-*   🔧 **Inbound Customer Wait Experience**: Play ringback tone to customer while assigned agent is ringing (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.2).
-*   🔧 **Session Write-Overwrite Risk Elimination**: Remove duplicate load-modify-save between `handleDialpadAgentAnswer` and `StartDialpadCustomerOutbound`, paving the way for Redis/DB persistence (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.3).
+*   ✅ **Inbound No-Agent Queuing & Safe Cleanup**: Push inbound customers into `CallQueue`, play wait music, auto-hangup after 30s timeout; fall back to prompt + safe hangup when queue is unavailable (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.1).
+*   ✅ **Inbound Customer Wait Experience**: Play ringback tone to customer while assigned agent is ringing (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.2).
+*   ✅ **Session Write-Overwrite Risk Elimination**: Remove duplicate load-modify-save between `handleDialpadAgentAnswer` and `StartDialpadCustomerOutbound`, paving the way for Redis/DB persistence (see [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.3).
 
 > 📖 Full call flow technical documentation is available at [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md), including signaling sequences, state machines, event handling chains, and known issue analysis.
 

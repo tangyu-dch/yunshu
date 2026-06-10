@@ -657,13 +657,13 @@ tenant:
 *   ✅ **GORM 权限模型与数据库种子**：创建控制台路由、操作码模型实体并完成静态权限的种子注入。
 *   ✅ **动态运行时权限拦截中间件**：两级缓存（本地内存 + Redis）路由权限解析，Pub/Sub 跨实例缓存失效通知，启动时自动预热。
 
-### 第六阶段：客户呼入流程完善与拨号盘直呼闭环验证 [进行中 🔧]
+### 第六阶段：客户呼入流程完善与拨号盘直呼闭环验证 [100% 已完工]
 *   ✅ **拨号盘直呼（呼出）完整闭环**：坐席拨号 → Sniffer 识别分机 → 摘机选号 → 客户腿起呼 → 补振铃编排 → 双腿桥接 → ACW 冷却收口。
-*   ✅ **呼入坐席动态分配（InboundAgentResolver）**：DID → 号码技能组 → 用户技能组 → 空闲坐席 Redis 状态过滤。
+*   ✅ **呼入坐席动态分配（InboundAgentResolver）**：DID → 号码技能组 → 用户技能组 → 空闲坐席 Redis 状态过滤，并在无空闲坐席时返回技能组用于排队。
 *   ✅ **呼入 AI 话术流降级回退**：AI 启用时启动 Voice Engine，失败自动降级到人工坐席分配。
-*   🔧 **呼入无坐席安全收口**：无可用坐席时播放提示音后自动挂断客户，避免客户被无限 park（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.1）。
-*   🔧 **呼入客户等待体验**：坐席振铃时向客户播放回铃音，提升呼入等待感知（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.2）。
-*   🔧 **Session 写覆盖风险消除**：消除 `handleDialpadAgentAnswer` 与 `StartDialpadCustomerOutbound` 之间的重复 load-modify-save，为 Redis/DB 持久化铺路（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.3）。
+*   ✅ **呼入无坐席排队与安全收口**：无空闲坐席时复用 `CallQueue` 入队、播放等待音，30 秒超时自动挂断；队列不可用时降级为提示音安全挂断（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.1）。
+*   ✅ **呼入客户等待体验**：坐席振铃时向客户播放回铃音，提升呼入等待感知（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.2）。
+*   ✅ **Session 写覆盖风险消除**：消除 `handleDialpadAgentAnswer` 与 `StartDialpadCustomerOutbound` 之间的重复 load-modify-save，为 Redis/DB 持久化铺路（详见 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md) §5.3）。
 
 > 📖 完整的呼叫流程技术文档请参阅 [`docs/CALL_FLOW.md`](docs/CALL_FLOW.md)，包含信令序列、状态机、事件处理链路和已知问题分析。
 

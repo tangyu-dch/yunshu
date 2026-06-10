@@ -1,29 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  拨号盘直呼 - SIPp UAC 场景 (模拟坐席 SIP 电话发起外呼)
+  拨号盘直呼 - SIPp UAC 场景 (模拟已注册坐席 SIP 电话发起外呼)
 
-  使用方法:
-    sipp -sf dialpad_uac.xml \
-         -s 2001 \                    # 坐席分机号
-         -p 6060 \                    # 本地 SIP 端口
-         127.0.0.1:5060               # Kamailio
-
-  验证要点:
-    1. 坐席注册后发起 INVITE（模拟拨号盘点击外呼）
-    2. 收到 183 Session Progress（系统正在呼叫客户）
-    3. 收到 200 OK（客户接听）
-    4. 通话后坐席挂机
+  run_e2e_tests.sh 会先使用 register_auth_uac.xml 将 1001 注册到 Kamailio，
+  本场景只验证已注册坐席从 yunshu-phone 等价入口发起 INVITE。
 -->
 <scenario name="dialpad_uac">
-  <!-- 发起 INVITE（坐席直呼外线号码） -->
   <send retrans="500">
     <![CDATA[
-      INVITE sip:13800001111@[remote_ip]:[remote_port] SIP/2.0
+      INVITE sip:13800003333@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: agent <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
-      To: 13800001111 <sip:13800001111@[remote_ip]:[remote_port]>
+      From: agent <sip:[service]@sip.merchant.yunshu.com>;tag=[call_number]
+      To: 13800003333 <sip:13800003333@[remote_ip]:[remote_port]>
       Call-ID: [call_id]
-      CSeq: [cseq] INVITE
+      CSeq: 1 INVITE
       Contact: sip:[service]@[local_ip]:[local_port]
       Max-Forwards: 70
       Subject: yunshu-dialpad-direct-test
@@ -44,47 +34,39 @@
     ]]>
   </send>
 
-  <!-- 100 Trying -->
   <recv response="100" optional="true" />
-
-  <!-- 183 Session Progress (系统正在呼叫客户) -->
+  <recv response="180" optional="true" />
   <recv response="183" optional="true" />
-
-  <!-- 200 OK (客户接听 或 系统桥接完成) -->
   <recv response="200" rtd="true" />
 
-  <!-- ACK -->
   <send>
     <![CDATA[
-      ACK sip:13800001111@[remote_ip]:[remote_port] SIP/2.0
+      ACK sip:13800003333@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: agent <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
-      To: 13800001111 <sip:13800001111@[remote_ip]:[remote_port]>[peer_tag_param]
+      From: agent <sip:[service]@sip.merchant.yunshu.com>;tag=[call_number]
+      To: 13800003333 <sip:13800003333@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
-      CSeq: [cseq] ACK
+      CSeq: 1 ACK
       Contact: sip:[service]@[local_ip]:[local_port]
       Content-Length: 0
     ]]>
   </send>
 
-  <!-- 通话 5 秒 -->
   <pause milliseconds="5000" />
 
-  <!-- 坐席挂机 -->
   <send retrans="500">
     <![CDATA[
-      BYE sip:13800001111@[remote_ip]:[remote_port] SIP/2.0
+      BYE sip:13800003333@[remote_ip]:[remote_port] SIP/2.0
       Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
-      From: agent <sip:[service]@[local_ip]:[local_port]>;tag=[call_number]
-      To: 13800001111 <sip:13800001111@[remote_ip]:[remote_port]>[peer_tag_param]
+      From: agent <sip:[service]@sip.merchant.yunshu.com>;tag=[call_number]
+      To: 13800003333 <sip:13800003333@[remote_ip]:[remote_port]>[peer_tag_param]
       Call-ID: [call_id]
-      CSeq: [cseq] BYE
+      CSeq: 2 BYE
       Max-Forwards: 70
       Content-Length: 0
     ]]>
   </send>
 
   <recv response="200" />
-
   <timewait milliseconds="1000" />
 </scenario>

@@ -157,7 +157,7 @@ func NewCallRuntimeWithConfig(ctx context.Context, cfg config.Config, bus events
 	if len(fsNodes) > 0 {
 		pool = fsesl.NewConnectionPool(ctx, fsNodes, cfg.FreeSwitch.Reconnect.Interval, cfg.FreeSwitch.Reconnect.MaxAttempts, logger)
 		pool.LeaseRegistry = nodeRegistry
-		pool.LeaseOwner = buildFSLeaseOwner(cfg.Service.Name)
+		pool.LeaseOwner = buildFSLeaseOwner(cfg.Service.Name, cfg.Service.InstanceID)
 		pool.LeaseTTL = cfg.FreeSwitch.EventLeaseTTL
 		pool.OnEvent = func(ctx context.Context, event contracts.TelephonyEvent) {
 			if _, err := session.ApplyEvent(ctx, event); err != nil {
@@ -509,18 +509,18 @@ func fsNodeConfigs(nodes []telephony.Node) []fsesl.NodeConfig {
 	return configs
 }
 
-func buildFSLeaseOwner(serviceName string) string {
+func buildFSLeaseOwner(serviceName, instanceID string) string {
 	hostname, err := os.Hostname()
 	if err != nil || hostname == "" {
-		if serviceName != "" {
-			return serviceName + "-local"
-		}
-		return "cc-call-local"
+		hostname = "local"
 	}
 	if serviceName == "" {
-		return hostname
+		serviceName = "cc-call"
 	}
-	return serviceName + "-" + hostname
+	if instanceID == "" {
+		instanceID = strconv.Itoa(os.Getpid())
+	}
+	return serviceName + "-" + hostname + "-" + instanceID
 }
 
 // inProcessESLClient 是进程内 ESL 客户端的简单封装。

@@ -2,6 +2,16 @@
 # Yunshu CallCenter - Universal .gitignore
 # ==========================================
 
+# Docs site temp files
+docs-site/.dumi/tmp
+docs-site/.dumi/tmp-production
+docs-site/.umi
+docs-site/node_modules
+docs-site/dist
+
+# Compiled binaries
+cc-all
+
 # OS Metadata
 # ------------------------------------------
 .DS_Store

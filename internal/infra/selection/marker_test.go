@@ -13,6 +13,13 @@ import (
 	"yunshu/internal/infra/security"
 )
 
+func TestRiskControlMerchantTableNameMatchesSecurityModel(t *testing.T) {
+	t.Parallel()
+	if got, want := (riskControlMerchantModel{}).TableName(), (security.RiskControlMerchantModel{}).TableName(); got != want {
+		t.Fatalf("risk merchant table mismatch: got %s want %s", got, want)
+	}
+}
+
 func TestRuntimeSelectionMarkerAppliesWhitelistAndBlacklist(t *testing.T) {
 	t.Parallel()
 

@@ -68,8 +68,8 @@ func TestASRServerVADAndMockRecognition(t *testing.T) {
 		return nil
 	})
 
-	// 4. WebSocket 客户端拨号连接
-	u := url.URL{Scheme: "ws", Host: addr, Path: "/asr"}
+	// 4. WebSocket 客户端拨号连接（需要携带 callId 参数）
+	u := url.URL{Scheme: "ws", Host: addr, Path: "/asr", RawQuery: "callId=test-asr-call-100"}
 	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
 		t.Fatalf("WebSocket connection failed: %v", err)

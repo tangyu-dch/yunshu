@@ -264,8 +264,16 @@ func (s *SessionService) ApplyEvent(ctx context.Context, event contracts.Telepho
 	session.State = next
 	session.LastEventID = event.EventID
 	session.UpdatedAt = s.Now().UTC()
+	effectiveLegRole := event.LegRole
 	if event.UUID != "" {
-		session.UUIDs[event.UUID] = event.LegRole
+		if existingRole, ok := session.UUIDs[event.UUID]; ok && existingRole != "" {
+			effectiveLegRole = existingRole
+		} else {
+			session.UUIDs[event.UUID] = event.LegRole
+		}
+	}
+	if effectiveLegRole != "" {
+		event.LegRole = effectiveLegRole
 	}
 	if event.FSAddr != "" {
 		session.FSAddr = event.FSAddr
@@ -283,8 +291,8 @@ func (s *SessionService) ApplyEvent(ctx context.Context, event contracts.Telepho
 	}
 	if s.Events != nil {
 		payload := map[string]any{"callId": event.CallID, "eventName": event.EventName, "uuid": event.UUID, "fsAddr": event.FSAddr, "profile": string(session.Profile)}
-		if event.LegRole != "" {
-			payload["legRole"] = string(event.LegRole)
+		if effectiveLegRole != "" {
+			payload["legRole"] = string(effectiveLegRole)
 		}
 		for key, value := range session.Metadata {
 			payload[key] = value

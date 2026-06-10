@@ -3,6 +3,7 @@ package esl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"yunshu/internal/contracts"
@@ -33,6 +34,7 @@ type Extension struct {
 	MerchantID      int
 	ExtensionNumber string
 	SipDomain       string
+	SkillGroupID    int
 }
 
 // ExtensionResolver 按用户读取已绑定分机。
@@ -536,11 +538,19 @@ func intFromMetadata(metadata map[string]any, key string) int {
 	}
 }
 
+func agentDomainOrGateway(sipDomain string) string {
+	if sipDomain != "" {
+		return fmt.Sprintf("%s;fs_path=sip:%s", sipDomain, defaultKamailioDomain)
+	}
+	return defaultKamailioDomain
+}
+
 // BatchAgentOriginateRequest 表示批量外呼中为坐席腿发起 originate 的请求。
 type BatchAgentOriginateRequest struct {
 	Version      string
 	CallID       string
 	Extension    string
+	SipDomain    string
 	AgentUUID    string
 	CustomerUUID string
 	FSAddr       string
@@ -569,6 +579,7 @@ func (s *OriginateService) StartBatchAgentOutbound(ctx context.Context, req Batc
 		"variable_merchant_id":   req.MerchantID,
 		"variable_agent_uuid":    req.AgentUUID,
 		"variable_customer_uuid": req.CustomerUUID,
+		"sip_h_X-Internal-Call":  true,
 	}
 
 	cmd := telephony.NewCommand(
@@ -585,7 +596,8 @@ func (s *OriginateService) StartBatchAgentOutbound(ctx context.Context, req Batc
 			"agentUuid":       req.AgentUUID,
 			"customerUuid":    req.CustomerUUID,
 			"destination":     req.Extension,
-			"domainOrGateway": "default",
+			"domainOrGateway": agentDomainOrGateway(req.SipDomain),
+			"register":        false,
 			"options":         options,
 			"userId":          req.UserID,
 			"merchantId":      req.MerchantID,
@@ -651,30 +663,33 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 	if s.SessionService == nil {
 		return ErrInvalidCommand
 	}
+
+	// 获取会话仅用于读取必要的上下文信息，不做任何修改
 	session, err := s.SessionService.Store.Get(ctx, req.CallID)
 	if err != nil {
 		logger.Error("拨号盘直呼客户腿起呼前读取会话失败", "callId", req.CallID, "error", err.Error())
 		return err
 	}
+
+	// 仅读取必要的上下文，不修改 Metadata
 	agentUUID, _ := session.Metadata["agentUuid"].(string)
-	customerUUID, _ := session.Metadata["customerUuid"].(string)
-	if customerUUID == "" {
-		customerUUID = NewDeterministicUUID("customer", req.CallID)
-		session.Metadata["customerUuid"] = customerUUID
-	}
+	customerUUID := NewDeterministicUUID("customer", req.CallID)
 	callee, _ := session.Metadata["callee"].(string)
 	userID := intFromMetadata(session.Metadata, "userId")
 	merchantID := intFromMetadata(session.Metadata, "merchantId")
 	extension, _ := session.Metadata["extension"].(string)
-	if agentUUID == "" || customerUUID == "" || callee == "" {
-		logger.Warn("拨号盘直呼客户腿起呼上下文不完整", "callId", req.CallID, "agentUuid", agentUUID, "customerUuid", customerUUID, "callee", callee)
+
+	if agentUUID == "" || callee == "" {
+		logger.Warn("拨号盘直呼客户腿起呼上下文不完整", "callId", req.CallID, "agentUuid", agentUUID, "callee", callee)
 		return ErrInvalidCommand
 	}
+
 	register := req.Selection.Model == 1
 	domainOrGateway := req.Selection.GatewayRegion
 	if register && req.Selection.GatewayName != "" {
 		domainOrGateway = req.Selection.GatewayName
 	}
+
 	options := map[string]any{
 		"Call-ID":                      req.CallID,
 		"yunshu_call_id":               req.CallID,
@@ -691,6 +706,7 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 		"variable_agent_uuid":          agentUUID,
 		"variable_customer_uuid":       customerUUID,
 	}
+
 	if req.Selection.CallerPrefix != "" {
 		options["caller_prefix"] = req.Selection.CallerPrefix
 	}
@@ -716,6 +732,7 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 	if req.Selection.BroadcastTimeFlag {
 		options["variable_yunshu_broadcast_time_flag"] = true
 	}
+
 	cmd := telephony.NewCommand(
 		"api-customer-originate:"+req.CallID,
 		"originate",
@@ -749,22 +766,24 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 			"userId":                userID,
 			"merchantId":            merchantID,
 			"extension":             extension,
-			"customerOriginateSent": true,
 			"selectedCaller":        req.Selection.Phone,
 			"selectedGatewayId":     req.Selection.GatewayID,
 			"selectedGatewayName":   req.Selection.GatewayName,
 			"selectedGatewayRegion": req.Selection.GatewayRegion,
 		},
 	)
+
 	if err := s.CommandService.Execute(ctx, cmd); err != nil {
 		logger.Error("拨号盘直呼客户腿起呼命令执行失败", "callId", req.CallID, "agentUuid", agentUUID, "customerUuid", customerUUID, "error", err.Error())
 		return err
 	}
-	// 注册客户腿 UUID 到会话（由调用方统一保存，避免重复 load-modify-save 写覆盖）
+
+	// 仅注册会话到 Store，不修改 Metadata（session 生命周期由调用方统一管理）
 	if err := s.SessionService.CreateFromOriginate(ctx, cmd); err != nil {
 		logger.Error("拨号盘直呼客户腿会话UUID注册失败", "callId", req.CallID, "error", err.Error())
 		return err
 	}
+
 	if s.Events != nil {
 		if err := s.Events.Publish(ctx, contracts.NewEventEnvelope(
 			"direct-command-sent:"+req.CallID,
@@ -779,6 +798,7 @@ func (s *OriginateService) StartDialpadCustomerOutbound(ctx context.Context, req
 			return err
 		}
 	}
+
 	logger.Info("拨号盘直呼客户腿起呼命令已提交", "callId", req.CallID, "caller", req.Selection.Phone, "gatewayId", req.Selection.GatewayID, "gatewayName", req.Selection.GatewayName, "gatewayRegion", req.Selection.GatewayRegion)
 	return nil
 }
@@ -808,6 +828,7 @@ func (s *OriginateService) StartInboundAgentOutbound(ctx context.Context, req Ba
 		"variable_merchant_id":   req.MerchantID,
 		"variable_agent_uuid":    req.AgentUUID,
 		"variable_customer_uuid": req.CustomerUUID,
+		"sip_h_X-Internal-Call":  true,
 	}
 
 	cmd := telephony.NewCommand(
@@ -824,7 +845,8 @@ func (s *OriginateService) StartInboundAgentOutbound(ctx context.Context, req Ba
 			"agentUuid":       req.AgentUUID,
 			"customerUuid":    req.CustomerUUID,
 			"destination":     req.Extension,
-			"domainOrGateway": "default",
+			"domainOrGateway": agentDomainOrGateway(req.SipDomain),
+			"register":        false,
 			"options":         options,
 			"userId":          req.UserID,
 			"merchantId":      req.MerchantID,

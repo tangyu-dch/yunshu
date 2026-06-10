@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS `cc_res_location` (
   `cflags` INT NOT NULL DEFAULT 0,
   `user_agent` VARCHAR(255) NOT NULL DEFAULT '',
   `socket` VARCHAR(64) NOT NULL DEFAULT '',
-  `methods` INT NOT NULL DEFAULT 0,
+  `methods` INT DEFAULT NULL,
   `instance` VARCHAR(255) DEFAULT NULL,
   `reg_id` INT NOT NULL DEFAULT 0,
   `server_id` INT NOT NULL DEFAULT 0,

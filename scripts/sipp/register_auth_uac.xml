@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scenario name="register_auth_uac">
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:sip.merchant.yunshu.com SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@sip.merchant.yunshu.com>;tag=[call_number]
+      To: <sip:[service]@sip.merchant.yunshu.com>
+      Call-ID: [call_id]
+      CSeq: 1 REGISTER
+      Contact: <sip:[service]@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Expires: 3600
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="401" auth="true" />
+
+  <send retrans="500">
+    <![CDATA[
+      REGISTER sip:sip.merchant.yunshu.com SIP/2.0
+      Via: SIP/2.0/[transport] [local_ip]:[local_port];branch=[branch]
+      From: <sip:[service]@sip.merchant.yunshu.com>;tag=[call_number]
+      To: <sip:[service]@sip.merchant.yunshu.com>
+      Call-ID: [call_id]
+      CSeq: 2 REGISTER
+      Contact: <sip:[service]@[local_ip]:[local_port]>
+      Max-Forwards: 70
+      Expires: 3600
+      [authentication username=1001 password=e2e-test-1001]
+      Content-Length: 0
+    ]]>
+  </send>
+
+  <recv response="200" />
+</scenario>

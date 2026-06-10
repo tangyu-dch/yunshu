@@ -38,6 +38,8 @@ func EventFromESL(fsAddr string, event *eslgo.Event) contracts.TelephonyEvent {
 		get(event, "Call-ID"),
 		get(event, "sip_h_X-S-C-I"),
 		get(event, "variable_sip_h_X-S-C-I"),
+		get(event, "Unique-ID"),
+		get(event, "Caller-Unique-ID"),
 	)
 	return contracts.TelephonyEvent{
 		EventID:   resolveEventID(fsAddr, eventName, get(event, "Event-Sequence"), uuid, eventTime(event)),
@@ -50,6 +52,8 @@ func EventFromESL(fsAddr string, event *eslgo.Event) contracts.TelephonyEvent {
 		At:        eventTime(event),
 		Headers: mergeHeaders(headers, map[string]any{
 			"otherUuid":            otherUUID,
+			"callerNumber":         firstNonBlank(get(event, "Caller-Caller-ID-Number"), get(event, "variable_caller_id_number")),
+			"calleeNumber":         firstNonBlank(get(event, "Caller-Destination-Number"), get(event, "variable_callee_id_number")),
 			"hangupCause":          get(event, "Hangup-Cause"),
 			"customHangupCause":    firstNonBlank(get(event, "custom_hangup_cause"), get(event, "variable_custom_hangup_cause")),
 			"q850":                 parseInt(get(event, "variable_hangup_cause_q850")),

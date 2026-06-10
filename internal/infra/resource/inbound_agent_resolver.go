@@ -17,9 +17,9 @@ import (
 //
 // 过滤条件: 用户启用、分机启用、分机状态为 IDLE(Redis)。
 type InboundAgentResolver struct {
-	DB          *gorm.DB
+	DB           *gorm.DB
 	StatusReader esl.ExtensionStatusReader
-	Logger      *slog.Logger
+	Logger       *slog.Logger
 }
 
 // NewInboundAgentResolver 创建呼入坐席分配器。
@@ -29,10 +29,12 @@ func NewInboundAgentResolver(db *gorm.DB, statusReader esl.ExtensionStatusReader
 
 // inboundAgentRow 查询坐席候选的中间结果。
 type inboundAgentRow struct {
-	UserID     int    `gorm:"column:user_id"`
-	MerchantID int    `gorm:"column:merchant_id"`
-	SeatNumber string `gorm:"column:seat_number"`
+	UserID          int    `gorm:"column:user_id"`
+	MerchantID      int    `gorm:"column:merchant_id"`
+	SeatNumber      string `gorm:"column:seat_number"`
 	ExtensionNumber string `gorm:"column:extension_number"`
+	SipDomain       string `gorm:"column:sip_domain"`
+	SkillGroupID    int    `gorm:"column:skill_group_id"`
 }
 
 // ResolveForDID 根据呼入 DID 号码找到一个可用的空闲坐席。
@@ -46,7 +48,9 @@ func (r *InboundAgentResolver) ResolveForDID(ctx context.Context, did string, me
 			u.id AS user_id,
 			u.merchant_id,
 			u.seat_number,
-			e.extension_number
+			e.extension_number,
+			e.sip_domain,
+			sg.id AS skill_group_id
 		FROM cc_res_pool_phone pp
 		INNER JOIN cc_res_pool_phone_skill_group ppsg ON ppsg.pool_phone_id = pp.id
 		INNER JOIN cc_res_skill_group sg ON sg.id = ppsg.skill_group_id AND sg.enable = 1 AND sg.del_flag = 0
@@ -81,6 +85,8 @@ func (r *InboundAgentResolver) ResolveForDID(ctx context.Context, did string, me
 			UserID:          row.UserID,
 			MerchantID:      row.MerchantID,
 			ExtensionNumber: row.ExtensionNumber,
+			SipDomain:       row.SipDomain,
+			SkillGroupID:    row.SkillGroupID,
 		}
 		r.logger().Info("呼入坐席分配成功",
 			"did", did,
@@ -90,8 +96,9 @@ func (r *InboundAgentResolver) ResolveForDID(ctx context.Context, did string, me
 		return ext, nil
 	}
 
-	r.logger().Warn("DID 关联坐席均非空闲", "did", did, "merchantId", merchantID, "candidateCount", len(rows))
-	return nil, nil
+	skillGroupID := rows[0].SkillGroupID
+	r.logger().Warn("DID 关联坐席均非空闲，返回技能组用于排队", "did", did, "merchantId", merchantID, "skillGroupId", skillGroupID, "candidateCount", len(rows))
+	return &esl.Extension{MerchantID: merchantID, SkillGroupID: skillGroupID}, nil
 }
 
 func (r *InboundAgentResolver) logger() *slog.Logger {

@@ -74,8 +74,9 @@ type RAGConfig struct {
 
 // ServiceConfig 定义服务自身的基本信息，包括服务名称和监听地址。
 type ServiceConfig struct {
-	Name string `yaml:"name"`
-	Addr string `yaml:"addr"`
+	Name       string `yaml:"name"`
+	Addr       string `yaml:"addr"`
+	InstanceID string `yaml:"instanceId"`
 }
 
 // LoggingConfig 定义日志级别和输出格式，格式支持 json 和 text。
@@ -295,6 +296,13 @@ func (c *Config) Validate() error {
 func applyEnv(cfg *Config) {
 	if value := os.Getenv("ADDR"); value != "" {
 		cfg.Service.Addr = value
+	}
+	if value := os.Getenv("SERVICE_INSTANCE_ID"); value != "" {
+		cfg.Service.InstanceID = value
+	} else if value := os.Getenv("CC_CALL_INSTANCE_ID"); value != "" {
+		cfg.Service.InstanceID = value
+	} else if value := os.Getenv("POD_NAME"); value != "" {
+		cfg.Service.InstanceID = value
 	}
 	if value := os.Getenv("MYSQL_DSN"); value != "" {
 		cfg.MySQL.DSN = value
